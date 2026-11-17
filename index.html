@@ -192,11 +192,11 @@ const APPS = [
     desc:'Clientes, visitas con GPS, cotizaciones, oportunidades y muestras.',
     icon:ic('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/>'),
     check: async uid => { const { data } = await sb.from('crm_profiles').select('active').eq('id', uid).maybeSingle(); return !!(data && data.active); } },
-  { id:'silos', name:'Silos TX 360', short:'Silos', color:'var(--c-silos)', url:'../silos-tx/',
+  { id:'silos', name:'Silos TX 360', short:'Silos', color:'var(--c-silos)', url:'silos-tx/',
     desc:'Solicitud, prefactibilidad, instalación, fallas, mantenciones y retiro de silos.',
     icon:ic('<path d="M7 7l5-3 5 3"/><rect x="7" y="7" width="10" height="9"/><path d="M7 16l3 3h4l3-3"/><path d="M8 16l-1.5 5M16 16l1.5 5"/>'),
     check: async uid => { const { data } = await sb.from('profiles').select('rol,activo').eq('id', uid).maybeSingle(); return !!(data && data.activo && data.rol !== 'pendiente'); } },
-  { id:'ent', name:'Entregas TX', short:'Entregas', color:'var(--c-ent)', url:'../entregas-tx/',
+  { id:'ent', name:'Entregas TX', short:'Entregas', color:'var(--c-ent)', url:'entregas-tx/',
     desc:'Pendientes desde Excel, armado de rutas por capacidad, flota, entregas con firma y seguimiento para clientes.',
     icon:ic('<path d="M2 6h11v10H2zM13 9h4l3 3v4h-7"/><circle cx="6" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/>'),
     check: async uid => { const { data } = await sb.from('ent_usuarios').select('rol,activo').eq('id', uid).maybeSingle(); return !!(data && data.activo && data.rol !== 'pendiente'); } },
@@ -205,7 +205,7 @@ const APPS = [
     icon:ic('<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>'),
     check: async uid => { const [c, p] = await Promise.all([ sb.from('crm_profiles').select('active').eq('id', uid).maybeSingle(), sb.from('profiles').select('rol,activo').eq('id', uid).maybeSingle() ]);
       return !!((c.data && c.data.active) || (p.data && p.data.activo && p.data.rol !== 'pendiente')); } },
-  { id:'tur', name:'Asignación de Turnos', short:'Turnos', color:'var(--c-tur)', url:'../ASIGNADOR_DE_TURNOS_LABORALES_MTX/',
+  { id:'tur', name:'Asignación de Turnos', short:'Turnos', color:'var(--c-tur)', url:'turnos/',
     desc:'Planificación mensual de turnos por área, colaboradores y catálogo de turnos.',
     icon:ic('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h3M13 14h3M8 17.5h3"/>'),
     check: async uid => { const [t, p] = await Promise.all([ sb.from('tur_usuarios').select('activo').eq('id', uid).maybeSingle(), sb.from('profiles').select('rol,activo').eq('id', uid).maybeSingle() ]);
