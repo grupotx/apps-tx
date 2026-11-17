@@ -13,14 +13,14 @@
 :root{
   --brand:#ff2a4d;--brand-ink:#fff;--brand-soft:#3a0f18;
   --bg:#050505;--card:#0e0f11;--sunk:#17181b;--ink:#f4f4f4;--mute:#a4a7ae;
-  --line:rgba(255,255,255,.22);--line-strong:rgba(255,255,255,.55);
+  --line:rgba(255,255,255,.22);--line-soft:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.55);
   --ok:#4fd18a;--bad:#ff6670;--warn:#f2b04a;--txbg:#2a0d14;
   --b-tx:#ff2a4d;--b-presec:#3987e5;--b-bemezcla:#d95926;--b-weber:#199e70;--b-bekron:#c98500;--b-sika:#d55181;--b-toro:#9085e9;--b-otros:#9aa3b4;
   --f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
   color-scheme:dark}
 :root[data-theme="light"]{
   --brand:#e4032e;--brand-soft:#fde7eb;--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;
-  --line:rgba(0,0,0,.18);--line-strong:rgba(0,0,0,.5);--ok:#18864a;--bad:#c4121f;--warn:#b86e00;--txbg:#fdebee;
+  --line:rgba(0,0,0,.18);--line-soft:rgba(0,0,0,.08);--line-strong:rgba(0,0,0,.5);--ok:#18864a;--bad:#c4121f;--warn:#b86e00;--txbg:#fdebee;
   --b-tx:#e4032e;--b-presec:#2a78d6;--b-bemezcla:#eb6834;--b-weber:#1baf7a;--b-bekron:#eda100;--b-sika:#e87ba4;--b-toro:#6250d6;--b-otros:#8b919c;
   color-scheme:light}
 *{box-sizing:border-box}
@@ -29,7 +29,7 @@
 body{margin:0;font-family:var(--f-ui);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:inherit}
-.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line-strong)}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
 .topin{display:flex;align-items:center;gap:14px;padding:12px max(20px,env(safe-area-inset-left,0px));max-width:1200px;margin:0 auto;flex-wrap:wrap}
 .txmark{width:58px;flex:none;color:var(--ink);display:block}
 .ttl{display:flex;flex-direction:column;margin-right:auto;min-width:0;line-height:1.15}
@@ -38,7 +38,7 @@ a{color:inherit}
 .sub{color:var(--mute);font-size:12px}
 .semsel{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mute)}
 .semsel select{width:auto;padding:7px 10px}
-.uchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line-strong);border-radius:99px;padding:4px 12px 4px 4px;color:var(--ink);text-decoration:none;font-size:13px}
+.uchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line-soft);border-radius:99px;padding:4px 12px 4px 4px;color:var(--ink);text-decoration:none;font-size:13px}
 .uchip .av{width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:11.5px;font-weight:700}
 .uchip .un{display:grid;line-height:1.15}.uchip .un b{font-size:12.5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uchip .un small{font-size:10.5px;color:var(--mute)}
 #estado-conexion{font-size:12px;color:var(--mute)}
@@ -64,13 +64,13 @@ textarea{min-height:200px;font:12px var(--f-mono);resize:vertical}
 .btn:hover,button.primary:hover{filter:brightness(1.08)}
 .btn[disabled]{opacity:.6;cursor:wait}
 button.ghost,.btn.ghost,.filtros button:not(.primary):not(.mini){background:var(--card);color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;padding:9px 15px;font-weight:600;cursor:pointer}
-.card,.panel{background:var(--card);border:1px solid var(--line-strong);border-radius:14px;padding:16px;margin-bottom:14px}
+.card,.panel{background:var(--card);border:1px solid var(--line-soft);border-radius:14px;padding:16px;margin-bottom:14px}
 .panel-h{display:flex;flex-wrap:wrap;gap:6px 12px;justify-content:space-between;align-items:baseline;margin-bottom:12px}
 .panel-h h2{font-size:16px}
 .aviso{color:var(--mute);font-size:12.5px;margin:0 0 12px}
 .small{color:var(--mute);font-size:11.5px;white-space:normal}
 .sin{color:var(--mute);text-align:center;padding:24px 8px}
-.filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line-strong);border-radius:14px;padding:12px;margin-bottom:14px}
+.filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line-soft);border-radius:14px;padding:12px;margin-bottom:14px}
 .filtros input[type=search]{flex:1 1 180px;width:auto}
 .filtros select{flex:0 1 auto;width:auto;max-width:100%}
 .filtros label{font-size:12.5px;color:var(--mute);display:flex;gap:6px;align-items:center}
@@ -82,8 +82,8 @@ button.ghost,.btn.ghost,.filtros button:not(.primary):not(.mini){background:var(
 .chip:has(input:focus-visible){outline:2px solid var(--brand);outline-offset:2px}
 button.mini{padding:4px 10px;font-size:12px;border-radius:999px;background:transparent;color:var(--mute);border:1px solid var(--line);cursor:pointer}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
-.kpi{background:var(--card);border:1px solid var(--line-strong);border-top:3px solid var(--brand);border-radius:14px;padding:14px}
-.kpi.w{border-top-color:var(--ink)}.kpi.ok{border-top-color:var(--ok)}
+.kpi{background:var(--card);border:1px solid var(--line-soft);border-top:3px solid var(--brand);border-radius:14px;padding:14px}
+.kpi.w{border-top-color:var(--line)}.kpi.ok{border-top-color:var(--ok)}
 .kpi .n{font-weight:800;font-size:28px;line-height:1.1;margin-top:4px;font-variant-numeric:tabular-nums}
 .kpi .l{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.1em;font-weight:700}
 .kpi .s{font-size:12px;color:var(--mute);margin-top:2px}
@@ -153,6 +153,12 @@ a.buscar{color:var(--mute);font-size:12px;text-decoration:underline dotted;text-
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;transition:transform .25s,opacity .25s;opacity:0;pointer-events:none;font-size:13.5px;z-index:60}
 #toast.on{transform:translateX(-50%) translateY(0);opacity:1}
 @media (max-width:560px){.pt-row{grid-template-columns:1fr}.pt-row.ax>div:first-child{display:none}.kpi .n{font-size:22px}.bar-row,.dv-row{grid-template-columns:1fr auto}.bar-row .track,.dv-row .dv-track{grid-column:1/-1;order:3}}
+.bar-row .lb{display:flex;align-items:center;gap:8px;min-width:0}
+.bar-row .lb a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blogo{flex:none;width:22px;height:22px;border-radius:6px;border:1px solid var(--line);display:inline-grid;place-items:center;font-size:9px;font-weight:700;letter-spacing:.02em;color:var(--mute);opacity:.6;text-transform:uppercase;object-fit:contain;padding:2px;background:transparent}
+.blogo.tx{border-color:var(--brand);color:var(--brand);opacity:.9}
+.bar-row .v .u{color:var(--mute);font-weight:500;font-size:11px;margin-left:1px}
+ul.notas{margin:0;padding-left:18px;color:var(--mute);font-size:12.5px;display:grid;gap:4px}ul.notas b{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -573,23 +579,8 @@ function renderRes(){
   </div>
   <p class="aviso">Las comparaciones se hacen siempre dentro del mismo canal: Grupo TX contra su equivalente en el mismo distribuidor.</p>`;
   if(!vis.length) h += `<section class="panel"><p class="sin">Todavía no hay productos TX cargados en “${esc(CATEGORIAS[F.cat]||'esta categoría')}”. Falta definir el 80-20 de esa categoría.</p></section>`;
-  h += graficosMercado(vis);
-  h += `<section class="panel"><div class="panel-h"><h2>Posición de precio por producto</h2>
-    <span class="small">Diferencia promedio TX vs. equivalentes, mismo canal. <span class="pos">Rojo = TX más caro</span> · <span class="neg">verde = TX más barato</span></span></div>`;
-  let alguno = false, i = 0;
-  for(const p of vis){
-    const tx = filasDe(p)[0], difs = [];
-    for(const r of filasDe(p).slice(1)) for(const c of canalesVis()){ const t = ckRC(tx,c), x = ckRC(r,c); if(t && x) difs.push((t/x-1)*100); }
-    if(!difs.length){ h += `<div class="dv-row"><div style="font-size:12.5px"><b>${esc(p.nombre)}</b></div><div class="small">Sin pares en el mismo canal</div><div></div></div>`; continue; }
-    alguno = true;
-    const avg = difs.reduce((a,b) => a+b, 0)/difs.length;
-    h += `<div class="dv-row"><div style="font-size:12.5px;line-height:1.25"><b>${esc(p.nombre)}</b><br><span class="small">${difs.length} ${difs.length>1?'pares':'par'}</span></div>
-      <div class="dv-track">${barraBrecha(avg, i++)}</div><div class="v ${avg>0?'pos':'neg'}">${pct(avg)}</div></div>`;
-  }
-  if(!alguno) h += `<p class="sin">Sin pares para comparar con los filtros actuales.</p>`;
-  h += `</section>`;
-  h += `<section class="panel"><div class="panel-h"><h2>Mejor precio CLP/kg por marca</h2>
-    <div class="leyenda">${Object.keys(COLOR).map(m => `<span style="display:inline-flex;gap:5px;align-items:center">${dot(m)}${esc(m)}</span>`).join('')}</div></div>`;
+  h += `<section class="panel"><div class="panel-h"><h2>Mejor precio por kg (CLP/kg)</h2>
+    <div class="leyenda"><span style="display:inline-flex;gap:5px;align-items:center"><span class="dot" style="background:var(--brand)"></span>Grupo TX</span><span style="display:inline-flex;gap:5px;align-items:center"><span class="dot" style="background:var(--ink)"></span>Competencia</span><span>Valores en $ por kilo</span></div></div>`;
   let alguno2 = false;
   for(const p of vis){
     const rows = filasDe(p).filter(filaVisible).map(r => {
@@ -602,15 +593,59 @@ function renderRes(){
     const max = Math.max(...rows.map(r => r.best));
     h += `<div class="prod-c"><h3>${esc(p.nombre)}</h3>`;
     rows.forEach((r, j) => {
-      h += `<div class="bar-row"><div class="lb">${enlace(r, r.bc, `${r.tx?'<b>':''}${esc(r.marca)} · ${esc(r.prod)} · ${esc(r.bc)}${r.tx?'</b>':''}`)}</div>
-        <div class="track"><span class="fill" data-w="${(r.best/max*100).toFixed(1)}%" data-i="${j}" style="background:${COLOR[r.marca]||'var(--b-otros)'}"></span></div>
-        <div class="v">${fmtP(r.best)}</div></div>`;
+      h += `<div class="bar-row"><div class="lb">${logoMarca(r.marca)}${enlace(r, r.bc, `${r.tx?'<b>':''}${esc(r.marca)} · ${esc(r.prod)} · ${esc(r.bc)}${r.tx?'</b>':''}`)}</div>
+        <div class="track"><span class="fill" data-w="${(r.best/max*100).toFixed(1)}%" data-i="${j}" style="background:${r.tx?'var(--brand)':'var(--ink)'};${r.tx?'':'opacity:.82'}"></span></div>
+        <div class="v">${fmtP(r.best)}<span class="u">/kg</span></div></div>`;
     });
     h += `</div>`;
   }
   if(!alguno2) h += `<p class="sin">Sin precios para los filtros seleccionados.</p>`;
   h += `</section>`;
+  h += notasVariacion();
   $('#res').innerHTML = h;
+}
+
+
+/* logos de la competencia (sutiles). Para usar el logo oficial, sube el archivo a logos/<marca>.svg y agrégalo aquí. */
+const LOGOS = {};
+function logoMarca(m){
+  if(m===TXM) return `<span class="blogo tx" aria-hidden="true">TX</span>`;
+  if(LOGOS[m]) return `<img class="blogo" src="${esc(LOGOS[m])}" alt="" loading="lazy">`;
+  return `<span class="blogo" aria-hidden="true" title="${esc(m)}">${esc(m.slice(0,2))}</span>`;
+}
+/* Notas de variación: qué precios cambiaron entre la semana elegida y la anterior con captura */
+function notasVariacion(){
+  const ant = semanaAnterior(semana);
+  let h = `<section class="panel"><div class="panel-h"><h2>Notas de actualización del shopeo</h2><span class="small">${ant ? `Semana del ${fechaLarga(semana)} frente a la del ${fechaLarga(ant)}` : `Semana del ${fechaLarga(semana)}`}</span></div>`;
+  const cur = DB[semana] || {};
+  const cambios = [];
+  if(ant){
+    const prev = DB[ant] || {};
+    for(const r of TODAS){
+      if(!filaVisible(r)) continue;
+      for(const c of canalesVis()){
+        const k = r.base+'|'+c, a = clpkg(prev[k]), b = clpkg(cur[k]);
+        if(a && b && a !== b) cambios.push({r, c, a, b, pa:Number(prev[k].precio), pb:Number(cur[k].precio), d:(b/a-1)*100});
+        else if(!a && b) cambios.push({r, c, a:null, b, pb:Number(cur[k].precio), nuevo:true});
+        else if(a && !b && Object.keys(cur).length) cambios.push({r, c, a, b:null, pa:Number(prev[k].precio), sin:true});
+      }
+    }
+  }
+  if(!ant) h += `<p class="aviso">Aún no hay una semana anterior con precios. Desde la próxima actualización del shopeo aquí aparecerá qué precio subió, bajó, apareció o dejó de aparecer.</p>`;
+  else if(!cambios.length) h += `<p class="aviso">Sin variaciones de precio frente a la semana anterior con los filtros actuales.</p>`;
+  else {
+    cambios.sort((x,y) => (y.d===undefined?0:Math.abs(y.d)) - (x.d===undefined?0:Math.abs(x.d)));
+    h += `<div class="wrap"><table><thead><tr><th>Producto</th><th>Canal</th><th class="num">Antes (por kg)</th><th class="num">Ahora (por kg)</th><th class="num">Variación</th><th>Nota</th></tr></thead><tbody>`;
+    for(const x of cambios){
+      const nota = x.nuevo ? 'Precio nuevo: no estaba en la semana anterior' : x.sin ? 'Sin precio esta semana' : (x.d>0 ? `Subió ${fmtP(x.pb-x.pa)} en el saco` : `Bajó ${fmtP(x.pa-x.pb)} en el saco`);
+      h += `<tr class="${x.r.tx?'tx':''}"><td>${marcaTag(x.r.marca)} ${esc(x.r.prod)}</td><td>${esc(x.c)}</td><td class="num">${x.a?fmtP(x.a)+'/kg':'—'}</td><td class="num">${x.b?fmtP(x.b)+'/kg':'—'}</td>
+        <td class="num ${x.d>0?'pos':x.d<0?'neg':''}">${x.d===undefined?'—':pct(x.d)}</td><td class="small" style="white-space:normal">${esc(nota)}</td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+  }
+  const notas = TODAS.filter(filaVisible).flatMap(r => canalesVis().filter(c => (cur[r.base+'|'+c]||{}).nota).map(c => ({r, c, n:cur[r.base+'|'+c].nota})));
+  if(notas.length) h += `<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700;font-size:13.5px">Notas de captura de esta semana (${notas.length})</summary><ul class="notas" style="margin-top:10px">${notas.map(x => `<li><b>${esc(x.r.marca)} · ${esc(x.r.prod)}</b> · ${esc(x.c)}: ${esc(x.n)}</li>`).join('')}</ul></details>`;
+  return h + `</section>`;
 }
 
 /* ===================== Shopeo ===================== */
