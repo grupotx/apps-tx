@@ -253,7 +253,7 @@ function pantallaAuth(modo = 'chofer', msg = '') {
       <div class="ctx err" id="a-err" hidden></div>
       <button class="btn primary" id="a-go" style="width:100%;padding:13px">${{ chofer: 'Ingresar', staff: 'Ingresar', cliente: 'Ingresar', signup: 'Crear cuenta', reset: 'Enviar enlace', newpass: 'Guardar contraseña' }[modo]}</button>
     </form>
-    <div class="auth-links">${modo === 'staff' ? '<button data-m="signup">Crear cuenta</button><button data-m="reset">Olvidé mi contraseña</button>'
+    <div class="auth-links">${modo === 'staff' ? '<button data-m="reset">Olvidé mi contraseña</button>'
       : modo === 'cliente' ? '<span class="sub">Sigue tus despachos en el mapa. Tu acceso lo entrega Grupo TX.</span><button data-m="reset">Olvidé mi contraseña</button>'
       : modo === 'chofer' ? '<span class="sub">Tu cuenta la crea Logística. Si olvidaste tu clave, pídeles que la restablezcan.</span>'
       : '<button data-m="staff">Volver a ingresar</button>'}</div>`;

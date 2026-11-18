@@ -1753,7 +1753,7 @@ function authScreen(mode='login', msg=''){
       <div class="ctx err" id="a-err" hidden></div>
       <button class="btn primary" id="a-go" style="width:100%;padding:13px">${{ login:'Ingresar', signup:'Crear cuenta', reset:'Enviar enlace', newpass:'Guardar contraseña' }[mode]}</button>
     </form>
-    <div class="auth-links">${mode==='login' ? '<button data-auth="signup">Crear cuenta nueva</button><button data-auth="reset">Olvidé mi contraseña</button>' : '<button data-auth="login">Volver a ingresar</button>'}</div>`;
+    <div class="auth-links">${mode==='login' ? '<button data-auth="reset">Olvidé mi contraseña</button>' : '<button data-auth="login">Volver a ingresar</button>'}</div>`;
   a.querySelectorAll('[data-auth]').forEach(b => b.onclick = () => authScreen(b.dataset.auth));
   const err = t => { const e = $('#a-err'); e.textContent = t; e.hidden = false; };
   const tr = m => /Invalid login/i.test(m) ? 'Correo o contraseña incorrectos.' : /Email not confirmed/i.test(m) ? 'Debes confirmar tu correo: revisa tu bandeja de entrada.' : /already registered/i.test(m) ? 'Ese correo ya tiene cuenta. Ingresa o recupera tu contraseña.' : /Password should be/i.test(m) ? 'La contraseña debe tener al menos 8 caracteres.' : /rate limit/i.test(m) ? 'Demasiados intentos. Espera unos minutos.' : m;
