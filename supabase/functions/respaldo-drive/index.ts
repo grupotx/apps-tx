@@ -1,5 +1,5 @@
 // Edge Function respaldo-drive: envía la cola de respaldo al Apps Script de Google Drive.
-// Solo la llama pg_cron con la service key. Secrets: APPS_SCRIPT_URL, RESPALDO_CLAVE.
+// Solo la llama pg_cron con el token de Vault (header x-respaldo-token). Secrets: APPS_SCRIPT_URL, RESPALDO_CLAVE.
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
 import { encodeBase64 } from 'jsr:@std/encoding@1.0.5/base64';
 import { procesarLote, type Cola, type Deps } from '../_shared/proceso.ts';
@@ -9,11 +9,11 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, SERVICE_KEY, { auth: { persistSession: false } });
 const LIMITE = 6; // ~10 s por envío; deja margen bajo el límite de 150 s de la función.
 
-function iguales(a: string, b: string): boolean {
-  if (!a || !b) return false;
-  let d = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return d === 0;
+// Token interno guardado en Vault (respaldo_cron_token); lo envía pg_cron vía app.respaldo_llamar().
+async function tokenValido(token: string | null): Promise<boolean> {
+  if (!token) return false;
+  const { data, error } = await sb.rpc('respaldo_token_valido', { p_token: token });
+  return !error && data === true;
 }
 
 async function uno(tabla: string, col: string, val: unknown, campos = '*') {
@@ -103,8 +103,7 @@ async function lote(modo: string, limite: number): Promise<Cola[]> {
 }
 
 Deno.serve(async (req) => {
-  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  if (req.method !== 'POST' || !iguales(token, SERVICE_KEY)) return new Response('no autorizado', { status: 401 });
+  if (req.method !== 'POST' || !(await tokenValido(req.headers.get('x-respaldo-token')))) return new Response('no autorizado', { status: 401 });
   try {
     const { modo } = await req.json().catch(() => ({ modo: 'procesar' }));
     const r = modo === 'noche'
