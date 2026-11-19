@@ -2611,6 +2611,7 @@ function docsDeDb(){
 function aplicarDoc(col, id, data){
   const k = col+SEP+id;
   if(ARR.includes(col)){
+    if(!Array.isArray(db[col])) db[col] = [];
     const i = db[col].findIndex(x => x.id === id);
     if(data == null){ if(i >= 0) db[col].splice(i,1); }
     else if(i >= 0) db[col][i] = data; else db[col].push(data);
