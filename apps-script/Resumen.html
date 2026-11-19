@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#121212;font-size:11pt;margin:24px}
+  .cab{border-bottom:3px solid #e4032e;padding-bottom:8px;margin-bottom:14px}
+  .cab b{color:#e4032e;font-size:16pt}
+  .cab span{color:#5e6066;font-size:10pt;display:block;margin-top:2px}
+  table{width:100%;border-collapse:collapse}
+  td{border-bottom:1px solid #dfdfdb;padding:5px 6px;vertical-align:top}
+  td.k{width:32%;color:#5e6066;font-weight:bold}
+  .fotos img{width:31%;margin:1%;border:1px solid #dfdfdb}
+  .pie{margin-top:16px;color:#5e6066;font-size:8.5pt}
+</style></head>
+<body>
+  <div class="cab"><b>Grupo TX · <?= nombreApp ?></b>
+    <span>Envío <?= env.fila['Número'] ?> · <?= env.identificador ?> · <?= env.fecha ?></span></div>
+  <table>
+    <? for (var i = 0; i < env.campos.length; i++) { ?>
+      <tr><td class="k"><?= env.campos[i][0] ?></td><td><?= env.campos[i][1] ?></td></tr>
+    <? } ?>
+    <? if (env.fila['Observaciones']) { ?><tr><td class="k">Observaciones</td><td><?= env.fila['Observaciones'] ?></td></tr><? } ?>
+  </table>
+  <div class="fotos">
+    <? for (var j = 0; j < env.archivos.length; j++) { var a = env.archivos[j]; if (a.base64) { ?>
+      <img src="data:<?= /\.png$/i.test(a.nombre) ? 'image/png' : 'image/jpeg' ?>;base64,<?= a.base64 ?>" alt="<?= a.nombre ?>">
+    <? } } ?>
+  </div>
+  <div class="pie">Respaldo automático de Apps Grupo TX · <?= new Date().toLocaleString('es-CL') ?></div>
+</body></html>
