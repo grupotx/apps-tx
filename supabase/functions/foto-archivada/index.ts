@@ -26,6 +26,9 @@ Deno.serve(async (req) => {
   const auth = req.headers.get('Authorization') || '';
   const { bucket, ruta } = await req.json().catch(() => ({}));
   const usuario = createClient(URL_SB, ANON, { global: { headers: { Authorization: auth } }, auth: { persistSession: false } });
+  // Solo usuarios con sesión: la clave pública (rol anon) también pasa la verificación JWT del gateway.
+  const { data: quien } = await usuario.auth.getUser(auth.replace(/^Bearer\s+/i, ''));
+  if (!quien?.user) return new Response('inicia sesión', { status: 401, headers: h });
 
   const r = await puedeVer({
     async archivo(b, p) {

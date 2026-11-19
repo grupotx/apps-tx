@@ -29,6 +29,10 @@
   window.fotoArchivadaImg = function (img) {
     if (img.dataset.archivada) return;
     img.dataset.archivada = '1';
-    window.fotoArchivada(img.dataset.bucket, img.dataset.ruta).then((u) => { img.src = u; }).catch(() => {});
+    const b = img.dataset.bucket;
+    // Sin data-ruta (fotos antiguas sin id): se obtiene de la URL pública .../object/public/<bucket>/<ruta>
+    const ruta = img.dataset.ruta || decodeURIComponent(((img.src || '').split('/object/public/' + b + '/')[1] || '').split(/[?#]/)[0]);
+    if (!ruta) return;
+    window.fotoArchivada(b, ruta).then((u) => { img.src = u; }).catch(() => {});
   };
 })();

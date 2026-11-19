@@ -2,7 +2,7 @@
 // Solo la llama pg_cron con el token de Vault (header x-respaldo-token). Secrets: APPS_SCRIPT_URL, RESPALDO_CLAVE.
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
 import { encodeBase64 } from 'jsr:@std/encoding@1.0.5/base64';
-import { procesarLote, type Cola, type Deps } from '../_shared/proceso.ts';
+import { procesarLote, descargaNoExiste, type Cola, type Deps } from '../_shared/proceso.ts';
 import type { Archivo } from '../_shared/envios.ts';
 import { nombreCopia, seleccionarParaBorrar, type ArchivoRetencion } from '../_shared/noche.ts';
 
@@ -62,8 +62,12 @@ async function cargar(c: Cola): Promise<Record<string, unknown> | null> {
 async function descargar(a: Archivo): Promise<string | null> {
   if ('base64' in a) return a.base64;
   const { data, error } = await sb.storage.from(a.bucket).download(a.ruta);
-  if (error || !data) return null;
-  return encodeBase64(new Uint8Array(await data.arrayBuffer()));
+  if (error) {
+    // Solo "no existe" se anota como foto faltante; cualquier otro error se reintenta más tarde.
+    if (descargaNoExiste(error)) return null;
+    throw new Error(`descarga ${a.bucket}/${a.ruta}: ${(error as any).originalError?.status || error.message}`);
+  }
+  return encodeBase64(new Uint8Array(await data!.arrayBuffer()));
 }
 
 async function enviar(body: unknown) {
@@ -87,12 +91,15 @@ const deps: Deps = {
   },
   descargar,
   enviar,
-  async marcar(colaId, cambios) {
-    const { error } = await sb.from('respaldo_cola').update(cambios).eq('id', colaId);
+  async marcar(c, cambios) {
+    // Condicional: si el registro se editó o borró durante el envío, la fila cambió y no se pisa.
+    const { error } = await sb.from('respaldo_cola').update(cambios)
+      .eq('id', c.id).eq('estado', c.estado).eq('listo_desde', c.listo_desde);
     if (error) throw new Error(error.message);
   },
   async registrarArchivos(colaId, archivos) {
-    const { error } = await sb.from('respaldo_archivos').upsert(archivos.map((a) => ({ cola_id: colaId, ...a })), { onConflict: 'bucket,ruta' });
+    // Nunca reasigna a otro registro una ruta ya registrada (respaldo_registrar_archivos).
+    const { error } = await sb.rpc('respaldo_registrar_archivos', { p_cola_id: colaId, p_archivos: archivos });
     if (error) throw new Error(error.message);
   },
 };

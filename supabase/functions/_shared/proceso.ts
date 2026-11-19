@@ -15,6 +15,7 @@ export type Cola = {
   drive_folder_id: string | null;
   drive_url: string | null;
   enviado_at: string | null;
+  listo_desde: string;
 };
 
 export type RespuestaScript = {
@@ -31,21 +32,28 @@ export type Deps = {
   pendientes(limit: number): Promise<Cola[]>;
   cargar(c: Cola): Promise<Record<string, unknown> | null>;
   numero(colaId: number): Promise<number>;
-  descargar(a: Archivo): Promise<string | null>;
+  descargar(a: Archivo): Promise<string | null>; // null = el archivo no existe; lanza si es un error temporal
   enviar(body: unknown): Promise<RespuestaScript>;
-  marcar(colaId: number, cambios: Partial<Cola>): Promise<void>;
+  marcar(c: Cola, cambios: Partial<Cola>): Promise<void>; // actualiza solo si la fila sigue igual (estado, listo_desde)
   registrarArchivos(colaId: number, archivos: ArchivoRegistrado[]): Promise<void>;
   ahora?: () => string;
 };
 
 class ErrorEnvio extends Error {}
 
+// Error de descarga de Storage: ¿el archivo no existe (se anota como faltante) o es un fallo temporal?
+// Storage responde 400 con cuerpo vacío para un objeto inexistente.
+export function descargaNoExiste(error: any): boolean {
+  const st = Number(error?.statusCode ?? error?.status ?? error?.originalError?.status);
+  return st === 400 || st === 404 || /not.?found/i.test(String(error?.message || ''));
+}
+
 async function procesarEliminado(c: Cola, d: Deps, ahora: string) {
   if (c.numero != null) {
     const r = await d.enviar({ accion: 'eliminado', app: c.app, numero: c.numero });
     if (!r.ok) throw new ErrorEnvio(r.error || 'error del script');
   }
-  await d.marcar(c.id, { enviado_at: ahora, intentos: 0, ultimo_error: null });
+  await d.marcar(c, { enviado_at: ahora, intentos: 0, ultimo_error: null });
 }
 
 async function procesarEnvio(c: Cola, d: Deps, ahora: string) {
@@ -77,7 +85,7 @@ async function procesarEnvio(c: Cola, d: Deps, ahora: string) {
   const r = await d.enviar({ accion: 'envio', envio: { ...env, fila, archivos } });
   if (!r.ok) throw new ErrorEnvio(r.error || 'error del script');
 
-  await d.marcar(c.id, {
+  await d.marcar(c, {
     estado: 'enviado', numero, drive_folder_id: r.folderId ?? null, drive_url: r.folderUrl ?? null,
     enviado_at: ahora, intentos: 0, ultimo_error: null,
   });
@@ -98,7 +106,8 @@ export async function procesarLote(d: Deps, limite = 10): Promise<{ ok: number; 
     } catch (e) {
       res.error++;
       const msg = String((e as Error)?.message || e).slice(0, 500);
-      await d.marcar(c.id, { estado: c.estado === 'eliminado' ? 'eliminado' : 'error', intentos: c.intentos + 1, ultimo_error: msg });
+      // intentos ya se sumó al reclamar la fila (respaldo_pendientes), así un corte a medias también cuenta
+      await d.marcar(c, { estado: c.estado === 'eliminado' ? 'eliminado' : 'error', ultimo_error: msg });
     }
   }
   return res;

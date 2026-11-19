@@ -37,8 +37,20 @@ export function rutaDesdeUrlPublica(url: string, bucket: string): string | null 
   return decodeURIComponent(url.slice(i + marca.length).split(/[?#]/)[0]);
 }
 
+// Nombre del archivo en Drive derivado de su ruta en Storage (FNV-1a 32 bits): estable aunque cambie el
+// orden o la lista de fotos del registro, y distinto para rutas distintas. Evita reusar un fileId ajeno.
+export function nombreArchivo(bucket: string, ruta: string, prefijo: string, ext: string): string {
+  let h = 0x811c9dc5;
+  for (const ch of `${bucket}/${ruta}`) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 0x01000193) >>> 0; }
+  return `${prefijo}_${h.toString(16).padStart(8, '0')}.${ext}`;
+}
+
 const deBucket = (bucket: string, rutas: unknown[]): ArchivoBucket[] =>
-  rutas.filter(Boolean).map((r, i) => ({ bucket, ruta: String(r), nombre: `foto_${i + 1}.jpg` }));
+  rutas.filter(Boolean).map((r) => ({ bucket, ruta: String(r), nombre: nombreArchivo(bucket, String(r), 'foto', 'jpg') }));
+
+// Entregas: solo se respaldan archivos dentro de la carpeta de la guía (así no se puede apuntar a fotos ajenas).
+const deLaGuia = (guiaId: unknown) => (r: unknown) =>
+  !!guiaId && typeof r === 'string' && r.startsWith(`${guiaId}/`) && !r.split('/').includes('..');
 
 const planos = (o: Obj | undefined, excluir: string[] = []): Array<[string, unknown]> =>
   Object.entries(o || {}).filter(([k, v]) => !excluir.includes(k) && v !== null && typeof v !== 'object');
@@ -46,8 +58,9 @@ const planos = (o: Obj | undefined, excluir: string[] = []): Array<[string, unkn
 function entregas(d: Obj) {
   const e: Obj = d.entrega || {}, g: Obj = d.guia || {};
   const dev = (d.devoluciones || []).map((x: Obj) => `${x.cantidad} ${x.unidad || ''} ${x.producto_descripcion || x.producto_codigo || ''} (${x.motivo || ''})`.replace(/\s+/g, ' ')).join('; ');
-  const archivos: Archivo[] = deBucket('entregas', e.fotos || []);
-  if (e.firma_path) archivos.push({ bucket: 'entregas', ruta: e.firma_path, nombre: 'firma.png' });
+  const propia = deLaGuia(e.guia_id);
+  const archivos: Archivo[] = deBucket('entregas', (e.fotos || []).filter(propia));
+  if (e.firma_path && propia(e.firma_path)) archivos.push({ bucket: 'entregas', ruta: e.firma_path, nombre: nombreArchivo('entregas', e.firma_path, 'firma', 'png') });
   return {
     identificador: `Folio ${g.folio || e.guia_id || e.id}`,
     fecha: dia(e.cierre_at || g.fecha || e.created_at),
@@ -95,12 +108,11 @@ function silos(tabla: string, d: Obj) {
 function mantencion(d: Obj) {
   const data: Obj = d.data || {};
   const archivos: Archivo[] = [];
-  for (const it of data.items || []) {
+  (data.items || []).forEach((it: Obj, ix: number) => {
     const f = it?.foto;
-    const nombre = `foto_${archivos.length + 1}.jpg`;
-    if (typeof f === 'string' && f.startsWith('data:')) archivos.push({ base64: f.slice(f.indexOf(',') + 1), nombre });
-    else if (f && typeof f === 'object' && f.path) archivos.push({ bucket: 'mantencion', ruta: f.path, nombre });
-  }
+    if (typeof f === 'string' && f.startsWith('data:')) archivos.push({ base64: f.slice(f.indexOf(',') + 1), nombre: `foto_item${ix + 1}.jpg` });
+    else if (f && typeof f === 'object' && f.path) archivos.push({ bucket: 'mantencion', ruta: f.path, nombre: nombreArchivo('mantencion', f.path, 'foto', 'jpg') });
+  });
   const esChk = d.coleccion === 'chk';
   const items = (data.items || []).map((it: Obj) => `${it.item}: ${it.r}${it.com ? ` (${it.com})` : ''}`).join('; ');
   return {
