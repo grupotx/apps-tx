@@ -1,0 +1,7 @@
+# GitHub Pages (Jekyll): no publicar código de servidor, pruebas ni documentos internos.
+exclude:
+  - supabase
+  - apps-script
+  - tests
+  - docs
+  - README.md
