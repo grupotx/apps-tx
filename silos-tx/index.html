@@ -376,6 +376,7 @@ input[type=file]{padding:8px;background:var(--sunk)}
 <datalist id="dl-material"><option value="Mortero de pega"><option value="Estuco"><option value="Estuco hidrófugo"><option value="Hormigón seco"><option value="Pega baldosas"><option value="Adhesivo cerámico"></datalist>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="../foto-archivada.js"></script>
 
 <script>
 (function(){
@@ -880,7 +881,7 @@ function renderSilos(){
       ${condChip(i.cond)}
       <div class="stats"><div><b>${i.dias ?? '–'}</b><small>días</small></div><div><b>${i.cnt.fallas}</b><small>fallas</small></div><div><b>${clpK(i.g.total)}</b><small>gasto</small></div></div>
     </div>
-    <div class="thumb">${i.lastPhotos ? i.lastPhotos.fotos.slice(0,3).map(p => `<img src="${esc(p.url)}" alt="" loading="lazy">`).join('') + `<span class="sub">Última foto ${fmtD(i.lastPhotos.fecha)}</span>` : `<span class="sub">${i.lastVisit ? 'Última visita ' + fmtD(i.lastVisit.fecha) : 'Sin visitas registradas'}</span>`}</div>
+    <div class="thumb">${i.lastPhotos ? i.lastPhotos.fotos.slice(0,3).map(p => `<img src="${esc(p.url)}" alt="" loading="lazy" data-bucket="fotos" data-ruta="${esc(p.id||'')}" onerror="window.fotoArchivadaImg&&fotoArchivadaImg(this)">`).join('') + `<span class="sub">Última foto ${fmtD(i.lastPhotos.fecha)}</span>` : `<span class="sub">${i.lastVisit ? 'Última visita ' + fmtD(i.lastVisit.fecha) : 'Sin visitas registradas'}</span>`}</div>
   </button>`).join('')}</div>` : '<div class="card empty"><b>Sin resultados</b>Ningún silo coincide con el filtro.</div>';
 }
 
@@ -922,7 +923,7 @@ function evText(e){
   if(e.obs) p.push(`<span class="sub">${esc(e.obs)}</span>`);
   return p.filter(Boolean).map(x => `<p>${x}</p>`).join('');
 }
-const photosHTML = (fotos, cls='photos') => (fotos||[]).length ? `<div class="${cls}">${fotos.map(f => `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="Foto de visita" loading="lazy"></a>`).join('')}</div>` : '';
+const photosHTML = (fotos, cls='photos') => (fotos||[]).length ? `<div class="${cls}">${fotos.map(f => `<a href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="Foto de visita" loading="lazy" data-bucket="fotos" data-ruta="${esc(f.id||'')}" onerror="window.fotoArchivadaImg&&fotoArchivadaImg(this)"></a>`).join('')}</div>` : '';
 function openSilo(id){
   const draw = () => {
     recompute();

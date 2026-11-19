@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Grupo TX · Registro de Terreno</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="foto-archivada.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:#fde7eb;--red:var(--brand);--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;--line:#dfdfdb;--gray:#8d939a;--ok:#18864a;--ok-soft:#ddf2e5;--warn:#b86e00;--warn-soft:#fbeed6;
@@ -663,6 +664,9 @@ async function cargarFotos(){
   if (faltan.length) {
     const { data } = await sb.storage.from(BUCKET).createSignedUrls(faltan, 3600);
     (data || []).forEach(x => { if (x.signedUrl) urlCache[x.path] = x.signedUrl; });
+    // Fotos que ya no están en Supabase (archivadas en Drive tras 60 días)
+    await Promise.all(faltan.filter(p => !urlCache[p] && window.fotoArchivada)
+      .map(p => fotoArchivada(BUCKET, p).then(u => { urlCache[p] = u; }).catch(() => {})));
   }
   links.forEach(a => { const u = urlCache[a.dataset.path]; if (u) { a.href = u; a.querySelector('img').src = u; } });
 }

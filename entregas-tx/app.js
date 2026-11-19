@@ -135,7 +135,9 @@ async function comprimirImagen(file, max = 1400, calidad = 0.78) {
 async function urlFirmada(path) {
   if (!path) return '';
   const { data } = await sb.storage.from('entregas').createSignedUrl(path, 3600);
-  return data?.signedUrl || '';
+  if (data?.signedUrl) return data.signedUrl;
+  // La foto ya no está en Supabase: se pide la copia archivada en Drive
+  return window.fotoArchivada ? await fotoArchivada('entregas', path).catch(() => '') : '';
 }
 
 /* mapa con el mismo estilo que Silos TX (calles / satélite, modo oscuro) */

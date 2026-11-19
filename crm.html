@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="foto-archivada.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
@@ -813,7 +814,7 @@ function vVisits(){
 }
 function showVisit(id){const v=S.visits.find(x=>x.id===id);const c=VC(v);
  openModal('Visita · '+esc(c.name),`<dl class="kv"><dt>Fecha y hora</dt><dd>${fdt(v.date)}</dd><dt>Vendedor</dt><dd>${esc(U(v.userId).name)}</dd><dt>Dirección</dt><dd>${esc(v.address)}</dd><dt>Motivo</dt><dd>${esc(v.reason)}</dd><dt>Comentarios</dt><dd>${esc(v.comments)}</dd><dt>Resultado</dt><dd>${esc(v.result)}</dd><dt>Próximo paso</dt><dd>${esc(v.next)}</dd><dt>Fecha seguimiento</dt><dd>${fd(v.followDate)}</dd><dt>Ubicación</dt><dd class="small"><span class="mono">${(+v.lat).toFixed(5)}, ${(+v.lng).toFixed(5)}</span> ${v.gps?'(GPS del teléfono)':'(comuna del cliente)'} · <a href="https://www.google.com/maps?q=${v.lat},${v.lng}" target="_blank" rel="noopener">Abrir en mapa</a></dd><dt>Evidencia</dt><dd id="vPhoto">${v.photo?'Cargando foto…':'Sin foto'}</dd></dl>`,c.id?`<a class="btn" href="#cliente/${c.id}">Ver ficha del cliente</a>`:'','narrow');
- if(v.photo)sb.storage.from('crm-visitas').createSignedUrl(v.photo,3600).then(({data,error})=>{const el=$('#vPhoto');if(!el)return;el.innerHTML=error?'No se pudo cargar la foto.':`<a href="${data.signedUrl}" target="_blank" rel="noopener"><img src="${data.signedUrl}" alt="Foto de la visita" style="max-height:260px;border-radius:8px"></a>`})}
+ if(v.photo)sb.storage.from('crm-visitas').createSignedUrl(v.photo,3600).then(async({data,error})=>{let u=error?'':data.signedUrl;if(!u&&window.fotoArchivada)u=await fotoArchivada('crm-visitas',v.photo).catch(()=>'');const el=$('#vPhoto');if(!el)return;el.innerHTML=!u?'No se pudo cargar la foto.':`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="Foto de la visita" style="max-height:260px;border-radius:8px"></a>`})}
 function visitForm(clientId){
  if(!can('registrar_visita')){toast('Tu perfil no puede registrar visitas.');return}
  const cl=visibleClients();
