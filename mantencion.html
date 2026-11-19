@@ -3216,9 +3216,23 @@ async function fotoDataURL(file){
   c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
   return c.toDataURL('image/jpeg',0.6);
 }
+// Sube la foto al bucket privado 'mantencion' y devuelve {path}. Si no se puede subir
+// (sin conexión, sin permiso), devuelve el base64 como antes para no perder la foto.
+async function fotoGuardar(file, chkId, ix){
+  const dataURL = await fotoDataURL(file);
+  if(!dataURL) return null;
+  try{
+    const blob = await (await fetch(dataURL)).blob();
+    const path = chkId+'/'+ix+'-'+Date.now()+'.jpg';
+    const { error } = await sb.storage.from('mantencion').upload(path, blob, { contentType:'image/jpeg', upsert:false });
+    if(error) throw error;
+    return { path };
+  }catch(e){ console.warn('Foto en base64 (no se pudo subir):', e && e.message); return dataURL; }
+}
 async function guardarChk(f){
   const fd = new FormData(f);
   const t = tplDe(sel); const items = [];
+  const id = uid('k');
   for (let ix=0; ix<t.i.length; ix++){
     const v = fd.get('i'+ix);
     const file = fd.get('f'+ix);
@@ -3226,11 +3240,10 @@ async function guardarChk(f){
       const el = f.querySelector('.item[data-ix="'+ix+'"]'); if(el){ el.classList.add('falta'); el.scrollIntoView({block:'center',behavior:'smooth'}); }
       toast('Falta la foto obligatoria del ítem marcado «Revisar».'); return;
     }
-    const foto = await fotoDataURL(file);
+    const foto = await fotoGuardar(file, id, ix);
     items.push({item:t.i[ix], r:v, foto, com:(fd.get('c'+ix)||'').trim()});
   }
   const fallas = items.filter(x=>x.r==='falla');
-  const id = uid('k');
   db.mm = db.mm||{}; db.mm[sel] = {f:(fd.get('fab')||'').trim(), m:(fd.get('mod')||'').trim()};
   const chk = {id,eq:sel,tpl:t.t,fecha:hoy(),usuario:yo(),items,fallas:fallas.length,resuelta:fallas.length===0,obs:items.filter(x=>x.com).map(x=>x.item.split(' | ')[0]+': '+x.com).join(' · '),permiso:(t.r&&t.r.length)?{riesgos:t.r,corr:fd.get('corr'),fecha:hoy()}:null};
   db.chk.push(chk);
