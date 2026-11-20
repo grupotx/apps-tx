@@ -1097,29 +1097,45 @@ async function resolverProspecto(d){
 const NUM_PEND='(sin número)';
 const qn=q=>q.num||'Sin número';
 // Reserva local 'crm.numeros' (por usuario). Leer y descontar bajo un Web Lock: dos pestañas nunca toman el mismo.
-const conNumeros=fn=>navigator.locks?navigator.locks.request('crm-numeros-'+S.me,fn):fn();
+// El lock solo envuelve lecturas/escrituras locales (nunca la red); espera opcional con tope (ms).
+const conNumeros=(fn,tope)=>!navigator.locks?fn():navigator.locks.request('crm-numeros-'+S.me,tope&&typeof AbortSignal!=='undefined'&&AbortSignal.timeout?{signal:AbortSignal.timeout(tope)}:{},fn);
+// Si el lock no llega en 3 s, la cotización va sin número (lo asigna el servidor) en vez de dejar "Guardando…".
 async function tomarNumeroReservado(){
- try{return await conNumeros(async()=>{const res=(await TXOffline.leerLocal('crm.numeros'))||[];const {num,resto}=CO.tomarNumero(res);if(num)await TXOffline.guardarLocal('crm.numeros',resto);return num})}
+ try{return await conNumeros(async()=>{const res=(await TXOffline.leerLocal('crm.numeros'))||[];const {num,resto}=CO.tomarNumero(res);if(num)await TXOffline.guardarLocal('crm.numeros',resto);return num},3000)}
  catch(e){console.warn('[CRM] sin reserva de números:',e);return null}
 }
 // Con señal: completa la reserva (al iniciar, al volver la señal y después de usar un número).
 let reponiendo=false;
-// Todo bajo el mismo Web Lock (se revisa la reserva dentro): dos pestañas no piden números a la vez.
+// Dos pestañas no piden números a la vez: bajo el Web Lock se revisa la reserva y se marca
+// 'crm.numeros.reponiendo' (hora; vencida a los 15 s por si una pestaña murió a mitad). La llamada a la red va
+// FUERA del lock (con tope de 10 s), así tomar un número nunca espera a una red lenta; al volver se agrega bajo el lock.
 // Si falla (sin red, tope del servidor…) no se avisa: se reintenta en el próximo disparo.
 async function reponerNumeros(){
  if(reponiendo||!S.me||!can('cotizar')||navigator.onLine===false)return;
- reponiendo=true;
+ reponiendo=true;let marcado=false;
  try{
-  await conNumeros(async()=>{
+  const n=await conNumeros(async()=>{
    const res=(await TXOffline.leerLocal('crm.numeros'))||[];
-   if(!CO.necesitaReponer(res))return;
-   const n=Math.min(20,CO.cantidadAReservar(res));if(!n)return;
-   const nuevos=okR(await sb.rpc('crm_reservar_numeros',{p_n:n}))||[];
+   if(!CO.necesitaReponer(res))return 0;
+   const desde=await TXOffline.leerLocal('crm.numeros.reponiendo');
+   if(desde&&Date.now()-desde<15000)return 0;
+   await TXOffline.guardarLocal('crm.numeros.reponiendo',Date.now());marcado=true;
+   return Math.min(20,CO.cantidadAReservar(res));
+  },5000);
+  if(!n)return;
+  let pedido=sb.rpc('crm_reservar_numeros',{p_n:n});
+  if(pedido.abortSignal&&typeof AbortSignal!=='undefined'&&AbortSignal.timeout)pedido=pedido.abortSignal(AbortSignal.timeout(10000));
+  const nuevos=okR(await pedido)||[];
+  await conNumeros(async()=>{
    const act=(await TXOffline.leerLocal('crm.numeros'))||[];
    await TXOffline.guardarLocal('crm.numeros',[...act,...nuevos.filter(x=>!act.includes(x))]);
+   await TXOffline.guardarLocal('crm.numeros.reponiendo',null);marcado=false;
   });
  }catch(e){console.warn('[CRM] no se pudieron reservar números:',e)}
- finally{reponiendo=false}
+ finally{
+  reponiendo=false;
+  if(marcado)Promise.resolve(conNumeros(()=>TXOffline.guardarLocal('crm.numeros.reponiendo',null))).catch(()=>{});
+ }
 }
 window.addEventListener('online',()=>{if(lastLoad)reponerNumeros()});
 // El servidor asignó el número (cotización guardada sin reserva): se actualiza la copia en pantalla.
@@ -1433,7 +1449,7 @@ async function decidirQ(q,status,linea){
  let r;try{r=await dbRun(sb.from('crm_quotes').select('history,sent_at,status').eq('id',q.id).maybeSingle())}catch(_){return false}
  if(!r||r.status!=='pendiente'){toast('La cotización cambió. Recarga e inténtalo de nuevo.');return false}
  const history=[...(Array.isArray(r.history)?r.history:[]),linea];
- try{await dbRun(sb.from('crm_quotes').update({status,history}).eq('id',q.id))}catch(_){return false}
+ try{await dbRun(sb.from('crm_quotes').update({status,history}).eq('id',q.id).eq('status','pendiente'))}catch(_){return false}
  q.status=status;q.history=history;q.sentAt=r.sent_at;return true}
 async function approveQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q)){toast('Solo la jefatura del vendedor puede aprobar.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
  if(!await decidirQ(q,'enviada',{ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(q)}%)`}))return;
