@@ -85,7 +85,22 @@
     return 'oficial';
   }
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf };
+  // Aviso de la barra cuando los datos vienen de la copia local: "Sin conexión · datos de las HH:MM"
+  // (hora local del equipo; si la copia es de otro día se agrega " del D mmm").
+  const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  function textoCopia(guardadoEn, ahora = new Date()) {
+    const d = new Date(guardadoEn);
+    if (isNaN(d)) return 'Sin conexión · datos guardados';
+    const p2 = (n) => String(n).padStart(2, '0');
+    let t = 'Sin conexión · datos de las ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    if (d.toDateString() !== ahora.toDateString()) t += ' del ' + d.getDate() + ' ' + MESES[d.getMonth()];
+    return t;
+  }
+
+  // Firma de la fila visible (id:estado, en orden): si no cambia, no hace falta repintar.
+  const firmaFila = (entradas) => (entradas || []).map((e) => e.id + ':' + e.estado).join('|');
+
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

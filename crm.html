@@ -18,6 +18,9 @@
 <script src="foto-archivada.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="offline-core.js"></script>
+<script src="offline.js"></script>
+<script src="crm-offline.js"></script>
 <style>
 [hidden]{display:none!important}
 html,body{margin:0}
@@ -344,6 +347,12 @@ tr.over td{background:color-mix(in srgb,var(--amber-bg) 60%,transparent)}.neg{co
 .cmk{display:block;width:14px;height:14px;border:3.5px solid;border-radius:3px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
 .leaflet-container{font-family:var(--f-body)}
 @media (max-width:520px){.userbtn .un{display:none}.userbtn{padding:4px}}
+.offchip{font-size:.72rem;font-weight:600;padding:4px 9px;border-radius:999px;background:var(--amber-bg);color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+#copiaInd:not([hidden])+#filaInd[data-estado="sin-conexion"]{display:none}
+.offbar{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
+.offbar+.who{margin-left:0}
+/* teléfono: los avisos bajan a una segunda línea de la barra (y no ocupan espacio si no hay ninguno) */
+@media (max-width:520px){.top{flex-wrap:wrap;row-gap:6px}.offbar{order:9;flex-basis:100%;justify-content:flex-end;margin-left:0}.offbar+.who{margin-left:auto}.offbar:not(:has(.offchip:not([hidden]))){display:none}.offchip{font-size:.68rem;padding:3px 8px;max-width:none}}
 .brand span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:#4a86d8;margin-right:7px;vertical-align:1px;box-shadow:0 0 10px #4a86d8}
 </style>
 </head>
@@ -360,6 +369,7 @@ tr.over td{background:color-mix(in srgb,var(--amber-bg) 60%,transparent)}.neg{co
         <input id="gsearch" type="search" placeholder="Buscar cliente, RUT, cotización, producto, vendedor…" autocomplete="off">
         <div class="sres" id="sres" hidden></div>
       </div>
+      <div class="offbar"><span class="offchip" id="copiaInd" hidden></span><span class="offchip" id="filaInd" hidden></span></div>
       <div class="who">
         <span id="syncDot" data-state="ok" title="Todo guardado"></span>
         <button class="userbtn" id="userBtn" aria-label="Menú de usuario"></button>
@@ -481,7 +491,55 @@ const TXLOGO=`<svg role="img" aria-label="Grupo TX" style="width:100%;height:aut
 {const t=document.getElementById('tmark');if(t)t.innerHTML=TXLOGO}
 const SB_URL='https://xinnonzltoaoptnvkhhy.supabase.co';
 const SB_KEY='sb_publishable_DoSRSj0wmAR_UIX8tENXXQ_X5BS5a1q';
-const sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+// global.fetch: supabase-js resuelve window.fetch al momento de cada llamada (no lo captura al crear el cliente)
+const sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true},global:{fetch:(...a)=>window.fetch(...a)}});
+
+/* ============ sin conexión (TXOffline) ============ */
+const AUTH_KEY='sb-'+new URL(SB_URL).hostname.split('.')[0]+'-auth-token';
+const MSG_LOGIN_SIN_RED='Necesitas conexión para iniciar sesión la primera vez';
+const MSG_NO_SALIR='Tienes registros sin enviar. Conéctate y espera a que se envíen antes de cerrar sesión.';
+const MSG_REQUIERE_RED='Esta acción requiere conexión. Inténtalo con señal.';
+const esperar=ms=>new Promise(r=>setTimeout(r,ms));
+const esRed=e=>TXOfflineCore.clasificarError(e)==='red';
+// Tipos de la fila de envíos: cada flujo de terreno agrega aquí su handler (TIPOS_FILA['crm.visita']=async(datos,archivos,meta)=>{…}).
+// Se registran todos juntos en boot, ANTES de TXOffline.iniciar (iniciar envía de inmediato lo que haya en la fila).
+// Una entrada de un tipo sin handler no rompe nada: la fila la deja 'problema' y aplicarFilaCRM la ignora.
+const TIPOS_FILA={};
+function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,fn)}
+// Usuario de la sesión guardada en el equipo (para abrir sin señal cuando supabase no puede renovar el token).
+function usuarioGuardado(){try{const s=JSON.parse(localStorage.getItem(AUTH_KEY)||'null');return (s&&s.user)||null}catch(_){return null}}
+async function hayConexion(){
+ if(navigator.onLine===false)return false;
+ const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),6000);
+ // cualquier respuesta HTTP = hay red; solo un fallo de red (TypeError/abort) = sin conexión
+ try{await fetch(SB_URL+'/auth/v1/health',{headers:{apikey:SB_KEY},cache:'no-store',signal:ctl.signal});return true}
+ catch(_){return false}finally{clearTimeout(t)}
+}
+async function avisoConexionLogin(){const el=$('#lg-net');if(!el)return;const ok=await hayConexion();if($('#lg-net')!==el)return;el.textContent=ok?'':MSG_LOGIN_SIN_RED;el.hidden=ok}
+window.addEventListener('online',avisoConexionLogin);
+window.addEventListener('offline',avisoConexionLogin);
+// Consulta con copia local; sin red conocida (navigator.onLine) va directo a la copia.
+function consultarCRM(clave,fn){return TXOffline.consultar(clave,()=>{if(navigator.onLine===false)throw new TypeError('Failed to fetch');return fn()})}
+function mostrarCopia(r){const el=$('#copiaInd');if(!el)return;const c=r&&r.desdeCache;el.textContent=c?CO.textoCopia(r.guardadoEn):'';el.title=c?'Se muestran los datos guardados en este equipo. Se actualizan solos al volver la señal.':'';el.hidden=!c}
+// Hace visibles en S los envíos pendientes/con problema de la fila (idempotente).
+let firmaVista='';
+async function aplicarFila(){let ents;try{ents=await TXOffline.entradas()}catch(_){return false}CO.aplicarFilaCRM(S,ents);const f=CO.firmaFila(ents),cambio=f!==firmaVista;firmaVista=f;return cambio}
+const puedeRepintar=()=>!$('#modalRoot').innerHTML&&!/cotizacion\/nueva/.test(location.hash)&&!S.quotes.some(q=>q._edit);
+window.addEventListener('txoffline:cambio',async()=>{if(!lastLoad)return;const cambio=await aplicarFila();if(cambio&&$('#gate').hidden&&puedeRepintar())rerender()});
+// Al volver la señal, si se estaba mostrando la copia, se recarga (sin pisar un formulario abierto).
+window.addEventListener('online',()=>{if(lastLoad&&!$('#copiaInd').hidden&&puedeRepintar())reloadData()});
+TXOffline.montarIndicador($('#filaInd'));
+let saliendo=false;
+// Único camino para cerrar sesión: no se sale con registros sin enviar (se perderían).
+async function cerrarSesion(){
+ let ok=true;try{ok=await TXOffline.puedeCerrarSesion()}catch(_){}
+ if(!ok){toast(MSG_NO_SALIR);return}
+ saliendo=true;
+ const {error}=await sb.auth.signOut();
+ if(error){saliendo=false;toast(esRed(error)?'Sin conexión: no se pudo cerrar sesión. Intenta de nuevo con señal.':'No se pudo cerrar sesión: '+esc(error.message||error));return}
+ try{await TXOffline.alCerrarSesion()}catch(_){}
+ location.href='./';
+}
 const REN={desc:'descr',to:'recipients',from:'sender'};
 const RENB=Object.fromEntries(Object.entries(REN).map(([a,b])=>[b,a]));
 const snake=k=>REN[k]||k.replace(/[A-Z]/g,m=>'_'+m.toLowerCase());
@@ -505,17 +563,24 @@ function syncBadge(){const b=$('#syncDot');if(b){b.dataset.state=pending?'busy':
 async function dbRun(promise){pending++;syncBadge();try{const {data,error}=await promise;if(error)throw error;return data}catch(e){dbFail(e);throw e}finally{pending--;syncBadge()}}
 function dbIns(t,o){const rows=(Array.isArray(o)?o:[o]).map(x=>toRow(x,COLS[t]));return dbRun(sb.from('crm_'+t).insert(rows))}
 function dbUpd(t,o,fields,key='id'){const r=toRow(o,fields||COLS[t]);delete r[snake(key)];return dbRun(sb.from('crm_'+t).update(r).eq(snake(key),o[key]))}
-function dbFail(e){console.error(e);const msg=(e&&e.message)||String(e);const rls=/row-level security|permission denied/i.test(msg);toast((rls?'No tienes permiso para guardar este cambio.':'No se pudo guardar: '+msg)+' Se recargaron los datos.');reloadData()}
+// Sin señal no se recarga (se perdería la pantalla y la copia local no tiene el cambio): solo se avisa.
+function dbFail(e){console.error(e);if(esRed(e)){toast(MSG_REQUIERE_RED);return}const msg=(e&&e.message)||String(e);const rls=/row-level security|permission denied/i.test(msg);toast((rls?'No tienes permiso para guardar este cambio.':'No se pudo guardar: '+msg)+' Se recargaron los datos.');reloadData()}
 const ignore=()=>{};
 async function fetchAll(t,order){let out=[],from=0;for(;;){let q=sb.from('crm_'+t).select('*').range(from,from+999);if(order)q=q.order(order,{ascending:true});if(order&&order!=='id'&&['clients','visits','quotes','opps','tasks','comms','price_lists'].includes(t))q=q.order('id',{ascending:true});const {data,error}=await q;if(error)throw error;out=out.concat(data);if(data.length<1000)break;from+=1000}return out.map(fromRow)}
 const num=x=>x==null?x:+x;
 let lastLoad=0;
-async function loadAll(){
+// La copia local ('crm.datos') guarda las filas crudas tal como llegan (ya pasadas por fromRow): JSON plano,
+// clonable para IndexedDB, y aplicarDatos rehace S igual que con datos frescos (cfg sobre los valores por defecto, normItem…).
+async function traerDatos(){
  const [profiles,perms,settings,lists,items,products,clients,visits,quotes,opps,tasks,comms,aud,out]=await Promise.all([
   fetchAll('profiles','created_at'),fetchAll('role_permissions'),fetchAll('settings'),fetchAll('price_lists','id'),fetchAll('price_list_items'),fetchAll('products','code'),
   fetchAll('clients','created_at'),fetchAll('visits','date'),fetchAll('quotes','created_at'),fetchAll('opps','created_at'),fetchAll('tasks','date'),fetchAll('comms','date'),
   sb.from('crm_audit').select('*').order('ts',{ascending:false}).limit(500).then(r=>{if(r.error)throw r.error;return r.data.map(fromRow).map(a=>({...a,user:a.userId}))}),
   sb.from('crm_outbox').select('*').order('ts',{ascending:false}).limit(300).then(r=>{if(r.error)throw r.error;return r.data.map(fromRow)})]);
+ return {profiles,perms,settings,lists,items,products,clients,visits,quotes,opps,tasks,comms,aud,out};
+}
+function aplicarDatos(d){
+ const {profiles,perms,settings,lists,items,products,clients,visits,quotes,opps,tasks,comms,aud,out}=d;
  TODAY=new Date();
  S.users=profiles;S.perms={};perms.forEach(p=>{(S.perms[p.role]=S.perms[p.role]||{})[p.perm]=p.allowed?1:0});
  settings.forEach(s=>{if(s.key==='cfg')S.cfg=Object.assign(S.cfg,s.value);if(s.key==='region_list')S.regionList=s.value;if(s.key==='team')S.team=Array.isArray(s.value)?s.value:[]});
@@ -527,7 +592,24 @@ async function loadAll(){
  S.opps=opps.map(o=>({...o,amount:num(o.amount),stage:['prospecto','contactado'].includes(o.stage)?'visita':o.stage}));S.tasks=tasks;S.comms=comms;S.audit=aud;S.outbox=out;
  lastLoad=Date.now();
 }
-async function reloadData(){try{await loadAll();renderShell();rerender()}catch(e){console.error(e)}}
+// Carga todo con copia local. Sin señal: la primera carga usa la copia; en una recarga (conservar)
+// se mantiene lo que ya está en pantalla, que es igual o más nuevo que la copia.
+async function loadAll(opts){
+ let r;
+ const sinRed=()=>{throw new TypeError('Failed to fetch')};
+ try{r=await consultarCRM('crm.datos',opts&&opts.soloCopia?sinRed:traerDatos)}
+ catch(e){
+  // pasó el tope de espera de consultar y no hay copia (primera apertura con señal lenta): se espera la carga completa
+  if(!(e&&e.name==='AbortError')||navigator.onLine===false)throw e;
+  r={datos:await traerDatos(),desdeCache:false,guardadoEn:new Date().toISOString()};
+ }
+ mostrarCopia(r);
+ if(r.desdeCache&&opts&&opts.conservar&&lastLoad)return r;
+ aplicarDatos(r.datos);
+ await aplicarFila();
+ return r;
+}
+async function reloadData(){try{const r=await loadAll({conservar:true});if(!r.desdeCache){renderShell();rerender()}return r}catch(e){console.error(e);return null}}
 
 
 /* ============ derived ============ */
@@ -1355,21 +1437,38 @@ function passModal(force){openModal(force?'Crea tu contraseña':'Cambiar mi cont
 /* ============ auth + boot ============ */
 function showGate(html){$('#gate').innerHTML=html;$('#gate').hidden=false;$('.app').hidden=true;$('#bnav').hidden=true;$('#fab').hidden=true}
 function hideGate(){$('#gate').hidden=true;$('.app').hidden=false;$('#bnav').hidden=false}
-function showLogin(msg){showGate(`<form class="gate-card" id="loginForm"><div class="brand"><div class="mk">${TXLOGO}</div><span>CRM Comercial</span></div><h1>Ingresar</h1>${msg?`<div class="note warn">${esc(msg)}</div>`:''}<div class="fld"><label for="lg-email">Correo</label><input id="lg-email" type="email" autocomplete="username" required></div><div class="fld"><label for="lg-pass">Contraseña</label><input id="lg-pass" type="password" autocomplete="current-password" required></div><button class="btn pri" type="submit" id="lgBtn" style="justify-content:center">Ingresar</button><p class="small muted">Usa el mismo correo y contraseña de las apps Grupo TX. <a href="./">Volver al portal</a></p></form>`);
- $('#loginForm').onsubmit=async e=>{e.preventDefault();const b=$('#lgBtn');b.disabled=true;b.textContent='Ingresando…';const {error}=await sb.auth.signInWithPassword({email:$('#lg-email').value.trim(),password:$('#lg-pass').value});if(error){b.disabled=false;b.textContent='Ingresar';const m=/invalid/i.test(error.message)?'Correo o contraseña incorrectos.':error.message;$('#loginForm .note')?.remove();b.insertAdjacentHTML('beforebegin',`<div class="note warn">${esc(m)}</div>`);return}boot()}}
+function showLogin(msg){showGate(`<form class="gate-card" id="loginForm"><div class="brand"><div class="mk">${TXLOGO}</div><span>CRM Comercial</span></div><h1>Ingresar</h1><div class="note warn" id="lg-net" hidden></div>${msg?`<div class="note warn">${esc(msg)}</div>`:''}<div class="fld"><label for="lg-email">Correo</label><input id="lg-email" type="email" autocomplete="username" required></div><div class="fld"><label for="lg-pass">Contraseña</label><input id="lg-pass" type="password" autocomplete="current-password" required></div><button class="btn pri" type="submit" id="lgBtn" style="justify-content:center">Ingresar</button><p class="small muted">Usa el mismo correo y contraseña de las apps Grupo TX. <a href="./">Volver al portal</a></p></form>`);
+ avisoConexionLogin();
+ $('#loginForm').onsubmit=async e=>{e.preventDefault();const b=$('#lgBtn');b.disabled=true;b.textContent='Ingresando…';const {error}=await sb.auth.signInWithPassword({email:$('#lg-email').value.trim(),password:$('#lg-pass').value});if(error){b.disabled=false;b.textContent='Ingresar';const m=esRed(error)?MSG_LOGIN_SIN_RED:/invalid/i.test(error.message)?'Correo o contraseña incorrectos.':error.message;$('#loginForm .note:not(#lg-net)')?.remove();b.insertAdjacentHTML('beforebegin',`<div class="note warn">${esc(m)}</div>`);return}boot()}}
 async function boot(){
  showGate(`<div class="gate-card"><div class="brand"><div class="mk">${TXLOGO}</div><span>CRM Comercial</span></div><p class="muted">Cargando datos…</p></div>`);
- const {data:{session}}=await sb.auth.getSession();
- if(!session){showLogin();return}
- S.me=session.user.id;
- try{await loadAll()}catch(e){console.error(e);showGate(`<div class="gate-card"><h1>No se pudieron cargar los datos</h1><p class="muted">${esc(e.message||e)}</p><button class="btn pri" onclick="location.reload()">Reintentar</button> <button class="btn" onclick="sb.auth.signOut().then(()=>location.reload())">Cerrar sesión</button></div>`);return}
+ // Sin señal y con el token vencido, supabase reintenta renovarlo ~30 s: no se espera tanto,
+ // se abre con el usuario guardado en el equipo (la fila renueva la sesión al volver la señal).
+ const r=await Promise.race([sb.auth.getSession().catch(error=>({data:{session:null},error})),esperar(5000).then(()=>null)]);
+ let user=(r&&r.data&&r.data.session&&r.data.session.user)||null;
+ // sin sesión viva por falta de red: las consultas a la base también esperarían la renovación del token,
+ // así que la primera carga va directo a la copia (se actualiza sola al renovarse la sesión o volver la señal)
+ const soloCopia=!user;
+ if(!user&&(!r||(r.error&&esRed(r.error))))user=usuarioGuardado();
+ if(!user){showLogin();return}
+ S.me=user.id;
+ // copia local y fila por usuario: se abren antes de cualquier consulta (tipos registrados antes de iniciar)
+ registrarTiposFila();
+ try{await TXOffline.iniciar({app:'crm',sb,usuarioId:user.id})}catch(e){console.warn('[CRM] sin copia local:',e)}
+ try{await loadAll({soloCopia})}catch(e){console.error(e);const red=esRed(e);showGate(`<div class="gate-card"><h1>${red?'Sin conexión':'No se pudieron cargar los datos'}</h1><p class="muted">${red?'Necesitas señal para abrir el CRM por primera vez en este equipo.':esc(e.message||e)}</p><div class="row"><button class="btn pri" onclick="location.reload()">Reintentar</button> <button class="btn" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`);return}
  const p=S.users.find(u=>u.id===S.me);
- if(!p||!p.active){showGate(`<div class="gate-card"><h1>Sin acceso al CRM</h1><p>Tu cuenta (${esc(session.user.email)}) no tiene acceso al CRM Comercial o está desactivada. Pídele al administrador del CRM que te agregue.</p><div class="row"><a class="btn pri" href="./">Volver al portal</a><button class="btn" onclick="sb.auth.signOut().then(()=>location.href='./')">Cerrar sesión</button></div></div>`);return}
+ if(!p||!p.active){showGate(`<div class="gate-card"><h1>Sin acceso al CRM</h1><p>Tu cuenta (${esc(user.email)}) no tiene acceso al CRM Comercial o está desactivada. Pídele al administrador del CRM que te agregue.</p><div class="row"><a class="btn pri" href="./">Volver al portal</a><button class="btn" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`);return}
  hideGate();router();
- if(session.user.user_metadata&&session.user.user_metadata.must_change)setTimeout(()=>passModal(true),300);
+ if(user.user_metadata&&user.user_metadata.must_change)setTimeout(()=>passModal(true),300);
 }
-sb.auth.onAuthStateChange(ev=>{if(ev==='SIGNED_OUT')location.href='./'});
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.me&&Date.now()-lastLoad>60000&&!$('#modalRoot').innerHTML&&!/cotizacion\/nueva/.test(location.hash)&&!S.quotes.some(q=>q._edit))reloadData()});
+// SIGNED_OUT ajeno (otra pestaña, token revocado): al portal. No por un corte de red: supabase no borra la
+// sesión por fallas de red al renovar, y si igual llegara sin conexión, se sigue con los datos guardados.
+sb.auth.onAuthStateChange(ev=>{
+ // sesión renovada con la copia en pantalla: hay señal otra vez, se recarga
+ if((ev==='TOKEN_REFRESHED'||ev==='SIGNED_IN')&&lastLoad&&!$('#copiaInd').hidden&&puedeRepintar()){setTimeout(()=>reloadData(),0);return}
+ if(ev!=='SIGNED_OUT'||saliendo)return;hayConexion().then(ok=>{if(ok&&!saliendo)location.href='./'})});
+// Sin señal no se intenta (y reloadData conserva la pantalla si cae a la copia).
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.me&&lastLoad&&navigator.onLine!==false&&Date.now()-lastLoad>60000&&puedeRepintar())reloadData()});
 
 /* ============ EXPORT ============ */
 function exportData(what){if(!can('exportar')){toast('Tu perfil no puede exportar.');return}
@@ -1402,7 +1501,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('.search'))$('#sres')
 });
 document.addEventListener('change',e=>{const t=e.target.dataset.taskDone;if(t){const k=S.tasks.find(x=>x.id===t);k.done=e.target.checked;dbUpd('tasks',k,['done']).catch(ignore);toast(k.done?'Actividad completada.':'Actividad reabierta.');setTimeout(rerender,250)}});
 $('#userBtn').addEventListener('click',()=>{const m=$('#umenu');if(!m.hidden){m.hidden=true;return}m.innerHTML=`<div class="hd"><b>${esc(me().name)}</b><div class="muted small">${esc(me().email)} · ${ROLES[me().role]}</div></div><button data-um="pass">${ico('edit')}Cambiar mi contraseña</button><button data-um="reload">${ico('hist')}Actualizar datos</button><button data-um="portal">${ico('home')}Ir al portal de apps</button><button data-um="out">${ico('x')}Cerrar sesión</button>`;m.hidden=false});
-$('#umenu').addEventListener('click',async e=>{const b=e.target.closest('[data-um]');if(!b)return;$('#umenu').hidden=true;const a=b.dataset.um;if(a==='pass')passModal();if(a==='reload'){await reloadData();toast('Datos actualizados.')}if(a==='portal')location.href='./';if(a==='out'){await sb.auth.signOut();location.href='./'}});
+$('#umenu').addEventListener('click',async e=>{const b=e.target.closest('[data-um]');if(!b)return;$('#umenu').hidden=true;const a=b.dataset.um;if(a==='pass')passModal();if(a==='reload'){const r=await reloadData();toast(r&&!r.desdeCache?'Datos actualizados.':'Sin conexión: se mantienen los datos guardados en este equipo.')}if(a==='portal')location.href='./';if(a==='out')cerrarSesion()});
 document.addEventListener('click',e=>{if(!e.target.closest('#umenu')&&!e.target.closest('#userBtn'))$('#umenu').hidden=true});
 $('#bellBtn').addEventListener('click',()=>{const n=$('#notif');if(!n.hidden){n.hidden=true;return}const al=alertsFor();n.innerHTML=`<h3>Alertas (${al.length})</h3>`+(al.map(a=>`<div class="it" data-ngo="${a.go}"><div class="ic ${a.k==='q'?'q':a.k==='t'?'t':'l'}">${ico(a.k==='q'?'doc':a.k==='t'?'clock':'alert')}</div><div><b class="small">${esc(a.text)}</b><div class="small muted">${esc(a.sub)}</div></div></div>`).join('')||'<div class="empty">Sin alertas.</div>');n.hidden=false});
 $('#notif').addEventListener('click',e=>{const i=e.target.closest('[data-ngo]');if(i){location.hash=i.dataset.ngo;$('#notif').hidden=true}});
@@ -1411,6 +1510,8 @@ $('#bnav').addEventListener('click',e=>{const b=e.target.closest('[data-bnav]');
 $('#fab').addEventListener('click',()=>visitForm());
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();$('#side').classList.remove('open')}});
 window.addEventListener('hashchange',router);
+// Service worker solo del CRM (scope ./crm): el resto de las apps del sitio no queda bajo su control.
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('crm-sw.js',{scope:'./crm'}).catch(()=>{});
 boot();
 </script>
 </body>

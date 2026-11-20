@@ -208,3 +208,22 @@ test('aplicarFilaCRM: si otra edición sigue pendiente el overlay se mantiene', 
   assert.ok(S.quotes[0]._base);
   assert.equal(S.quotes[0]._base.notes, 'viejo');
 });
+
+test('textoCopia: misma fecha muestra solo la hora', () => {
+  const g = new Date(2026, 10, 20, 9, 5);
+  assert.equal(C.textoCopia(g.toISOString(), new Date(2026, 10, 20, 18, 0)), 'Sin conexión · datos de las 09:05');
+});
+
+test('textoCopia: otro día agrega la fecha; inválida da texto genérico', () => {
+  const g = new Date(2026, 10, 18, 17, 42);
+  assert.equal(C.textoCopia(g.toISOString(), new Date(2026, 10, 20, 8, 0)), 'Sin conexión · datos de las 17:42 del 18 nov');
+  assert.equal(C.textoCopia('x'), 'Sin conexión · datos guardados');
+});
+
+test('firmaFila: cambia con el estado, igual si no cambia nada', () => {
+  const a = [ent('1', 'crm.visita', {}), ent('2', 'crm.cotizacion', {}, 'problema')];
+  assert.equal(C.firmaFila(a), '1:pendiente|2:problema');
+  assert.equal(C.firmaFila([]), '');
+  assert.equal(C.firmaFila(undefined), '');
+  assert.notEqual(C.firmaFila(a), C.firmaFila([a[0], { ...a[1], estado: 'pendiente' }]));
+});

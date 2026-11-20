@@ -19,7 +19,8 @@ self.addEventListener('install', e => {
     await Promise.all(CDN.map(u => c.add(new Request(u, { mode: 'cors' })).catch(() => {})));
   }).then(() => self.skipWaiting()));
 });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
+// solo cachés viejas de Entregas: el almacén de cachés es del sitio entero (el CRM tiene las suyas, 'crm-…')
+self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('entregas-tx-') && k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 
 const copiaDe = req => caches.match(req).then(m => m || caches.match(req, { ignoreSearch: true }));
 
