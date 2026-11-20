@@ -108,7 +108,10 @@
   // tiene nada que contar (nunca se oculta con pendientes o problemas).
   const filaRedundante = (copiaSinRed, resumen) => !!copiaSinRed && !(resumen && (resumen.pendientes || resumen.problemas));
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante };
+  // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
+  const snapshotVigente = (inicio, actual) => actual === inicio;
+
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

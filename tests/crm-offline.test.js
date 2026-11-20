@@ -243,3 +243,9 @@ test('filaRedundante: solo sin pendientes ni problemas y con aviso sin red', () 
   assert.equal(C.filaRedundante(true, { pendientes: 0, problemas: 1 }), false);
   assert.equal(C.filaRedundante(false, { pendientes: 0, problemas: 0 }), false);
 });
+
+test('snapshotVigente: vieja si hubo escrituras desde el inicio de la carga', () => {
+  assert.equal(C.snapshotVigente(3, 3), true);
+  assert.equal(C.snapshotVigente(3, 4), false);
+  assert.equal(C.snapshotVigente(0, 0), true);
+});
