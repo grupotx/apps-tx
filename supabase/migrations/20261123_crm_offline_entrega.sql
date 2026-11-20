@@ -1,5 +1,5 @@
 -- CRM offline (fase 2, Task 6 revisión) — tope de reservas con vencimiento y entrega de PDF sin versión.
--- PENDIENTE: aplicar con apply_migration (nombre: crm_offline_entrega) antes de publicar (crm.html llama crm_registrar_entrega).
+-- Aplicada en producción el 2026-11-20 con apply_migration (nombre: crm_offline_entrega).
 
 -- 1) Reservar números: el tope de 40 sin usar cuenta solo reservas de los últimos 7 días.
 --    Las reservas viejas sin usar (sesión cerrada: la reserva local se borra; cotización descartada;
