@@ -40,7 +40,7 @@
         if (!q) continue;
         // Superpone los campos editados en el teléfono (idempotente).
         const v = d.version_telefono || {};
-        for (const k of Object.keys(d.cambios || {})) q[k] = k in v ? v[k] : d.cambios[k];
+        Object.assign(q, d.cambios || {}, v, { id: q.id });
         q._fila = marca(e);
       }
     }
