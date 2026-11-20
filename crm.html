@@ -499,7 +499,7 @@ const MSG_LOGIN_SIN_RED='Necesitas conexión para iniciar sesión la primera vez
 const MSG_NO_SALIR='Tienes registros sin enviar. Conéctate y espera a que se envíen antes de cerrar sesión.';
 const MSG_REQUIERE_RED='Esta acción requiere conexión. Inténtalo con señal.';
 // Acciones (data-act) que escriben directo en la base, sin pasar por la fila: requieren señal.
-const ACT_RED=new Set(['editClient','newTask','newComm','win','lose','askApproval','newProduct','editProduct','toggleProduct']);
+const ACT_RED=new Set(['newClient','editClient','newTask','newComm','win','lose','askApproval','newProduct','editProduct','toggleProduct']);
 // true (y avisa) si no hay señal: para escrituras de oficina que no pasan por la fila.
 const sinSenal=()=>{if(navigator.onLine!==false)return false;toast(MSG_REQUIERE_RED);return true};
 const esperar=ms=>new Promise(r=>setTimeout(r,ms));
@@ -510,14 +510,23 @@ const esRed=e=>TXOfflineCore.clasificarError(e)==='red';
 const TIPOS_FILA={};
 // Cada envío cuenta como escritura al empezar y al terminar: una carga que se cruce con él queda vieja (CO.snapshotVigente).
 // Envío exitoso → recarga programada (ver programarRecarga).
-function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,async(d,a,m)=>{escrituras++;try{const r=await fn(d,a,m);programarRecarga();return r}finally{escrituras++}})}
+function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,async(d,a,m)=>{escrituras++;try{const r=await fn(d,a,m);programarRecarga(m&&m.id);return r}finally{escrituras++}})}
 // Lo que un envío dejó en el servidor entra también a la copia local: al reabrir sin señal desde una copia
 // anterior, lo ya enviado (fuera de la fila) no desaparece.
 function copiaEnviado(tipo,datos,meta){if(!TXOffline.ajustarConsulta)return;const p=CO.enviadoParaCopia(tipo,datos,meta);TXOffline.ajustarConsulta('crm.datos',d=>CO.aplicarACopia(d,p)).catch(e=>console.warn('[CRM] copia local sin actualizar:',e))}
-// Después de enviar algo de la fila se recarga del servidor (pantalla y copia al día), haya o no aviso de copia.
-// Una ráfaga de envíos = una sola recarga; no pisa un formulario abierto (reintenta cada 2 s).
-let recargaProg=null;
-function programarRecarga(){clearTimeout(recargaProg);recargaProg=setTimeout(function rec(){recargaProg=null;if(!lastLoad||navigator.onLine===false)return;if(!puedeRepintar()){recargaProg=setTimeout(rec,2000);return}reloadData()},1500)}
+// Envíos en primer plano: lo que el usuario acaba de guardar con señal y espera en pantalla (S y la copia ya
+// quedan al día con lo que devuelve el envío): no piden recarga. Si no se envió mientras esperaba (sin señal),
+// sale del conjunto y su envío posterior (al volver la señal) cuenta como de fondo.
+const primerPlano=new Set();
+async function encolarAhora(tipo,datos,op){const id=await TXOffline.encolar(tipo,datos,op);if(navigator.onLine!==false)primerPlano.add(id);return id}
+async function esperarPrimerPlano(id){const r=await esperarEnvio(id);if(r.estado!=='enviado')primerPlano.delete(id);return r}
+// Envíos de fondo (fila vaciada al volver la señal, al iniciar o por el temporizador): se recarga del servidor
+// (pantalla y copia al día), haya o no aviso de copia. Una ráfaga = una sola recarga; no pisa un formulario
+// abierto (reintenta cada 2 s). Se decide al vencer el plazo: para entonces el flujo de guardado ya marcó lo suyo.
+let recargaProg=null,recargaIds=[];
+function programarRecarga(id){recargaIds.push(id);clearTimeout(recargaProg);recargaProg=setTimeout(function rec(){recargaProg=null;
+ if(recargaIds.length&&recargaIds.every(x=>x&&primerPlano.has(x))){recargaIds=[];return}
+ if(!lastLoad||navigator.onLine===false){recargaIds=[];return}if(!puedeRepintar()){recargaProg=setTimeout(rec,2000);return}recargaIds=[];reloadData()},1500)}
 // Escritura de oficina que falló por red: lo cambiado en pantalla no se guardó. Se vuelve a lo guardado
 // (servidor si responde; si no, la copia local) con la fila superpuesta. Varias fallas seguidas = una sola vuelta.
 let restauraProg=null;
@@ -1052,7 +1061,7 @@ function visitForm(clientId){
   const datos={visita:v,prospecto:newC||prospFila,tarea:tk,opp,aviso,auditoria,auditoriaProspecto};
   const archivos=photo?{[ruta]:photo}:{};
   let id=null,r;
-  try{id=await TXOffline.encolar('crm.visita',datos,{archivos,dependeDe:prospFila?c._fila.id:null})}
+  try{id=await encolarAhora('crm.visita',datos,{archivos,dependeDe:prospFila?c._fila.id:null})}
   catch(e){
    // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
    console.error(e);const mid=uid();esperandoEnvio.add(mid);
@@ -1066,7 +1075,7 @@ function visitForm(clientId){
   if(opAct){opAct.nextAction=v.next;opAct.nextDate=v.followDate}
   if(aviso)S.outbox.unshift(aviso);
   for(const a of [auditoriaProspecto,auditoria])if(a)S.audit.unshift({ts:nowIso(),user:S.me,...a});
-  if(!r){r=await esperarEnvio(id);esperandoEnvio.delete(id)}
+  if(!r){r=await esperarPrimerPlano(id);esperandoEnvio.delete(id)}
   closeModal();rerender();
   const seg=v.next&&v.followDate?' Seguimiento agendado para el '+fds(v.followDate)+'.':'';
   if(r.estado==='enviado'){const t=resolverAviso(id);const vs=S.visits.find(x=>x.id===v.id);const cid=vs&&C(vs.clientId)?vs.clientId:null;
@@ -1269,7 +1278,7 @@ async function editarPorFila(q,over,reemplaza){
  // _base (no enumerable) también fuera: una pasada de aplicarFila durante el guardado pudo tomarlo de los valores del editor
  const listo=()=>{const b=q._bak;Object.keys(q).forEach(k=>delete q[k]);delete q._base;Object.assign(q,b);delete q._edit;delete q._bak;delete q._reemplaza};
  let id=null,r=null;
- try{id=await TXOffline.encolar('crm.cotizacion.editar',datos)}
+ try{id=await encolarAhora('crm.cotizacion.editar',datos)}
  catch(e){
   // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
   console.error(e);
@@ -1286,7 +1295,7 @@ async function editarPorFila(q,over,reemplaza){
  for(const a of datos.avisos)S.outbox.unshift(a);
  S.audit.unshift({user:S.me,...datos.auditoria});
  rerender();
- if(!r)r=await esperarEnvio(id);
+ if(!r)r=await esperarPrimerPlano(id);
  await aplicarFila();rerender();
  const sq=S.quotes.find(x=>x.id===q.id)||q;
  if(r.estado==='enviado'){if(!over)toast('Cambios guardados.')}
@@ -1314,7 +1323,7 @@ async function registrarEntrega(q,o){
  const datos={id:q.id,ajena:q.userId!==S.me,linea,sentAt:o.sentAt||null,aEnviada:!!o.aEnviada,aviso:o.aviso||null,auditoria:o.auditoria?{ts:nowIso(),...o.auditoria}:null};
  if(linea)(q.history=q.history||[]).push(linea);if(o.sentAt)q.sentAt=o.sentAt;if(o.aEnviada&&q.status==='borrador')q.status='enviada';
  if(o.aviso)S.outbox.unshift(o.aviso);if(datos.auditoria)S.audit.unshift({user:S.me,...datos.auditoria});
- try{await TXOffline.encolar('crm.cotizacion.entrega',datos,{dependeDe:q._fila?q._fila.id:null})}
+ try{await encolarAhora('crm.cotizacion.entrega',datos,{dependeDe:q._fila?q._fila.id:null})}
  catch(e){console.error(e);try{escrituras++;await TIPOS_FILA['crm.cotizacion.entrega'](datos,{},{id:uid(),intentos:0})}catch(e2){console.error(e2);toast(esRed(e2)?MSG_REQUIERE_RED:'No se pudo registrar la entrega del PDF: '+esc((e2&&e2.message)||e2))}finally{escrituras++}}
 }
 
@@ -1531,7 +1540,7 @@ function quoteEditor(q,isNew){
    const prospFila=CO.prospectoParaFila(cn);
    const datos={cotizacion:nq,prospecto:prospFila,tarea:tk,opp:oppD,avisos:avisos.filter(Boolean),auditoria};
    let id=null,r;
-   try{id=await TXOffline.encolar('crm.cotizacion',datos,{dependeDe:prospFila?cn._fila.id:null})}
+   try{id=await encolarAhora('crm.cotizacion',datos,{dependeDe:prospFila?cn._fila.id:null})}
    catch(e){
     // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
     console.error(e);const mid=uid();esperandoEnvio.add(mid);
@@ -1547,7 +1556,7 @@ function quoteEditor(q,isNew){
    for(const a of datos.avisos)S.outbox.unshift(a);
    S.audit.unshift({user:S.me,...auditoria});
    reponerNumeros();
-   if(!r){r=await esperarEnvio(id);esperandoEnvio.delete(id)}
+   if(!r){r=await esperarPrimerPlano(id);esperandoEnvio.delete(id)}
    DRAFT=null;location.hash='#cotizacion/'+nq.id;
    const sq=S.quotes.find(x=>x.id===nq.id)||nq;
    if(over)setTimeout(()=>notifyModal(sq,'req',true),400);
@@ -1934,6 +1943,7 @@ sb.auth.onAuthStateChange(ev=>{
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.me&&lastLoad&&navigator.onLine!==false&&Date.now()-lastLoad>60000&&puedeRepintar())reloadData()});
 
 /* ============ EXPORT ============ */
+// Sin señal la exportación funciona igual; su línea de auditoría se omite (no hay fila para ella).
 function exportData(what){if(!can('exportar')){toast('Tu perfil no puede exportar.');return}
  let rows=[];
  if(what==='clientes')rows=[['Nombre','Razón social','RUT','Tipo','Segmento','Región','Comuna','Dirección','Teléfono','Correo','Vendedores','Última visita','Días sin visita'],...visibleClients().map(c=>{const l=lastVisit(c.id);return[c.name,c.razon,c.rut,c.type,c.segment,regName(c.region),c.comuna,c.address,c.phone,c.email,c.sellers.map(s=>U(s).name).join(' / '),l?l.date.slice(0,10):'',daysSince(c.id)>=999?'':daysSince(c.id)]})];
@@ -1943,7 +1953,7 @@ function exportData(what){if(!can('exportar')){toast('Tu perfil no puede exporta
  if(what==='actividad')rows=[['Fecha','Tipo','Vendedor','Cliente','Detalle'],...S.visits.map(v=>[v.date,'Visita',U(v.userId).name,VC(v).name,v.reason]),...S.quotes.map(q=>[q.date,'Cotización',U(q.userId).name,CQ(q).name,q.num+' '+STATUS[qStatus(q)]]),...S.tasks.map(t=>[t.date,TASKT[t.type],U(t.userId).name,(C(t.clientId)||{}).name||'',t.title])];
  openModal('Exportar '+what,`<p>${rows.length-1} filas listas para descargar en Excel.</p><div class="tbl-w" style="max-height:300px;overflow:auto"><table><thead><tr>${rows[0].map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1,11).map(r=>`<tr>${r.map(x=>`<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="small muted">Vista previa de las primeras 10 filas.</p>`,`<button class="btn" id="cpy">${ico('copy')}Copiar</button><button class="btn pri" id="xls">${ico('dl')}Descargar Excel</button>`,'wide');
  $('#cpy').onclick=()=>copyText(rows.map(r=>r.join('\t')).join('\n'));
- $('#xls').onclick=()=>{try{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]??'').length)))}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,what.slice(0,30));XLSX.writeFile(wb,`CRM_TX_${what}_${ymd(new Date())}.xlsx`);audit('Exportación',what,'Exportado a Excel',rows.length-1+' filas');closeModal()}catch(e){toast('No se pudo generar el Excel.')}}}
+ $('#xls').onclick=()=>{try{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]??'').length)))}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,what.slice(0,30));XLSX.writeFile(wb,`CRM_TX_${what}_${ymd(new Date())}.xlsx`);if(navigator.onLine!==false)audit('Exportación',what,'Exportado a Excel',rows.length-1+' filas');closeModal()}catch(e){toast('No se pudo generar el Excel.')}}}
 function copyText(t){try{navigator.clipboard.writeText(t).then(()=>toast('Copiado. Pégalo en Excel.'),()=>fallbackCopy(t))}catch(e){fallbackCopy(t)}}
 function fallbackCopy(t){const ta=document.createElement('textarea');ta.value=t;ta.style.cssText='width:100%;height:160px';const mb=document.querySelector('.mb');if(mb){mb.appendChild(ta);ta.select();toast('Selecciona y copia el texto (Ctrl+C).')}}
 
