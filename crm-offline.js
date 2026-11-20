@@ -35,7 +35,7 @@
     const pend = (entradas || []).filter((e) => e.estado === 'pendiente' || e.estado === 'problema').sort(porCreada);
     // Reversión: sin edición pendiente para la cotización, vuelven los valores del servidor
     // y se quita la marca si su entrada ya no está activa (enviada o desaparecida).
-    const conEdicion = new Set(pend.filter((e) => e.tipo === 'crm.cotizacion.editar' && e.estado === 'pendiente').map((e) => e.datos.id));
+    const conEdicion = new Set(pend.filter((e) => e.tipo === 'crm.cotizacion.editar' && e.estado === 'pendiente').map((e) => (e.datos || {}).id));
     const activas = new Set(pend.map((e) => e.id));
     for (const q of S.quotes) {
       if (q._base && !conEdicion.has(q.id)) {
@@ -44,34 +44,88 @@
       }
       if (q._fila && !activas.has(q._fila.id)) delete q._fila;
     }
-    for (const e of pend) {
-      const d = e.datos || {};
-      if (e.tipo === 'crm.visita') {
-        if (d.prospecto) agregar(S.clients, d.prospecto, e);
-        agregar(S.visits, d.visita, e);
-      } else if (e.tipo === 'crm.cotizacion') {
-        agregar(S.quotes, d.cotizacion, e);
-      } else if (e.tipo === 'crm.cotizacion.editar') {
-        const q = S.quotes.find((x) => x.id === d.id);
-        if (!q) continue;
-        // Con varias ediciones pendientes de la misma cotización gana la última (orden por creada)
-        // y _fila.id apunta a ella. En 'problema' (p. ej. CONFLICTO) no se toca nada del servidor:
-        // la decisión del jefe no debe taparse; la versión del teléfono queda en datos.version_telefono.
-        if (e.estado === 'pendiente') {
-          if (!q._base) {
-            // Original del servidor, no enumerable para que nunca se serialice.
-            const base = {};
-            for (const k of [...CAMPOS_EDITABLES, 'status']) base[k] = clonar(q[k]);
-            Object.defineProperty(q, '_base', { value: base, enumerable: false, writable: true, configurable: true });
-          }
-          const cambios = d.cambios || {};
-          for (const k of CAMPOS_EDITABLES) if (k in cambios) q[k] = clonar(cambios[k]);
-          if (d.requiereAprobacion) q.status = 'pendiente';
+    // Lo agregado por la fila (visitas, prospectos, tareas, oportunidades) se queda en pantalla al
+    // enviarse; solo pierde la marca "Pendiente de enviar".
+    for (const k of ['visits', 'clients', 'tasks', 'opps']) {
+      for (const x of S[k] || []) if (x._fila && !activas.has(x._fila.id)) delete x._fila;
+    }
+    for (const e of pend) superponerEntrada(S, e);
+  }
+
+  // Superpone una sola entrada (sin limpiar marcas de otras): para mostrar al tiro lo recién encolado.
+  function superponerEntrada(S, e) {
+    const d = e.datos || {};
+    if (e.tipo === 'crm.visita') {
+      if (d.prospecto) agregar(S.clients, d.prospecto, e);
+      agregar(S.visits, d.visita, e);
+      if (d.tarea && S.tasks) agregar(S.tasks, d.tarea, e);
+      if (d.opp && d.opp.modo === 'nueva' && S.opps) agregar(S.opps, d.opp.obj, e);
+    } else if (e.tipo === 'crm.cotizacion') {
+      agregar(S.quotes, d.cotizacion, e);
+    } else if (e.tipo === 'crm.cotizacion.editar') {
+      const q = S.quotes.find((x) => x.id === d.id);
+      if (!q) return;
+      // Con varias ediciones pendientes de la misma cotización gana la última (orden por creada)
+      // y _fila.id apunta a ella. En 'problema' (p. ej. CONFLICTO) no se toca nada del servidor:
+      // la decisión del jefe no debe taparse; la versión del teléfono queda en datos.version_telefono.
+      if (e.estado === 'pendiente') {
+        if (!q._base) {
+          // Original del servidor, no enumerable para que nunca se serialice.
+          const base = {};
+          for (const k of [...CAMPOS_EDITABLES, 'status']) base[k] = clonar(q[k]);
+          Object.defineProperty(q, '_base', { value: base, enumerable: false, writable: true, configurable: true });
         }
-        q._fila = marca(e);
+        const cambios = d.cambios || {};
+        for (const k of CAMPOS_EDITABLES) if (k in cambios) q[k] = clonar(cambios[k]);
+        if (d.requiereAprobacion) q.status = 'pendiente';
       }
+      q._fila = marca(e);
     }
   }
+
+  // ── Visitas: el prospecto ya existía en el servidor (crm_resolver_cliente devolvió otro id) ──
+  // Copia de los datos con visita, tarea y oportunidad apuntando al cliente nuevoId (no muta datos).
+  function reasignarCliente(datos, nuevoId) {
+    const r = clonar(datos);
+    if (r.visita) r.visita.clientId = nuevoId;
+    if (r.tarea) r.tarea.clientId = nuevoId;
+    if (r.opp && r.opp.obj) r.opp.obj.clientId = nuevoId;
+    return r;
+  }
+
+  // En memoria: quita el prospecto creado en el teléfono (no existe en el servidor) y mueve la
+  // visita, tarea y oportunidad de esa entrada al cliente nuevoId.
+  function reasignarEnS(S, datos, nuevoId) {
+    const viejo = datos.prospecto && datos.prospecto.id;
+    if (viejo && viejo !== nuevoId) {
+      const i = S.clients.findIndex((c) => c.id === viejo);
+      if (i >= 0) S.clients.splice(i, 1);
+    }
+    const mover = (lista, obj) => {
+      const x = obj && (lista || []).find((y) => y.id === obj.id);
+      if (x) x.clientId = nuevoId;
+    };
+    mover(S.visits, datos.visita);
+    mover(S.tasks, datos.tarea);
+    if (datos.opp && datos.opp.modo === 'nueva') mover(S.opps, datos.opp.obj);
+  }
+
+  // Entrada descartada: lo que solo existía por ella (marcado con su id) sale de S.
+  function quitarEntrada(S, id) {
+    // (cotizaciones: las edita el flujo de cotizaciones; una editada del servidor no debe salir)
+    for (const k of ['visits', 'clients', 'tasks', 'opps']) {
+      const l = S[k] || [];
+      for (let i = l.length - 1; i >= 0; i--) if (l[i]._fila && l[i]._fila.id === id) l.splice(i, 1);
+    }
+  }
+
+  const MSG_CLIENTE_EXISTE = 'Ese RUT ya pertenece a un cliente de otro vendedor. Habla con tu jefatura.';
+  // crm_resolver_cliente lanza 'CLIENTE_EXISTE: …' (cliente que este usuario no puede ver): regla, no se reintenta.
+  function errorClienteExiste(error) {
+    const m = typeof error === 'string' ? error : error && error.message;
+    return typeof m === 'string' && m.includes('CLIENTE_EXISTE') ? MSG_CLIENTE_EXISTE : null;
+  }
+  const textoProspectoExistia = (nombre) => 'El prospecto «' + nombre + '» ya existía; la visita quedó en ese cliente.';
 
   const esConflicto = (error) => {
     const m = typeof error === 'string' ? error : error && error.message;
@@ -111,7 +165,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

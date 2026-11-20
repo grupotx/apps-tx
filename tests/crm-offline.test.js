@@ -249,3 +249,117 @@ test('snapshotVigente: vieja si hubo escrituras desde el inicio de la carga', ()
   assert.equal(C.snapshotVigente(3, 4), false);
   assert.equal(C.snapshotVigente(0, 0), true);
 });
+
+// ── Visitas (Task 5) ──
+const S1 = () => ({ clients: [], visits: [], quotes: [], tasks: [], opps: [] });
+const visitaDatos = () => ({
+  visita: { id: 'v1', clientId: 'c1' },
+  prospecto: { id: 'c1', name: 'Obra X' },
+  tarea: { id: 't1', clientId: 'c1', title: 'Seguimiento' },
+  opp: { modo: 'nueva', obj: { id: 'o1', clientId: 'c1' } },
+});
+
+test('aplicarFilaCRM: visita con tarea y oportunidad nueva las agrega marcadas', () => {
+  const S = S1();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.visita', visitaDatos())]);
+  assert.equal(S.tasks.length, 1);
+  assert.equal(S.tasks[0]._fila.id, 'e1');
+  assert.equal(S.opps.length, 1);
+  assert.equal(S.opps[0]._fila.id, 'e1');
+});
+
+test('aplicarFilaCRM: oportunidad a actualizar no se agrega; S sin tasks/opps no rompe', () => {
+  const S = S1();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.visita', { visita: { id: 'v1' }, opp: { modo: 'actualizar', obj: { id: 'o9' } } })]);
+  assert.equal(S.opps.length, 0);
+  const S2 = S0();
+  C.aplicarFilaCRM(S2, [ent('e1', 'crm.visita', visitaDatos())]);
+  assert.equal(S2.visits.length, 1);
+});
+
+test('aplicarFilaCRM: visita enviada quita la marca de visita, prospecto, tarea y oportunidad (los objetos quedan)', () => {
+  const S = S1();
+  const e = ent('e1', 'crm.visita', visitaDatos());
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [{ ...e, estado: 'enviado' }]);
+  for (const k of ['visits', 'clients', 'tasks', 'opps']) {
+    assert.equal(S[k].length, 1, k);
+    assert.equal(S[k][0]._fila, undefined, k);
+  }
+});
+
+test('aplicarFilaCRM: la marca se queda mientras la entrada siga activa', () => {
+  const S = S1();
+  const e = ent('e1', 'crm.visita', visitaDatos());
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [{ ...e, estado: 'problema', error: 'x' }]);
+  assert.equal(S.visits[0]._fila.estado, 'problema');
+  assert.equal(S.clients[0]._fila.estado, 'problema');
+});
+
+test('aplicarFilaCRM: edición sin datos no rompe', () => {
+  const S = S0();
+  assert.doesNotThrow(() => C.aplicarFilaCRM(S, [ent('e1', 'crm.cotizacion.editar', undefined)]));
+});
+
+test('superponerEntrada: agrega una entrada sin limpiar las marcas de otras', () => {
+  const S = S1();
+  S.visits.push({ id: 'v0', _fila: { estado: 'pendiente', error: null, id: 'e0' } });
+  C.superponerEntrada(S, ent('e1', 'crm.visita', visitaDatos()));
+  assert.equal(S.visits.length, 2);
+  assert.equal(S.visits[0]._fila.id, 'e0');
+  assert.equal(S.visits[1]._fila.id, 'e1');
+  assert.equal(S.clients[0]._fila.id, 'e1');
+});
+
+test('reasignarCliente: cambia el cliente de visita, tarea y oportunidad sin mutar los datos', () => {
+  const d = visitaDatos();
+  const r = C.reasignarCliente(d, 'c9');
+  assert.equal(r.visita.clientId, 'c9');
+  assert.equal(r.tarea.clientId, 'c9');
+  assert.equal(r.opp.obj.clientId, 'c9');
+  assert.equal(d.visita.clientId, 'c1');
+  assert.equal(d.tarea.clientId, 'c1');
+  assert.equal(d.opp.obj.clientId, 'c1');
+  // sin tarea / opp no rompe; mismo id devuelve lo mismo
+  const r2 = C.reasignarCliente({ visita: { id: 'v', clientId: 'c1' }, prospecto: { id: 'c1' }, tarea: null, opp: null }, 'c2');
+  assert.equal(r2.visita.clientId, 'c2');
+  assert.equal(r2.tarea, null);
+});
+
+test('reasignarEnS: quita el prospecto del teléfono y mueve visita, tarea y oportunidad al cliente existente', () => {
+  const S = S1();
+  const d = visitaDatos();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.visita', d)]);
+  S.clients.push({ id: 'c9', name: 'Obra X' });
+  S.visits.push({ id: 'otra', clientId: 'c1' });
+  C.reasignarEnS(S, d, 'c9');
+  assert.deepEqual(S.clients.map((c) => c.id), ['c9']);
+  assert.equal(S.visits.find((v) => v.id === 'v1').clientId, 'c9');
+  assert.equal(S.visits.find((v) => v.id === 'otra').clientId, 'c1');
+  assert.equal(S.tasks[0].clientId, 'c9');
+  assert.equal(S.opps[0].clientId, 'c9');
+});
+
+test('errorClienteExiste: traduce CLIENTE_EXISTE a un mensaje claro; otros errores no', () => {
+  assert.equal(C.errorClienteExiste({ message: 'CLIENTE_EXISTE: 76.123.456-7 ya está registrado con otro vendedor' }),
+    'Ese RUT ya pertenece a un cliente de otro vendedor. Habla con tu jefatura.');
+  assert.equal(C.errorClienteExiste('CLIENTE_EXISTE: x'), 'Ese RUT ya pertenece a un cliente de otro vendedor. Habla con tu jefatura.');
+  assert.equal(C.errorClienteExiste({ message: 'otro' }), null);
+  assert.equal(C.errorClienteExiste(null), null);
+});
+
+test('textoProspectoExistia', () => {
+  assert.equal(C.textoProspectoExistia('Obra X'), 'El prospecto «Obra X» ya existía; la visita quedó en ese cliente.');
+});
+
+test('quitarEntrada: saca de S lo agregado por esa entrada (descartada) y nada más', () => {
+  const S = S1();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.visita', visitaDatos()), ent('e2', 'crm.visita', { visita: { id: 'v2' } }, 'pendiente', 1)]);
+  S.visits.push({ id: 'vs' });
+  C.quitarEntrada(S, 'e1');
+  assert.deepEqual(S.visits.map((v) => v.id), ['v2', 'vs']);
+  assert.equal(S.clients.length, 0);
+  assert.equal(S.tasks.length, 0);
+  assert.equal(S.opps.length, 0);
+});

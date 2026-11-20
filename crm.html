@@ -504,7 +504,8 @@ const esRed=e=>TXOfflineCore.clasificarError(e)==='red';
 // Se registran todos juntos en boot, ANTES de TXOffline.iniciar (iniciar envía de inmediato lo que haya en la fila).
 // Una entrada de un tipo sin handler no rompe nada: la fila la deja 'problema' y aplicarFilaCRM la ignora.
 const TIPOS_FILA={};
-function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,fn)}
+// Cada envío cuenta como escritura al empezar y al terminar: una carga que se cruce con él queda vieja (CO.snapshotVigente).
+function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,async(d,a,m)=>{escrituras++;try{return await fn(d,a,m)}finally{escrituras++}})}
 // Usuario de la sesión guardada en el equipo (para abrir sin señal cuando supabase no puede renovar el token).
 function usuarioGuardado(){try{const s=JSON.parse(localStorage.getItem(AUTH_KEY)||'null');return (s&&s.user)||null}catch(_){return null}}
 async function hayConexion(){
@@ -526,9 +527,16 @@ function mostrarCopia(r,modo){const el=$('#copiaInd');if(!el)return;const c=!!(r
 function ajustarFilaInd(){const el=$('#filaInd');if(el)el.hidden=CO.filaRedundante(copiaSinRed,resumenFila)||!el.textContent}
 // Hace visibles en S los envíos pendientes/con problema de la fila (idempotente).
 let firmaVista='';
-async function aplicarFila(){let ents;try{ents=await TXOffline.entradas()}catch(_){return false}CO.aplicarFilaCRM(S,ents);const f=CO.firmaFila(ents),cambio=f!==firmaVista;firmaVista=f;return cambio}
+async function aplicarFila(){let ents;try{ents=await TXOffline.entradas()}catch(_){return false}CO.aplicarFilaCRM(S,ents);const f=CO.firmaFila(ents),cambio=f!==firmaVista;firmaVista=f;const av=avisosEnviados(ents);return cambio||av}
 const puedeRepintar=()=>!$('#modalRoot').innerHTML&&!/cotizacion\/nueva/.test(location.hash)&&!S.quotes.some(q=>q._edit);
 window.addEventListener('txoffline:cambio',async()=>{if(!lastLoad)return;const cambio=await aplicarFila();if(cambio&&$('#gate').hidden&&puedeRepintar())rerender()});
+// Visitas cuyo prospecto ya existía en el servidor: el handler deja aquí el aviso (id de entrada → {texto,datos,nuevoId}).
+// Se resuelve una sola vez, cuando la entrada ya no está activa (enviada): toast, prospecto del teléfono fuera de S
+// y visita/tarea/oportunidad al cliente existente (si ese cliente no está en pantalla, se recarga).
+const avisosVisita=new Map(),esperandoEnvio=new Set();
+function resolverAviso(id){const a=avisosVisita.get(id);if(!a)return null;avisosVisita.delete(id);CO.reasignarEnS(S,a.datos,a.nuevoId);
+ if(!C(a.nuevoId)){const rec=()=>{if(!puedeRepintar()){setTimeout(rec,2000);return}reloadData()};setTimeout(rec,0)}return a.texto}
+function avisosEnviados(ents){let hubo=false;for(const id of [...avisosVisita.keys()])if(!esperandoEnvio.has(id)&&!ents.some(e=>e.id===id)){const t=resolverAviso(id);if(t){toast(esc(t));hubo=true}}return hubo}
 // Al volver la señal, si se estaba mostrando la copia, se recarga (sin pisar un formulario abierto).
 window.addEventListener('online',()=>{if(lastLoad&&copiaSinRed&&puedeRepintar())reloadData()});
 TXOffline.montarIndicador($('#filaInd'));
@@ -625,6 +633,9 @@ async function loadAll(opts){
  if(r.desdeCache&&opts&&opts.conservar&&lastLoad)return r;
  aplicarDatos(r.datos);
  await aplicarFila();
+ // Un envío de la fila (o una escritura) se cruzó con esta carga: lo enviado puede faltar en la foto
+ // y ya no está en la fila para superponerse. Se recarga una vez más cuando se pueda repintar.
+ if(!r.desdeCache&&!CO.snapshotVigente(escInicio,escrituras)){const rec=()=>{if(gen!==genCarga)return;if(!puedeRepintar()){setTimeout(rec,2000);return}reloadData()};setTimeout(rec,300)}
  return r;
 }
 // Termina una carga lenta: guarda la copia y aplica los datos frescos en cuanto se pueda repintar
@@ -687,7 +698,8 @@ function recommend(c){const d=daysSince(c.id);const lq=lastQuote(c.id);const oq=
  return 'Mantener contacto';}
 function avatar(u){u=(typeof u==='string'||!u)?U(u):u;const i=(u.name||'?').split(' ').map(x=>x[0]).slice(0,2).join('');return `<span class="avatar" style="background:${u.color}" title="${esc(u.name)}">${i}</span>`}
 function audit(entity,ref,action,detail){const a={ts:nowIso(),user:S.me,entity,ref,action,detail:detail||''};S.audit.unshift(a);dbIns('audit',a).catch(ignore)}
-function sendMail(ev,subject,body,extraTo){const to=[...(S.cfg.on[ev]?S.cfg.emails[ev]:[]),...(extraTo||[])];if(!to.length)return null;const m={id:uid(),ts:nowIso(),event:ev,to,subject,body,from:me().email};S.outbox.unshift(m);dbIns('outbox',m).catch(ignore);return m}
+function armarMail(ev,subject,body,extraTo){const to=[...(S.cfg.on[ev]?S.cfg.emails[ev]:[]),...(extraTo||[])];if(!to.length)return null;return {id:uid(),ts:nowIso(),event:ev,to,subject,body,from:me().email}}
+function sendMail(ev,subject,body,extraTo){const m=armarMail(ev,subject,body,extraTo);if(!m)return null;S.outbox.unshift(m);dbIns('outbox',m).catch(ignore);return m}
 
 /* ============ alerts ============ */
 function alertsFor(){
@@ -807,7 +819,7 @@ function vClients(){
   let rows=cl.filter(c=>{const q=norm(CF.q);if(q&&!norm([c.name,c.razon,c.rut,c.comuna,c.email,(c.contacts||[]).map(x=>x.name).join(' ')].join(' ')).includes(q))return false;if(CF.region&&c.region!==CF.region)return false;if(CF.seller&&!c.sellers.includes(CF.seller))return false;if(CF.vsap&&c.vendedor!==CF.vsap)return false;if(CF.age&&daysSince(c.id)<+CF.age)return false;if(CF.seg&&c.segment!==CF.seg)return false;return true});
   const sorters={compra:(a,b)=>actKey(b).localeCompare(actKey(a)),name:(a,b)=>a.name.localeCompare(b.name),days:(a,b)=>daysSince(b.id)-daysSince(a.id),region:(a,b)=>a.region.localeCompare(b.region)||a.comuna.localeCompare(b.comuna)};
   rows.sort(sorters[CF.sort]);const total=rows.length;const LIM=300;rows=rows.slice(0,LIM);
-  $('#cl-table').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th class="s" data-sort="name">Cliente ↕</th><th class="hide-m">RUT</th><th class="s" data-sort="region">Región / comuna ↕</th><th class="hide-m">Vendedor</th><th class="s" data-sort="days">Última visita ↕</th><th class="hide-m">Última cotización</th></tr></thead><tbody>${rows.map(c=>{const lq=lastQuote(c.id);const lv=lastVisit(c.id);return `<tr class="click" data-go="#cliente/${c.id}"><td><b>${esc(c.name)}</b> ${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto</span>':`<span class="chip" title="Segmento">${c.segment}</span>`}<div class="small muted">${esc(c.type)}</div></td><td class="hide-m mono small">${c.rut}</td><td>${esc(c.comuna)}<div class="small muted">${regName(c.region)}</div></td><td class="hide-m"><span class="row">${c.sellers.map(avatar).join('')}</span>${c.vendedor?`<div class="small muted">SAP: ${esc(c.vendedor)}</div>`:''}</td><td>${agePill(daysSince(c.id))}<div class="small muted">${lv?fd(lv.date.slice(0,10)):''}</div></td><td class="hide-m">${lq?`<span class="mono small">${lq.num}</span><br>${stPill(lq)}`:'<span class="muted">—</span>'}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${total} de ${cl.length} clientes${total>LIM?` · se muestran los primeros ${LIM}; usa la búsqueda o los filtros para encontrar el resto`:''}</p>`:'<div class="card empty">No hay clientes que coincidan con los filtros.</div>';
+  $('#cl-table').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th class="s" data-sort="name">Cliente ↕</th><th class="hide-m">RUT</th><th class="s" data-sort="region">Región / comuna ↕</th><th class="hide-m">Vendedor</th><th class="s" data-sort="days">Última visita ↕</th><th class="hide-m">Última cotización</th></tr></thead><tbody>${rows.map(c=>{const lq=lastQuote(c.id);const lv=lastVisit(c.id);return `<tr class="click" data-go="#cliente/${c.id}"><td><b>${esc(c.name)}</b> ${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto</span>':`<span class="chip" title="Segmento">${c.segment}</span>`} ${filaChip(c)}<div class="small muted">${esc(c.type)}</div></td><td class="hide-m mono small">${c.rut}</td><td>${esc(c.comuna)}<div class="small muted">${regName(c.region)}</div></td><td class="hide-m"><span class="row">${c.sellers.map(avatar).join('')}</span>${c.vendedor?`<div class="small muted">SAP: ${esc(c.vendedor)}</div>`:''}</td><td>${agePill(daysSince(c.id))}<div class="small muted">${lv?fd(lv.date.slice(0,10)):''}</div></td><td class="hide-m">${lq?`<span class="mono small">${lq.num}</span><br>${stPill(lq)}`:'<span class="muted">—</span>'}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${total} de ${cl.length} clientes${total>LIM?` · se muestran los primeros ${LIM}; usa la búsqueda o los filtros para encontrar el resto`:''}</p>`:'<div class="card empty">No hay clientes que coincidan con los filtros.</div>';
  };
  draw();
  M().oninput=e=>{const id=e.target.id;if(id&&id.startsWith('cf-')){CF[id.slice(3)]=e.target.value;draw()}};
@@ -845,14 +857,14 @@ function vClient(id){
  const icmap={v:['v','pin'],q:['q','doc'],w:['w','check'],l:['l','x'],m:['','phone'],a:['','hist']};
  M().innerHTML=`
  <div class="ph"><div><div class="eyebrow"><a href="#clientes">Clientes</a> / ficha 360°</div><h1>${esc(c.name)}</h1>
-  <p class="row">${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto · completa RUT y datos con Editar</span>':''}<span class="mono small">${c.rut}</span><span class="chip">Segmento ${c.segment}</span><span class="chip">${esc(c.type)}</span><span class="chip">${esc(c.comuna)}, ${regName(c.region)}</span>${agePill(d)}</p></div>
+  <p class="row">${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto · completa RUT y datos con Editar</span>':''}${filaChip(c)}<span class="mono small">${c.rut}</span><span class="chip">Segmento ${c.segment}</span><span class="chip">${esc(c.type)}</span><span class="chip">${esc(c.comuna)}, ${regName(c.region)}</span>${agePill(d)}</p></div>
   <div class="row">${can('registrar_visita')?`<button class="btn pri" data-act="newVisit" data-client="${id}">${ico('pin')}Registrar visita</button>`:''}${can('cotizar')?`<button class="btn" data-act="newQuote" data-client="${id}">${ico('doc')}Nueva cotización</button>`:''}<button class="btn" data-act="newTask" data-client="${id}">${ico('cal')}Actividad</button><button class="btn" data-act="newComm" data-client="${id}">${ico('phone')}Comunicación</button>${can('crear_cliente')?`<button class="btn ghost" data-act="editClient" data-id="${id}">${ico('edit')}Editar</button>`:''}</div></div>
  <div class="kpis">${kpi('Monto cotizado',clpK(cot),qs.length+' cotizaciones')}${kpi('Ventas ganadas',clpK(wonAmt),won.length+' pedidos')}${kpi('Conversión',pct(closed.length?won.length/closed.length:NaN),'sobre cotizaciones cerradas')}${kpi('Visitas',vs.length,vs[0]?'última '+fd(vs[0].date.slice(0,10)):'sin registro')}${kpi('Tareas pendientes',ts.length,ts[0]?'próxima '+fds(ts[0].date):'')}</div>
  <div class="grid g-main">
   <div class="grid" style="align-content:start">
    <div class="card"><div class="card-h"><h2>Historial de actividad</h2></div>
     <div class="tabs" id="tl-tabs">${[['todo','Todo'],['v','Visitas'],['q','Cotizaciones y pedidos'],['m','Comunicaciones'],['a','Cambios']].map(([k,l])=>`<button data-tl="${k}" class="${C360tab===k?'on':''}">${l}<span class="c">${tl.filter(filt[k]).length}</span></button>`).join('')}</div>
-    <div>${tl.filter(filt[C360tab]).slice(0,40).map(x=>`<div class="list-item ${x.link?'click':''}" ${x.link?`data-go="${x.link}" style="cursor:pointer"`:''}><div class="ic ${icmap[x.k][0]}">${ico(icmap[x.k][1])}</div><div class="grow"><b>${esc(x.t)}</b><div class="small" style="color:var(--fg-2)">${esc(x.s)}</div>${x.k==='v'&&x.extra?`<div class="small muted">Próximo paso: ${esc(x.extra.next)} · seguimiento ${fds(x.extra.followDate)} ${x.extra.photo?' · 📷 foto adjunta':''}${x.extra.gps?' · GPS':''}</div>`:''}<div class="small muted">${fdt(x.ts)} · ${esc(U(x.u).name)}</div></div></div>`).join('')||'<div class="empty">Sin registros.</div>'}</div>
+    <div>${tl.filter(filt[C360tab]).slice(0,40).map(x=>`<div class="list-item ${x.link?'click':''}" ${x.link?`data-go="${x.link}" style="cursor:pointer"`:''}><div class="ic ${icmap[x.k][0]}">${ico(icmap[x.k][1])}</div><div class="grow"><b>${esc(x.t)}</b><div class="small" style="color:var(--fg-2)">${esc(x.s)}</div>${x.k==='v'&&x.extra?`<div class="small muted">Próximo paso: ${esc(x.extra.next)} · seguimiento ${fds(x.extra.followDate)} ${x.extra.photo?' · 📷 foto adjunta':''}${x.extra.gps?' · GPS':''}</div>${filaChip(x.extra)?`<div>${filaChip(x.extra)}</div>${filaAcc(x.extra)}`:''}`:''}<div class="small muted">${fdt(x.ts)} · ${esc(U(x.u).name)}</div></div></div>`).join('')||'<div class="empty">Sin registros.</div>'}</div>
    </div>
    <div class="card"><div class="card-h"><h2>Cotizaciones</h2>${can('cotizar')?`<button class="btn sm" data-act="newQuote" data-client="${id}">${ico('plus')}Nueva</button>`:''}</div>
     ${qs.length?`<div class="tbl-w"><table><thead><tr><th>N°</th><th>Fecha</th><th class="r">Total</th><th>Estado</th><th class="hide-m">Pedido</th></tr></thead><tbody>${qs.map(q=>`<tr class="click" data-go="#cotizacion/${q.id}"><td class="mono small">${q.num}</td><td>${fd(q.date)}</td><td class="r num">${clp(qTotals(q).total)}</td><td>${stPill(q)}</td><td class="hide-m mono small">${q.won?q.won.order:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Sin cotizaciones.</div>'}
@@ -867,7 +879,7 @@ function vClient(id){
    <div class="card"><h2>Tareas pendientes</h2>${ts.length?ts.map(taskRow).join(''):'<div class="empty">Sin tareas pendientes.</div>'}</div>
   </div>
  </div>`;
- M().onclick=e=>{const t=e.target.closest('[data-tl]');if(t){C360tab=t.dataset.tl;vClient(id)}};
+ M().onclick=e=>{const b=e.target.closest('[data-fila-acc]');if(b){accionFilaCRM(b);return}const t=e.target.closest('[data-tl]');if(t){C360tab=t.dataset.tl;vClient(id)}};
  M().oninput=null;M().onchange=null;
 }
 
@@ -926,13 +938,23 @@ function vVisits(){
  M().innerHTML=`<div class="ph"><div><h1>Visitas comerciales</h1><p>${vs.length} visitas registradas. Cada visita queda en el historial del cliente.</p></div><div class="row">${can('exportar')?`<button class="btn" data-act="export" data-what="visitas">${ico('dl')}Exportar</button>`:''}<a class="btn" href="#mapa">${ico('map')}Ver en mapa</a>${can('registrar_visita')?`<button class="btn pri" data-act="newVisit">${ico('plus')}Registrar visita</button>`:''}</div></div>
  <div class="filters"><input type="search" id="vf-q" placeholder="Cliente, motivo, comentario…" value="${esc(VF.q)}">${can('ver_todo')?`<select id="vf-seller"><option value="">Todos los vendedores</option>${S.users.filter(u=>u.role==='vendedor').map(u=>`<option value="${u.id}" ${VF.seller===u.id?'selected':''}>${u.name}</option>`).join('')}</select>`:''}<label class="small muted">Desde <input type="date" id="vf-from" value="${VF.from}"></label><label class="small muted">Hasta <input type="date" id="vf-to" value="${VF.to}"></label></div><div id="vt"></div>`;
  const draw=()=>{const rows=vs.filter(v=>{const c=VC(v);if(VF.q&&!norm(c.name+v.reason+v.comments+v.result).includes(norm(VF.q)))return false;if(VF.seller&&v.userId!==VF.seller)return false;if(VF.from&&v.date.slice(0,10)<VF.from)return false;if(VF.to&&v.date.slice(0,10)>VF.to)return false;return true}).sort((a,b)=>b.date.localeCompare(a.date));
-  $('#vt').innerHTML=`<div class="tbl-w"><table><thead><tr><th>Fecha</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Motivo</th><th class="hide-m">Resultado</th><th class="hide-m">Seguimiento</th><th class="hide-m">Evidencia</th></tr></thead><tbody>${rows.slice(0,150).map(v=>{const c=VC(v);return `<tr class="click" data-visit="${v.id}"><td class="small">${fdt(v.date)}</td><td><b>${esc(c.name)}</b><div class="small muted">${esc(c.comuna)}</div></td><td class="hide-m">${esc(U(v.userId).name)}</td><td>${esc(v.reason)}</td><td class="hide-m small">${esc(v.result)}</td><td class="hide-m small">${fds(v.followDate)}</td><td class="hide-m small">${v.photo?'Foto':''}${v.photo&&v.gps?' · ':''}${v.gps?'GPS':''}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${rows.length} visitas${rows.length>150?' (mostrando 150)':''}</p>`};
+  $('#vt').innerHTML=`<div class="tbl-w"><table><thead><tr><th>Fecha</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Motivo</th><th class="hide-m">Resultado</th><th class="hide-m">Seguimiento</th><th class="hide-m">Evidencia</th></tr></thead><tbody>${rows.slice(0,150).map(v=>{const c=VC(v);return `<tr class="click" data-visit="${v.id}"><td class="small">${fdt(v.date)}</td><td><b>${esc(c.name)}</b> ${filaChip(v)}<div class="small muted">${esc(c.comuna)}</div>${filaAcc(v)}</td><td class="hide-m">${esc(U(v.userId).name)}</td><td>${esc(v.reason)}</td><td class="hide-m small">${esc(v.result)}</td><td class="hide-m small">${fds(v.followDate)}</td><td class="hide-m small">${v.photo?'Foto':''}${v.photo&&v.gps?' · ':''}${v.gps?'GPS':''}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${rows.length} visitas${rows.length>150?' (mostrando 150)':''}</p>`};
  draw();M().oninput=e=>{if(e.target.id&&e.target.id.startsWith('vf-')){VF[e.target.id.slice(3)]=e.target.value;draw()}};M().onchange=M().oninput;
- M().onclick=e=>{const r=e.target.closest('[data-visit]');if(r)showVisit(r.dataset.visit)};
+ M().onclick=e=>{const b=e.target.closest('[data-fila-acc]');if(b){accionFilaCRM(b);return}const r=e.target.closest('[data-visit]');if(r)showVisit(r.dataset.visit)};
 }
-function showVisit(id){const v=S.visits.find(x=>x.id===id);const c=VC(v);
- openModal('Visita · '+esc(c.name),`<dl class="kv"><dt>Fecha y hora</dt><dd>${fdt(v.date)}</dd><dt>Vendedor</dt><dd>${esc(U(v.userId).name)}</dd><dt>Dirección</dt><dd>${esc(v.address)}</dd><dt>Motivo</dt><dd>${esc(v.reason)}</dd><dt>Comentarios</dt><dd>${esc(v.comments)}</dd><dt>Resultado</dt><dd>${esc(v.result)}</dd><dt>Próximo paso</dt><dd>${esc(v.next)}</dd><dt>Fecha seguimiento</dt><dd>${fd(v.followDate)}</dd><dt>Ubicación</dt><dd class="small"><span class="mono">${(+v.lat).toFixed(5)}, ${(+v.lng).toFixed(5)}</span> ${v.gps?'(GPS del teléfono)':'(comuna del cliente)'} · <a href="https://www.google.com/maps?q=${v.lat},${v.lng}" target="_blank" rel="noopener">Abrir en mapa</a></dd><dt>Evidencia</dt><dd id="vPhoto">${v.photo?'Cargando foto…':'Sin foto'}</dd></dl>`,c.id?`<a class="btn" href="#cliente/${c.id}">Ver ficha del cliente</a>`:'','narrow');
- if(v.photo)sb.storage.from('crm-visitas').createSignedUrl(v.photo,3600).then(async({data,error})=>{let u=error?'':data.signedUrl;if(!u&&window.fotoArchivada)u=await fotoArchivada('crm-visitas',v.photo).catch(()=>'');const el=$('#vPhoto');if(!el)return;el.innerHTML=!u?'No se pudo cargar la foto.':`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="Foto de la visita" style="max-height:260px;border-radius:8px"></a>`})}
+// Lo registrado en el teléfono que aún no llega al servidor (_fila): chip y, si falló, Reintentar / Descartar.
+function filaChip(x){const f=x&&x._fila;if(!f)return '';return f.estado==='problema'?`<span class="chip" style="color:var(--bad);white-space:normal">No se pudo enviar: ${esc(f.error||'')}</span>`:'<span class="chip" style="color:var(--amber)">Pendiente de enviar</span>'}
+function filaAcc(x){const f=x&&x._fila;return f&&f.estado==='problema'?`<span class="row" style="margin-top:4px"><button type="button" class="btn sm" data-fila-acc="reintentar" data-eid="${f.id}">${ico('send')}Reintentar</button><button type="button" class="btn sm ghost" data-fila-acc="descartar" data-eid="${f.id}">${ico('x')}Descartar</button></span>`:''}
+async function accionFilaCRM(b){const eid=b.dataset.eid,acc=b.dataset.filaAcc;
+ if(acc==='descartar'){if(!confirm('¿Descartar la visita sin enviar? Se borrará del teléfono (foto incluida) y no se enviará.'))return;CO.quitarEntrada(S,eid);try{await TXOffline.descartar(eid)}catch(e){console.error(e)}toast('Visita descartada.')}
+ else{b.disabled=true;esperandoEnvio.add(eid);try{await Promise.race([TXOffline.reintentar(eid),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
+  let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===eid)}catch(_){}
+  toast(!e?esc(resolverAviso(eid)||'Visita enviada.'):e.estado==='problema'?'Sigue con problema: '+esc(e.error||''):'Pendiente de enviar. Se enviará al volver la señal.')}
+ closeModal();await aplicarFila();rerender()}
+function showVisit(id){const v=S.visits.find(x=>x.id===id);if(!v){toast('La visita ya no está en este equipo.');return}const c=VC(v);
+ openModal('Visita · '+esc(c.name),`<dl class="kv"><dt>Fecha y hora</dt><dd>${fdt(v.date)}</dd><dt>Vendedor</dt><dd>${esc(U(v.userId).name)}</dd><dt>Dirección</dt><dd>${esc(v.address)}</dd><dt>Motivo</dt><dd>${esc(v.reason)}</dd><dt>Comentarios</dt><dd>${esc(v.comments)}</dd><dt>Resultado</dt><dd>${esc(v.result)}</dd><dt>Próximo paso</dt><dd>${esc(v.next)}</dd><dt>Fecha seguimiento</dt><dd>${fd(v.followDate)}</dd><dt>Ubicación</dt><dd class="small"><span class="mono">${(+v.lat).toFixed(5)}, ${(+v.lng).toFixed(5)}</span> ${v.gps?'(GPS del teléfono)':'(comuna del cliente)'} · <a href="https://www.google.com/maps?q=${v.lat},${v.lng}" target="_blank" rel="noopener">Abrir en mapa</a></dd><dt>Evidencia</dt><dd id="vPhoto">${!v.photo?'Sin foto':v._fila?'Foto guardada en el teléfono; se verá cuando la visita se envíe.':'Cargando foto…'}</dd>${v._fila?`<dt>Envío</dt><dd>${filaChip(v)}${filaAcc(v)}</dd>`:''}</dl>`,c.id?`<a class="btn" href="#cliente/${c.id}">Ver ficha del cliente</a>`:'','narrow');
+ const mb=$('#modalRoot .mb');if(mb)mb.onclick=e=>{const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
+ if(v.photo&&!v._fila)sb.storage.from('crm-visitas').createSignedUrl(v.photo,3600).then(async({data,error})=>{let u=error?'':data.signedUrl;if(!u&&window.fotoArchivada)u=await fotoArchivada('crm-visitas',v.photo).catch(()=>'');const el=$('#vPhoto');if(!el)return;el.innerHTML=!u?'No se pudo cargar la foto.':`<a href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="Foto de la visita" style="max-height:260px;border-radius:8px"></a>`})}
 function visitForm(clientId){
  if(!can('registrar_visita')){toast('Tu perfil no puede registrar visitas.');return}
  const cl=visibleClients();
@@ -982,17 +1004,72 @@ function visitForm(clientId){
   const sg=lugar?geoOf(siteOf(lugar).region,siteOf(lugar).comuna):null;
   const v={id:uid(),clientId:c?c.id:null,lugar,userId,date:$('#v-date').value,address:$('#v-address').value,reason:$('#v-reason').value,comments:$('#v-comments').value,result:$('#v-result').value,next:$('#v-next').value.trim(),followDate:$('#v-next').value.trim()&&$('#v-follow').value||null,photo:null,lat:gps?gps.lat:(c?c.lat:sg.lat),lng:gps?gps.lng:(c?c.lng:sg.lng),gps:!!gps};
   const btn=$('#vSave');btn.disabled=true;btn.textContent='Guardando…';
-  try{if(newC){await dbIns('clients',newC);S.clients.push(newC);audit('Cliente',newC.name,'Prospecto creado desde visita',[ (newC.contacts[0]||{}).name,newC.comuna].filter(Boolean).join(' · '))}
-   if(photo){const path=`${v.userId}/${v.id}.jpg`;const up=await sb.storage.from('crm-visitas').upload(path,photo,{contentType:'image/jpeg'});if(up.error)throw up.error;v.photo=path}await dbIns('visits',v)}catch(e){btn.disabled=false;btn.textContent='Guardar visita';if(e&&e.statusCode)toast('No se pudo subir la foto: '+e.message);return}
-  const name=VC(v).name;
-  S.visits.push(v);
-  if(v.next&&v.followDate){const tk={id:uid(),userId:v.userId,clientId:c?c.id:null,type:'seguimiento',title:'Seguimiento · '+v.next+(c?'':' ('+name+')'),date:v.followDate,time:'09:00',done:false};S.tasks.push(tk);dbIns('tasks',tk).catch(ignore)}
-  audit('Visita',name,'Registrada',v.reason+' · '+v.result);
-  if(c&&!NOVISIT(v.result)&&!/^Negativo/.test(v.result)){const op=S.opps.find(o=>o.clientId===c.id&&!['ganada','perdida'].includes(o.stage));if(op){if(v.next){op.nextAction=v.next;op.nextDate=v.followDate;dbUpd('opps',op,['nextAction','nextDate']).catch(ignore)}}else{const no={id:uid(),clientId:c.id,userId:v.userId,name:`${v.reason} · ${c.name}`,stage:'visita',amount:0,nextAction:v.next||'',nextDate:v.followDate||null,createdAt:nowIso(),quoteIds:[]};S.opps.push(no);dbIns('opps',no).catch(ignore)}}
-  const m=sendMail('visita',`Visita registrada – ${name}`,`${U(v.userId).name} registró una visita.\n\n${lugar?'Instalación':'Cliente'}: ${name}${newC?' (prospecto nuevo)':''}\nFecha: ${fdt(v.date)}\nMotivo: ${v.reason}\nResultado: ${v.result}\nComentarios: ${v.comments}\nPróximo paso: ${v.next||'—'}${v.next?' ('+fd(v.followDate)+')':''}`);
-  closeModal();rerender();toast(`Visita guardada${c?' en el historial de '+name:''}.${v.next&&v.followDate?' Seguimiento agendado para el '+fds(v.followDate)+'.':''}`,c?'Ver cliente':null,c?()=>location.hash='#cliente/'+c.id:null);
+  // Siempre por la fila de envíos (con o sin señal): con señal se envía en el acto, igual que antes.
+  const name=lugar?'Grupo TX · '+lugar:c.name;
+  const ruta=photo?`${v.userId}/${v.id}.jpg`:null;v.photo=ruta;
+  const tk=v.next&&v.followDate?{id:uid(),userId:v.userId,clientId:c?c.id:null,type:'seguimiento',title:'Seguimiento · '+v.next+(c?'':' ('+name+')'),date:v.followDate,time:'09:00',done:false}:null;
+  let opp=null,opAct=null;
+  if(c&&!NOVISIT(v.result)&&!/^Negativo/.test(v.result)){const op=S.opps.find(o=>o.clientId===c.id&&!['ganada','perdida'].includes(o.stage));if(op){if(v.next){opAct=op;opp={modo:'actualizar',obj:{id:op.id,nextAction:v.next,nextDate:v.followDate}}}}else opp={modo:'nueva',obj:{id:uid(),clientId:c.id,userId:v.userId,name:`${v.reason} · ${c.name}`,stage:'visita',amount:0,nextAction:v.next||'',nextDate:v.followDate||null,createdAt:nowIso(),quoteIds:[]}}}
+  const aviso=armarMail('visita',`Visita registrada – ${name}`,`${U(v.userId).name} registró una visita.\n\n${lugar?'Instalación':'Cliente'}: ${name}${newC?' (prospecto nuevo)':''}\nFecha: ${fdt(v.date)}\nMotivo: ${v.reason}\nResultado: ${v.result}\nComentarios: ${v.comments}\nPróximo paso: ${v.next||'—'}${v.next?' ('+fd(v.followDate)+')':''}`);
+  const auditoria={entity:'Visita',ref:name,action:'Registrada',detail:v.reason+' · '+v.result};
+  const auditoriaProspecto=newC?{entity:'Cliente',ref:newC.name,action:'Prospecto creado desde visita',detail:[(newC.contacts[0]||{}).name,newC.comuna].filter(Boolean).join(' · ')}:null;
+  const datos={visita:v,prospecto:newC,tarea:tk,opp,aviso,auditoria,auditoriaProspecto};
+  const archivos=photo?{[ruta]:photo}:{};
+  let id=null,r;
+  try{id=await TXOffline.encolar('crm.visita',datos,{archivos})}
+  catch(e){
+   // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
+   console.error(e);const mid=uid();esperandoEnvio.add(mid);
+   try{escrituras++;await TIPOS_FILA['crm.visita'](datos,archivos,{id:mid,intentos:0})}
+   catch(e2){console.error(e2);btn.disabled=false;btn.textContent='Guardar visita';toast(esRed(e2)?'Sin conexión y sin espacio en el teléfono: la visita no se guardó.':'No se pudo guardar la visita: '+esc((e2&&e2.message)||e2));return}
+   finally{escrituras++;esperandoEnvio.delete(mid)}
+   id=mid;r={estado:'enviado'};CO.superponerEntrada(S,{id,tipo:'crm.visita',datos,estado:'pendiente',error:null});CO.aplicarFilaCRM(S,[]);
+  }
+  // Pantalla al tiro con lo local (marcado "Pendiente de enviar" hasta que se envíe).
+  if(!r){esperandoEnvio.add(id);CO.superponerEntrada(S,{id,tipo:'crm.visita',datos,estado:'pendiente',error:null})}
+  if(opAct){opAct.nextAction=v.next;opAct.nextDate=v.followDate}
+  if(aviso)S.outbox.unshift(aviso);
+  for(const a of [auditoriaProspecto,auditoria])if(a)S.audit.unshift({ts:nowIso(),user:S.me,...a});
+  if(!r){r=await esperarEnvio(id);esperandoEnvio.delete(id)}
+  closeModal();rerender();
+  const seg=v.next&&v.followDate?' Seguimiento agendado para el '+fds(v.followDate)+'.':'';
+  if(r.estado==='enviado'){const t=resolverAviso(id);const vs=S.visits.find(x=>x.id===v.id);const cid=vs&&C(vs.clientId)?vs.clientId:null;
+   toast(t?esc(t):`Visita guardada${c?' en el historial de '+esc(name):''}.${seg}`,cid?'Ver cliente':null,cid?()=>location.hash='#cliente/'+cid:null)}
+  else if(r.estado==='problema')toast('La visita quedó en el teléfono, pero no se pudo enviar: '+esc(r.error||'')+' Revísala en Visitas.');
+  else toast('Visita guardada en el teléfono. Se enviará al volver la señal.');
  };
 }
+// Espera (con tope) a que la fila intente enviar una entrada recién encolada. Sin señal no espera.
+// → {estado:'enviado'|'pendiente'|'problema', error}
+async function esperarEnvio(id,tope=8000){
+ if(navigator.onLine!==false)await Promise.race([TXOffline.sincronizar(),esperar(tope)]);
+ let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===id)}catch(_){return {estado:'pendiente'}}
+ return !e?{estado:'enviado'}:{estado:e.estado,error:e.error};
+}
+// Envío de una visita de la fila (repetible: ids del teléfono, upsert sin duplicar, foto sin sobrescribir).
+// Obligatorio: prospecto, foto y visita. Tarea, oportunidad, aviso y auditoría: un rechazo se registra y se
+// ignora (como antes, cuando se guardaban con .catch(ignore)); un error de red o sesión se relanza para reintentar.
+const okR=res=>{const err=TXOfflineCore.errorDeRespuesta(res);if(err)throw err;return res.data};
+const secundario=async fn=>{try{await fn()}catch(e){if(TXOfflineCore.clasificarError(e)!=='regla')throw e;console.error('[CRM] envío secundario rechazado:',e)}};
+TIPOS_FILA['crm.visita']=async(d0,archivos,meta)=>{
+ let d=d0,nuevoId=null;
+ if(d.prospecto){
+  let cid;try{cid=okR(await sb.rpc('crm_resolver_cliente',{p:toRow(d.prospecto,COLS.clients)}))}
+  catch(e){const m=CO.errorClienteExiste(e);if(m)throw new Error(m);throw e}
+  if(cid&&cid!==d.prospecto.id){nuevoId=cid;d=CO.reasignarCliente(d,cid)}
+ }
+ const v={...d.visita};
+ if(v.photo){const blob=archivos[v.photo];
+  if(!blob){console.warn('[CRM] falta la foto en el teléfono; la visita se envía sin foto',v.photo);v.photo=null}
+  else{const {error}=await sb.storage.from('crm-visitas').upload(v.photo,blob,{contentType:'image/jpeg',upsert:false});if(error&&!TXOfflineCore.subidaYaExiste(error))throw error}}
+ okR(await sb.from('crm_visits').upsert(toRow(v,COLS.visits),{onConflict:'id',ignoreDuplicates:true}));
+ if(d.tarea)await secundario(async()=>okR(await sb.from('crm_tasks').upsert(toRow(d.tarea,COLS.tasks),{onConflict:'id',ignoreDuplicates:true})));
+ if(d.opp)await secundario(async()=>okR(d.opp.modo==='nueva'?await sb.from('crm_opps').upsert(toRow(d.opp.obj,COLS.opps),{onConflict:'id',ignoreDuplicates:true}):await sb.from('crm_opps').update(toRow(d.opp.obj,['nextAction','nextDate'])).eq('id',d.opp.obj.id)));
+ if(d.aviso)await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(d.aviso,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
+ // auditoría al final (sin id: un reintento después de esto la duplicaría)
+ for(const a of [nuevoId?null:d.auditoriaProspecto,d.auditoria])if(a)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,COLS.audit))));
+ if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d.prospecto.name),datos:d0,nuevoId});
+};
 
 /* ============ MAP ============ */
 let MF={seller:'',region:'',comuna:'',client:'',from:ymd(addD(TODAY,-90)),to:ymd(TODAY),showC:true,showV:true};
