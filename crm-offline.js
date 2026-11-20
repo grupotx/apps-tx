@@ -220,11 +220,17 @@
     if (x && typeof x === 'object') return '{' + Object.keys(x).sort().map((k) => JSON.stringify(k) + ':' + canonico(x[k])).join(',') + '}';
     return JSON.stringify(x);
   }
-  // El servidor ya tiene exactamente estos cambios (snake_case): el reintento de un envío que sí llegó
-  // (respuesta perdida) da CONFLICTO, pero no es de otra persona.
-  function yaAplicada(row, cambiosSnake) {
-    if (!row) return false;
-    return Object.keys(cambiosSnake || {}).every((k) => canonico(row[k]) === canonico(cambiosSnake[k]));
+  // ¿Esta edición ya se aplicó? (el reintento de un envío que sí llegó, con la respuesta perdida, da CONFLICTO).
+  // d: datos de la entrada {cambios (camelCase), nota, requiereAprobacion}; yo: id del usuario.
+  // La prueba es la línea que la RPC escribe tal cual (p_nota, con el total) por este usuario, más los campos
+  // iguales. Sin requiereAprobacion el estado además debe seguir editable; con ella, el estado puede haber
+  // cambiado después por la jefatura (aprobó/rechazó: la edición ya estaba).
+  function yaAplicada(row, d, yo) {
+    if (!row || !d || !d.nota) return false;
+    if (!(row.history || []).some((h) => h && h.user === yo && h.text === d.nota)) return false;
+    if (!d.requiereAprobacion && !EDITABLE_SIN_RED.includes(row.status)) return false;
+    const c = cambiosRPC(d.cambios);
+    return Object.keys(c).every((k) => canonico(row[k]) === canonico(c[k]));
   }
 
   const esConflicto = (error) => {

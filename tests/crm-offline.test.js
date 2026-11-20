@@ -563,13 +563,36 @@ test('edicionPorFila: ajena, sin versión, solo en el teléfono, o cambio de cli
   assert.match(C.edicionPorFila(a, { ...a, date: '2026-11-21' }, 'u1').msg, /cliente, vendedor o fecha/);
 });
 
-test('yaAplicada: el servidor ya tiene exactamente los cambios (orden de claves jsonb y null/"" no importan)', () => {
-  const cambios = { items: [{ code: 'A', qty: 2, price: 10 }], notes: '', next_date: '2026-11-25', valid_days: 30, entrega: { dir: 'x', obra: 'o' } };
-  const row = { id: 'q1', items: [{ price: 10, qty: 2, code: 'A' }], notes: null, next_date: '2026-11-25', valid_days: 30, entrega: { obra: 'o', dir: 'x' }, status: 'enviada' };
-  assert.equal(C.yaAplicada(row, cambios), true);
-  assert.equal(C.yaAplicada({ ...row, valid_days: 15 }, cambios), false);
-  assert.equal(C.yaAplicada({ ...row, items: [{ code: 'A', qty: 3, price: 10 }] }, cambios), false);
-  assert.equal(C.yaAplicada(null, cambios), false);
+// yaAplicada(row, d, yo): d = datos de la entrada (cambios camelCase, nota, requiereAprobacion)
+const NOTA = 'Cotización editada · total $ 2.380';
+const dEd = (extra = {}) => ({ cambios: { items: [{ code: 'A', qty: 2, price: 10 }], notes: '', nextDate: '2026-11-25', validDays: 30, entrega: { dir: 'x', obra: 'o' } }, nota: NOTA, requiereAprobacion: false, ...extra });
+const rowEd = (extra = {}) => ({ id: 'q1', items: [{ price: 10, qty: 2, code: 'A' }], notes: null, next_date: '2026-11-25', valid_days: 30, entrega: { obra: 'o', dir: 'x' }, status: 'enviada',
+  history: [{ ts: '2026-11-18T09:00', user: 'u1', text: 'Cotización creada' }, { ts: '2026-11-20T12:00', user: 'u1', text: NOTA }], ...extra });
+
+test('yaAplicada: mi línea de historia (usuario + nota exacta) y los campos → sí (orden de claves jsonb y null/"" no importan)', () => {
+  assert.equal(C.yaAplicada(rowEd(), dEd(), 'u1'), true);
+  assert.equal(C.yaAplicada(null, dEd(), 'u1'), false);
+});
+test('yaAplicada: sin mi línea en la historia → no (aunque los campos coincidan)', () => {
+  const r = rowEd({ history: [{ user: 'u1', text: 'Cotización creada' }] });
+  assert.equal(C.yaAplicada(r, dEd(), 'u1'), false);
+  assert.equal(C.yaAplicada(rowEd(), dEd(), 'u2'), false); // la línea es de otro usuario
+  assert.equal(C.yaAplicada(rowEd(), dEd({ nota: NOTA + ' ' }), 'u1'), false);
+});
+test('yaAplicada: campos distintos → no', () => {
+  assert.equal(C.yaAplicada(rowEd({ valid_days: 15 }), dEd(), 'u1'), false);
+  assert.equal(C.yaAplicada(rowEd({ items: [{ code: 'A', qty: 3, price: 10 }] }), dEd(), 'u1'), false);
+});
+test('yaAplicada (a): sobre el límite, aplicada y luego aprobada por la jefatura (enviada) → sí, no se re-envía', () => {
+  assert.equal(C.yaAplicada(rowEd({ status: 'enviada' }), dEd({ requiereAprobacion: true }), 'u1'), true);
+  assert.equal(C.yaAplicada(rowEd({ status: 'rechazada' }), dEd({ requiereAprobacion: true }), 'u1'), true);
+});
+test('yaAplicada (b): edición sin el cambio aplicado mientras la jefatura la dejó rechazada/ganada → no', () => {
+  const sinMiLinea = { history: [{ user: 'jefe', text: 'Rechazada por Jorge' }] };
+  assert.equal(C.yaAplicada(rowEd({ status: 'rechazada', ...sinMiLinea }), dEd(), 'u1'), false);
+  // sin requiereAprobacion el estado además debe seguir editable
+  assert.equal(C.yaAplicada(rowEd({ status: 'ganada' }), dEd(), 'u1'), false);
+  assert.equal(C.yaAplicada(rowEd({ status: 'negociacion' }), dEd(), 'u1'), true);
 });
 
 test('MSG_CONFLICTO en español', () => {
