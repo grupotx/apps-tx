@@ -67,7 +67,62 @@
     });
   }
 
-  const api = { T_LLEGADA, T_CIERRE, argsLlegada, argsCierre, rutasCierre, llegadaEnFila, aplicarFila };
+  // ---------- jornada y acciones de ruta ----------
+  const T_JORNADA = 'ent.jornada';
+  const T_RUTA = 'ent.ruta';
+
+  // Patente para una llegada: la de la jornada; si no hay, la de la ruta de la guía; si no, null (hay que pedirla).
+  function patenteParaLlegada(jornada, ruta) {
+    const p = (jornada && jornada.patente) || (ruta && ruta.patente) || '';
+    return String(p).trim() || null;
+  }
+
+  // datos de 'ent.jornada' → fila de ent_jornadas (id generado en el teléfono: reenviarla no duplica)
+  function filaJornada(d) {
+    return { id: d.id, chofer_id: d.chofer_id, patente: d.patente, fecha: d.fecha, inicio_at: d.inicio_at };
+  }
+
+  function argsRuta(d) { return { p_ruta: d.ruta, p_accion: d.accion }; }
+
+  // Un reenvío de una acción de ruta que el servidor ya aplicó responde con estos errores: cuenta como enviado.
+  function rutaYaHecha(accion, err) {
+    const msg = String((err && err.message) || err || '');
+    if (accion === 'aceptar') return /La ruta ya fue aceptada|La ruta ya salió/.test(msg);
+    if (accion === 'salir') return /La ruta ya salió/.test(msg);
+    return false;
+  }
+
+  // Aplica a las rutas las acciones aún en la fila: aceptar → 'aceptada' (si estaba 'asignada'),
+  // salir → 'en_ruta' (si estaba 'asignada'/'aceptada'). Con problema se deja el estado del servidor.
+  // Cada ruta tocada recibe r.fila = { estado, error, ids } como en aplicarFila.
+  function aplicarFilaRutas(rutas, entradas) {
+    const porRuta = new Map();
+    for (const e of (entradas || []).slice().sort(porCreada)) {
+      if (e.tipo !== T_RUTA || (e.estado !== 'pendiente' && e.estado !== 'problema')) continue;
+      const id = e.datos && e.datos.ruta;
+      if (!id) continue;
+      if (!porRuta.has(id)) porRuta.set(id, []);
+      porRuta.get(id).push(e);
+    }
+    return (rutas || []).map(r0 => {
+      const es = porRuta.get(r0.id);
+      if (!es) return r0;
+      const r1 = Object.assign({}, r0);
+      const problemas = es.filter(e => e.estado === 'problema');
+      for (const e of es) {
+        if (e.estado !== 'pendiente') continue;
+        if (e.datos.accion === 'aceptar' && r1.estado === 'asignada') r1.estado = 'aceptada';
+        if (e.datos.accion === 'salir' && (r1.estado === 'asignada' || r1.estado === 'aceptada')) r1.estado = 'en_ruta';
+      }
+      r1.fila = problemas.length
+        ? { estado: 'problema', error: problemas[0].error || 'No se pudo enviar', ids: problemas.map(e => e.id) }
+        : { estado: 'pendiente', error: null, ids: es.map(e => e.id) };
+      return r1;
+    });
+  }
+
+  const api = { T_LLEGADA, T_CIERRE, T_JORNADA, T_RUTA, argsLlegada, argsCierre, rutasCierre, llegadaEnFila, aplicarFila,
+    patenteParaLlegada, filaJornada, argsRuta, rutaYaHecha, aplicarFilaRutas };
   g.EntregasOffline = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

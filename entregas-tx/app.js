@@ -266,6 +266,24 @@ TXOffline.registrarTipo(EO.T_CIERRE, async (d, archivos, meta) => {
   }
   RESULTADOS.set(meta.id, await rpcOError('ent_cerrar_entrega', EO.argsCierre(d)));
 });
+TXOffline.registrarTipo(EO.T_JORNADA, async (d) => {
+  // cierra la jornada anterior (si la había) y crea la nueva con el id generado en el teléfono;
+  // ON CONFLICT DO NOTHING: reenviarla no duplica ni falla
+  if (d.cerrar) {
+    const { error } = await sb.from('ent_jornadas').update({ fin_at: d.fin_at }).eq('id', d.cerrar).is('fin_at', null);
+    if (error) throw error;
+  }
+  const { error } = await sb.from('ent_jornadas').upsert(EO.filaJornada(d), { onConflict: 'id', ignoreDuplicates: true });
+  if (error) throw error;
+});
+TXOffline.registrarTipo(EO.T_RUTA, async (d, _archivos, meta) => {
+  try {
+    RESULTADOS.set(meta.id, await rpcOError('ent_chofer_ruta', EO.argsRuta(d)));
+  } catch (e) {
+    if (EO.rutaYaHecha(d.accion, e)) return;   // reenvío de una acción que ya quedó hecha
+    throw e;
+  }
+});
 
 // Consulta con copia local; sin red conocida (navigator.onLine) va directo a la copia.
 function consultarEnt(clave, fn) {
@@ -535,12 +553,13 @@ function topChofer() {
   pintarGps(); pintarCampana();
 }
 
+// Inicia (o cambia) la jornada: queda guardada en el teléfono al instante y la fila crea la fila de
+// ent_jornadas (id generado aquí, así S.jornada.id sirve desde ya y un reenvío no duplica).
 async function iniciarJornadaCon(pat) {
   if (S.jornada?.patente === pat) return;
-  if (S.jornada?.id) await sb.from('ent_jornadas').update({ fin_at: new Date().toISOString() }).eq('id', S.jornada.id);
-  const { data, error } = await sb.from('ent_jornadas').insert({ chofer_id: S.perfil.id, patente: pat }).select().single();
-  if (error) throw error;
-  S.jornada = { uid: S.perfil.id, fecha: hoy(), patente: pat, id: data.id };
+  const id = crypto.randomUUID(), ahora = new Date().toISOString();
+  await TXOffline.encolar(EO.T_JORNADA, { id, chofer_id: S.perfil.id, patente: pat, fecha: hoy(), inicio_at: ahora, cerrar: S.jornada?.id || null, fin_at: ahora });
+  S.jornada = { uid: S.perfil.id, fecha: hoy(), patente: pat, id };
   guardarJornada(S.jornada); iniciarTracking();
 }
 
@@ -550,40 +569,40 @@ function tarjetaCarga(r, guias) {
     <div>
       <span class="eyebrow" style="color:var(--brand)">${r.estado === 'asignada' ? 'Nueva carga asignada' : r.estado === 'aceptada' ? 'Carga en planta' : 'En ruta'} · ${fechaCL(r.fecha)}</span>
       <h2 style="margin:6px 0 4px;font-size:24px;font-weight:800;letter-spacing:-.02em">${r.estado === 'asignada' ? 'Preséntate en planta a cargar' : r.estado === 'aceptada' ? 'Carga el camión y sal a ruta' : 'Ruta en curso'}</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px"><span class="pat" style="cursor:default;background:var(--bg);color:var(--ink)">${esc(r.patente)}</span><span class="chip plain" style="background:color-mix(in srgb,var(--bg) 15%,transparent);color:inherit">${fmtNum(r.peso_ton)} ton</span><span class="chip plain" style="background:color-mix(in srgb,var(--bg) 15%,transparent);color:inherit">${guias.length} parada(s)</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px"><span class="pat" style="cursor:default;background:var(--bg);color:var(--ink)">${esc(r.patente)}</span><span class="chip plain" style="background:color-mix(in srgb,var(--bg) 15%,transparent);color:inherit">${fmtNum(r.peso_ton)} ton</span><span class="chip plain" style="background:color-mix(in srgb,var(--bg) 15%,transparent);color:inherit">${guias.length} parada(s)</span>${r.fila?.estado === 'pendiente' ? '<span class="chip warn">Pendiente de enviar</span>' : ''}</div>
+      ${r.fila?.estado === 'problema' ? `<div style="margin:0 0 12px"><span class="chip bad" style="white-space:normal">No se pudo enviar: ${esc(r.fila.error)}</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn sm" data-rfila="reintentar">${I.refresh}Reintentar</button><button class="btn sm danger" data-rfila="descartar">${I.x}Descartar</button></div>` : ''}
       <ol style="margin:0 0 14px;padding-left:18px;opacity:.9;display:grid;gap:2px">${guias.map(g => `<li>${esc(g.cliente)} · ${esc(g.comuna || g.direccion)}</li>`).join('')}</ol>
       <div class="ratio" style="margin:0 0 6px">${[1, 2, 3].map(i => `<i style="width:33.3%;background:${i <= paso ? 'var(--brand)' : 'transparent'}"></i>`).join('')}</div>
       <div class="legend" style="margin-bottom:14px"><span style="--c:var(--brand)">1 Asignada</span><span style="--c:${paso >= 2 ? 'var(--brand)' : 'transparent'}">2 En planta</span><span style="--c:${paso >= 3 ? 'var(--brand)' : 'transparent'}">3 En ruta</span></div>
-      ${r.estado === 'asignada' ? `<button class="btn primary xl" data-racc="aceptar">${I.check}Acepto, voy a planta</button>` : ''}
-      ${r.estado === 'aceptada' ? `<button class="btn primary xl" data-racc="salir">${I.truck}Cargado, salgo a ruta</button>` : ''}
+      ${r.estado === 'asignada' && r.fila?.estado !== 'problema' ? `<button class="btn primary xl" data-racc="aceptar">${I.check}Acepto, voy a planta</button>` : ''}
+      ${r.estado === 'aceptada' && r.fila?.estado !== 'problema' ? `<button class="btn primary xl" data-racc="salir">${I.truck}Cargado, salgo a ruta</button>` : ''}
     </div></div>`;
 }
 
-function pedirPatente(cambio = false) {
+// alListo: se llama tras guardar la patente (p. ej. para seguir con una llegada que la necesitaba).
+function pedirPatente(cambio = false, alListo = null) {
   const opciones = S.vehiculos.filter(v => v.activo).map(v => `<option value="${esc(v.patente)}">${esc(v.descripcion || '')}</option>`).join('');
   const html = `<form id="fpat" class="form">
       <fieldset><legend>Vehículo</legend>
-        <p class="muted" style="margin:0">${cambio ? 'Ingresa la nueva patente del camión.' : 'Para comenzar, ingresa la patente del camión que manejas hoy. Tu nombre se completa solo con tu cuenta.'}</p>
+        <p class="muted" style="margin:0">${alListo ? 'Para registrar la llegada, ingresa la patente del camión que manejas hoy.' : cambio ? 'Ingresa la nueva patente del camión.' : 'Para comenzar, ingresa la patente del camión que manejas hoy. Tu nombre se completa solo con tu cuenta.'}</p>
         ${fld('Patente', `<input id="p-pat" class="pat-in" list="lpat" required placeholder="ABCD12" autocomplete="off" value="${esc(S.jornada?.patente || '')}"><datalist id="lpat">${opciones}</datalist>`, 1)}
         <div class="ctx">${I.pin}<span>Mientras la app esté abierta se registra tu ubicación para mostrar el trayecto a Logística.</span></div>
       </fieldset>
-      <button class="btn primary xl">${I.truck}${cambio ? 'Cambiar patente' : 'Iniciar jornada'}</button>
+      <button class="btn primary xl">${I.truck}${cambio && !alListo ? 'Cambiar patente' : 'Iniciar jornada'}</button>
     </form>`;
   let box;
-  if (cambio) box = openSheet('Cambiar patente', html, { eyebrow: 'Jornada' });
+  if (cambio || alListo) box = openSheet(alListo ? 'Patente del camión' : 'Cambiar patente', html, { eyebrow: 'Jornada' });
   else { box = $('#view'); box.innerHTML = `<div style="max-width:520px;margin:0 auto">${html}</div>`; }
   $('#fpat', box).onsubmit = async (ev) => {
     ev.preventDefault();
     const pat = $('#p-pat', box).value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (pat.length < 5) return toast('Patente inválida');
-    if (S.jornada?.id) await sb.from('ent_jornadas').update({ fin_at: new Date().toISOString() }).eq('id', S.jornada.id);
-    const { data, error } = await sb.from('ent_jornadas').insert({ chofer_id: S.perfil.id, patente: pat }).select().single();
-    if (error) return toast(errMsg(error));
-    S.jornada = { uid: S.perfil.id, fecha: hoy(), patente: pat, id: data.id };
-    guardarJornada(S.jornada);
-    if (cambio) closeSheet();
+    try { await iniciarJornadaCon(pat); }
+    catch (e) { return toast('No se pudo guardar la patente en el teléfono: ' + errMsg(e)); }
+    if (cambio || alListo) closeSheet();
     toast('Jornada iniciada con ' + pat);
-    iniciarTracking();
+    if (alListo) return alListo();
     go(S.view || 'ruta');
   };
 }
@@ -649,12 +668,13 @@ function tarjetaGuia(g, conAcciones = true, bloqueada = false) {
 
 async function vistaRuta(el) {
   const gen = S.gen;
-  let rRutas = null, rGuias = null, fila = [];
+  let rRutas = null, rGuias = null;
+  const fila = await TXOffline.entradas().catch(() => []);
   try {
     rRutas = await consultarEnt('ent.rutas', () => datosDe(sb.from('ent_rutas').select('*').eq('chofer_id', S.perfil.id).in('estado', ['asignada', 'aceptada', 'en_ruta']).gte('fecha', sumarDias(hoy(), -1)).order('fecha').order('asignada_at')));
   } catch (e) { console.warn('[Entregas] rutas:', e); }
   if (gen !== S.gen) return;
-  S.rutasChofer = rRutas?.datos || [];
+  S.rutasChofer = EO.aplicarFilaRutas(rRutas?.datos || [], fila);   // acciones de ruta aún en el teléfono
   if (!S.jornada && !S.rutasChofer.length && rRutas) { topChofer(); return pedirPatente(false); }
   topChofer();
   try {
@@ -662,7 +682,6 @@ async function vistaRuta(el) {
       .eq('chofer_id', S.perfil.id).neq('estado', 'anulada')
       .or(`fecha.eq.${hoy()},estado.in.(asignada,en_destino)`)
       .order('fecha').order('orden').order('created_at')));
-    fila = await TXOffline.entradas().catch(() => []);
   } catch (error) {
     if (gen !== S.gen) return;
     el.innerHTML = `<div class="ctx err">${esRed(error) ? 'Sin conexión y sin datos guardados en este teléfono. Conéctate para cargar tu ruta.' : esc(errMsg(error))}</div>`;
@@ -673,7 +692,7 @@ async function vistaRuta(el) {
   S.guiasChofer = data;
   const rutaDe = (g) => g.ruta_id ? S.rutasChofer.find(r => r.id === g.ruta_id) : null;
   const bloqueada = (g) => { const r = rutaDe(g); return r && r.estado !== 'en_ruta'; };
-  const cargasHtml = S.rutasChofer.filter(r => r.estado !== 'en_ruta').map(r => tarjetaCarga(r, data.filter(g => g.ruta_id === r.id))).join('');
+  const cargasHtml = S.rutasChofer.filter(r => r.estado !== 'en_ruta' || r.fila).map(r => tarjetaCarga(r, data.filter(g => g.ruta_id === r.id))).join('');
   const pend = data.filter(g => ['asignada', 'en_destino'].includes(g.estado));
   const hechas = data.filter(g => !['asignada', 'en_destino'].includes(g.estado));
   const tot = data.length || 1;
@@ -695,11 +714,9 @@ async function vistaRuta(el) {
     <div class="grid" style="gap:12px">${pend.length ? pend.map(g => tarjetaGuia(g, true, bloqueada(g))).join('') : `<div class="card empty"><b>No tienes entregas pendientes</b>Si esperas guías, pide a Logística que te las asigne y presiona Actualizar.</div>`}</div>
     ${hechas.length ? `<div class="sec-h block"><div><h2>Completadas hoy</h2></div></div><div class="grid" style="gap:12px">${hechas.map(g => tarjetaGuia(g, false)).join('')}</div>` : ''}`;
   $('#bRef').onclick = () => { TXOffline.sincronizar(); go('ruta'); };
-  $$('[data-fila]', el).forEach(b => b.onclick = async () => {
-    const g = S.guiasChofer.find(x => x.id === b.closest('.gcard').dataset.id);
-    const ids = g?.fila?.ids || [];
-    if (b.dataset.fila === 'descartar') {
-      if (!confirm(`¿Descartar lo registrado sin enviar de la guía ${g.folio}? Se borrará del teléfono (fotos y firma incluidas) y no se enviará.`)) return;
+  const accionFila = async (b, ids, accion, pregunta) => {
+    if (accion === 'descartar') {
+      if (!confirm(pregunta)) return;
       for (const id of ids) await TXOffline.descartar(id);
       toast('Registro descartado');
     } else {
@@ -709,17 +726,27 @@ async function vistaRuta(el) {
       toast(!quedan.length ? 'Enviado' : quedan.some(e => e.estado === 'problema') ? 'Sigue con problema: ' + (quedan.find(e => e.estado === 'problema').error || '') : 'Pendiente de enviar. Se enviará al volver la señal.');
     }
     go('ruta');
+  };
+  $$('[data-fila]', el).forEach(b => b.onclick = () => {
+    const g = S.guiasChofer.find(x => x.id === b.closest('.gcard').dataset.id);
+    accionFila(b, g?.fila?.ids || [], b.dataset.fila, `¿Descartar lo registrado sin enviar de la guía ${g.folio}? Se borrará del teléfono (fotos y firma incluidas) y no se enviará.`);
+  });
+  $$('[data-rfila]', el).forEach(b => b.onclick = () => {
+    const r = S.rutasChofer.find(x => x.id === b.closest('[data-ruta]').dataset.ruta);
+    accionFila(b, r?.fila?.ids || [], b.dataset.rfila, '¿Descartar la acción de la carga sin enviar? Se borrará del teléfono y no se enviará.');
   });
   $$('[data-racc]', el).forEach(b => b.onclick = async () => {
     const r = S.rutasChofer.find(x => x.id === b.closest('[data-ruta]').dataset.ruta), acc = b.dataset.racc;
     if (acc === 'salir' && !confirm('¿Confirmas que el camión está cargado y sales a ruta?')) return;
     b.disabled = true;
     try {
-      if (r.patente) await iniciarJornadaCon(r.patente);
-      const { error } = await sb.rpc('ent_chofer_ruta', { p_ruta: r.id, p_accion: acc });
-      if (error) throw error;
-      toast(acc === 'aceptar' ? 'Carga aceptada. Dirígete a planta.' : 'Buen viaje. El cliente ya puede ver tu camión en el mapa.');
-      revisarAvisos(); go('ruta');
+      if (r.patente) await iniciarJornadaCon(r.patente);   // jornada por la fila (sirve sin señal)
+      const idFila = await TXOffline.encolar(EO.T_RUTA, { ruta: r.id, accion: acc, at: new Date().toISOString() });
+      const res = await resultadoEnvio(idFila, 6000);
+      if (res.estado === 'enviado') { toast(acc === 'aceptar' ? 'Carga aceptada. Dirígete a planta.' : 'Buen viaje. El cliente ya puede ver tu camión en el mapa.'); revisarAvisos(); }
+      else if (res.estado === 'problema') toast('No se pudo registrar: ' + (res.error || '') + '.');
+      else toast(acc === 'aceptar' ? 'Carga aceptada y guardada en el teléfono. Se enviará al volver la señal.' : 'Salida a ruta guardada en el teléfono. Se enviará al volver la señal.');
+      go('ruta');
     } catch (e) { toast(errMsg(e)); b.disabled = false; }
   });
   $$('[data-acc=llegue]', el).forEach(b => b.onclick = () => marcarLlegada(b.closest('.gcard').dataset.id, b));
@@ -746,15 +773,22 @@ async function vistaHistorial(el) {
     </tbody></table>` : '<div class="empty"><b>Sin entregas</b>Aún no registras entregas en este período.</div>'}</div>`;
 }
 
-async function marcarLlegada(id, btn) {
+async function marcarLlegada(id, btn, confirmada = false) {
   const g = S.guiasChofer.find(x => x.id === id);
-  if (!confirm(`¿Confirmas que llegaste a ${g.cliente || 'destino'} (guía ${g.folio})?`)) return;
+  if (!confirmada && !confirm(`¿Confirmas que llegaste a ${g.cliente || 'destino'} (guía ${g.folio})?`)) return;
+  // la RPC exige patente: la de la jornada; si no, la de la ruta (y se inicia la jornada con ella); si no, se pide
+  const ruta = g.ruta_id ? (S.rutasChofer || []).find(r => r.id === g.ruta_id) : null;
+  const pat = EO.patenteParaLlegada(S.jornada, ruta);
+  if (!pat) return pedirPatente(false, () => marcarLlegada(id, btn, true));
+  if (!S.jornada?.patente) {
+    try { await iniciarJornadaCon(pat); } catch (e) { return toast('No se pudo guardar la patente en el teléfono: ' + errMsg(e)); }
+  }
   btn.disabled = true; btn.innerHTML = `${I.pin}Obteniendo ubicación…`;
   let idFila;
   try {
     const pos = await obtenerPosicion();   // el GPS funciona sin señal
     btn.innerHTML = `${I.pin}Guardando…`;
-    idFila = await TXOffline.encolar(EO.T_LLEGADA, { guia: id, patente: S.jornada?.patente ?? null, lat: pos.lat, lng: pos.lng, precision: Math.round(pos.acc), at: new Date().toISOString() });
+    idFila = await TXOffline.encolar(EO.T_LLEGADA, { guia: id, patente: pat, lat: pos.lat, lng: pos.lng, precision: Math.round(pos.acc), at: new Date().toISOString() });
   } catch (e) {
     toast(errMsg(e)); btn.disabled = false; btn.innerHTML = `${I.pin}Llegué al destino`;
     return;
@@ -780,7 +814,7 @@ function formEntrega(g) {
   const F = { fotos: [], resultado: 'entregada', devs: [] };
   const optsProd = '<option value="">Selecciona producto…</option>' + S.productos.filter(p => p.activo).map(p => `<option value="${esc(p.codigo)}">${esc(p.codigo)} — ${esc(p.descripcion)}</option>`).join('');
   const optsMot = '<option value="">Motivo…</option>' + S.motivos.filter(m => m.activo).map(m => `<option>${esc(m.motivo)}</option>`).join('');
-  const salir = () => { if (confirm('¿Salir sin guardar? La llegada ya quedó registrada; puedes completar la entrega después.')) { F.fotos.forEach(f => URL.revokeObjectURL(f.url)); closeSheet(); } };
+  const salir = () => { if (confirm('¿Salir sin guardar? La llegada ya quedó guardada; puedes completar la entrega después.')) { F.fotos.forEach(f => URL.revokeObjectURL(f.url)); closeSheet(); } };
   const sh = openSheet(`Guía ${esc(g.folio)}`, `
     <div class="ctx" style="margin-bottom:16px"><b>${esc(g.cliente)}</b>${g.obra ? ' · ' + esc(g.obra) : ''}<span class="sub" style="width:100%">${esc(g.direccion)}${g.comuna ? ', ' + esc(g.comuna) : ''}</span><span class="chip dark plain">Chofer: ${esc(S.perfil.nombre)}</span>${S.jornada ? `<span class="chip dark plain mono">${esc(S.jornada.patente)}</span>` : ''}</div>
     <div class="form" id="fEntrega">

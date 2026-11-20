@@ -97,3 +97,59 @@ test('argsCierre: mapea datos de la fila a los parámetros de ent_cerrar_entrega
     p_lat: null, p_lng: null, p_devoluciones: [], p_at: '2026-11-19T10:05:00.000Z',
   });
 });
+
+// ---------- fix ronda 1: patente, jornada y acciones de ruta ----------
+test('patenteParaLlegada: jornada, luego ruta, si no null', () => {
+  assert.equal(E.patenteParaLlegada({ patente: 'ABCD12' }, { patente: 'ZZZZ99' }), 'ABCD12');
+  assert.equal(E.patenteParaLlegada(null, { patente: 'ZZZZ99' }), 'ZZZZ99');
+  assert.equal(E.patenteParaLlegada({ patente: '  ' }, null), null);
+  assert.equal(E.patenteParaLlegada(null, null), null);
+  assert.equal(E.patenteParaLlegada({ patente: null }, { patente: '' }), null);
+});
+
+test('filaJornada: usa el id generado en el teléfono y la hora real', () => {
+  assert.deepEqual(E.filaJornada({ id: 'j1', chofer_id: 'u1', patente: 'ABCD12', fecha: '2026-11-19', inicio_at: '2026-11-19T10:00:00.000Z', cerrar: 'j0', fin_at: 'x' }),
+    { id: 'j1', chofer_id: 'u1', patente: 'ABCD12', fecha: '2026-11-19', inicio_at: '2026-11-19T10:00:00.000Z' });
+});
+
+test('argsRuta: parámetros de ent_chofer_ruta', () => {
+  assert.deepEqual(E.argsRuta({ ruta: 'r1', accion: 'salir', at: 'x' }), { p_ruta: 'r1', p_accion: 'salir' });
+});
+
+test('rutaYaHecha: errores de "ya aplicado" cuentan como enviado; otros no', () => {
+  assert.equal(E.rutaYaHecha('aceptar', { message: 'La ruta ya fue aceptada' }), true);
+  assert.equal(E.rutaYaHecha('aceptar', { message: 'La ruta ya salió' }), true);
+  assert.equal(E.rutaYaHecha('salir', { message: 'La ruta ya salió' }), true);
+  assert.equal(E.rutaYaHecha('salir', { message: 'La ruta ya fue aceptada' }), false);
+  assert.equal(E.rutaYaHecha('aceptar', { message: 'Ruta no asignada a este chofer' }), false);
+  assert.equal(E.rutaYaHecha('aceptar', new TypeError('Failed to fetch')), false);
+  assert.equal(E.rutaYaHecha('otra', { message: 'La ruta ya salió' }), false);
+});
+
+const entR = (id, ruta, accion, estado, seg, error = null) => ({
+  id, tipo: 'ent.ruta', estado, error, datos: { ruta, accion },
+  creada: new Date(Date.UTC(2026, 10, 19, 10, 0, seg)).toISOString(),
+});
+
+test('aplicarFilaRutas: aceptar pendiente → aceptada; salir pendiente → en_ruta', () => {
+  const rs = [{ id: 'r1', estado: 'asignada' }, { id: 'r2', estado: 'aceptada' }, { id: 'r3', estado: 'asignada' }];
+  const r = E.aplicarFilaRutas(rs, [entR('A', 'r1', 'aceptar', 'pendiente', 1), entR('B', 'r2', 'salir', 'pendiente', 2)]);
+  assert.equal(r[0].estado, 'aceptada');
+  assert.deepEqual(r[0].fila, { estado: 'pendiente', error: null, ids: ['A'] });
+  assert.equal(r[1].estado, 'en_ruta');
+  assert.equal(r[2], rs[2]);
+  assert.equal(rs[0].estado, 'asignada');
+});
+
+test('aplicarFilaRutas: aceptar y salir pendientes en orden → en_ruta', () => {
+  const r = E.aplicarFilaRutas([{ id: 'r1', estado: 'asignada' }], [entR('B', 'r1', 'salir', 'pendiente', 2), entR('A', 'r1', 'aceptar', 'pendiente', 1)]);
+  assert.equal(r[0].estado, 'en_ruta');
+  assert.deepEqual(r[0].fila.ids, ['A', 'B']);
+});
+
+test('aplicarFilaRutas: no retrocede una ruta ya en_ruta; con problema deja estado y expone motivo', () => {
+  assert.equal(E.aplicarFilaRutas([{ id: 'r1', estado: 'en_ruta' }], [entR('A', 'r1', 'aceptar', 'pendiente', 1)])[0].estado, 'en_ruta');
+  const r = E.aplicarFilaRutas([{ id: 'r1', estado: 'asignada' }], [entR('A', 'r1', 'aceptar', 'problema', 1, 'Ruta no asignada a este chofer')]);
+  assert.equal(r[0].estado, 'asignada');
+  assert.deepEqual(r[0].fila, { estado: 'problema', error: 'Ruta no asignada a este chofer', ids: ['A'] });
+});
