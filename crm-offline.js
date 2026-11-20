@@ -314,6 +314,14 @@
     return 'Contacta al cliente: la cotización ' + q.num + ' fue rechazada';
   }
 
+  // Texto de una frase ya escrita por una persona (motivo de rechazo, nota): un solo punto final.
+  // Si ya termina en ., !, ? o …, se deja tal cual; vacío sigue vacío.
+  const frase = (t) => {
+    const x = String(t == null ? '' : t).trim();
+    if (!x) return '';
+    return /[.!?…]$/.test(x) ? x.replace(/\.+$/, '.') : x + '.';
+  };
+
   // Aviso de la barra cuando se muestra la copia local (hora local del equipo; si la copia es de otro
   // día se agrega " del D mmm"). modo 'sin-red': "Sin conexión · datos de las HH:MM";
   // modo 'cargando' (hay red pero la carga tarda): "Datos de las HH:MM · cargando datos actualizados…".
@@ -340,7 +348,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, MSG_CONFLICTO, enviadoParaCopia, aplicarACopia, cambiosEdicion, cambiosRPC, baseEdicion, edicionPorFila, yaAplicada, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, MSG_CONFLICTO, enviadoParaCopia, aplicarACopia, cambiosEdicion, cambiosRPC, baseEdicion, edicionPorFila, yaAplicada, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, frase, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

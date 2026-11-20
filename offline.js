@@ -203,6 +203,9 @@
   }
 
   async function consultar(clave, fn) {
+    // Sin función no hay nada que consultar: antes se guardaba su resultado (undefined) y la copia
+    // local quedaba vacía, dejando la app sin datos sin señal.
+    if (typeof fn !== 'function') throw new TypeError('TXOffline.consultar necesita una función');
     let timer;
     try {
       const tope = new Promise((_, mal) => {
@@ -210,7 +213,8 @@
       });
       const datos = await Promise.race([Promise.resolve().then(fn), tope]);
       const guardadoEn = new Date().toISOString();
-      try { await poner('consultas', { datos, guardadoEn }, clave); } catch (_) { /* sin caché, no es grave */ }
+      // Nunca se guarda un resultado vacío: pisaría la copia buena con nada.
+      if (datos !== undefined) try { await poner('consultas', { datos, guardadoEn }, clave); } catch (_) { /* sin caché, no es grave */ }
       return { datos, desdeCache: false, guardadoEn };
     } catch (e) {
       if (Core.clasificarError(e) !== 'red') throw e;

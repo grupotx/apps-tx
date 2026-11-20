@@ -555,6 +555,10 @@ function ajustarFilaInd(){const el=$('#filaInd');if(el)el.hidden=CO.filaRedundan
 let firmaVista='';
 async function aplicarFila(){let ents;try{ents=await TXOffline.entradas()}catch(_){return false}CO.aplicarFilaCRM(S,ents);const f=CO.firmaFila(ents),cambio=f!==firmaVista;firmaVista=f;const av=avisosEnviados(ents);return cambio||av}
 const puedeRepintar=()=>!$('#modalRoot').innerHTML&&!/cotizacion\/nueva/.test(location.hash)&&!S.quotes.some(q=>q._edit);
+// Cambio que llegó del servidor y ya está en S (p. ej. la versión que gana un CONFLICTO): se repinta en
+// cuanto se pueda, sin pisar un formulario o un modal abierto (si hay, se reintenta hasta que se cierre).
+let repintaProg=null;
+function repintarPronto(){if(repintaProg)return;repintaProg=setTimeout(function rec(){if(!puedeRepintar()){repintaProg=setTimeout(rec,2000);return}repintaProg=null;if($('#gate').hidden)rerender()},0)}
 window.addEventListener('txoffline:cambio',async()=>{if(!lastLoad)return;const cambio=await aplicarFila();if(cambio&&$('#gate').hidden&&puedeRepintar())rerender()});
 // Visitas cuyo prospecto ya existía en el servidor: el handler deja aquí el aviso (id de entrada → {texto,datos,nuevoId}).
 // Se resuelve una sola vez, cuando la entrada ya no está activa (enviada): toast, prospecto del teléfono fuera de S
@@ -1227,6 +1231,7 @@ function cotizacionDelServidor(row){
  const q=S.quotes.find(x=>x.id===o.id);
  if(q){if(q._edit&&q._bak)Object.assign(q._bak,JSON.parse(JSON.stringify(o)));else{Object.assign(q,o);if(q._base)delete q._base}}
  cotizacionEnCopia(row);
+ repintarPronto();
 }
 // Copia local ('crm.datos'): la cotización queda como la devolvió el servidor (updated_at crudo incluido); si la copia
 // es anterior a su creación, se agrega. Así, al reabrir sin señal, una edición no choca con un cambio propio.
@@ -1584,7 +1589,7 @@ function approvalMsg(q,kind){const c=CQ(q)||{};const t=qTotals(q);const ap=appro
  const lines=q.items.filter(i=>(+i.disc||0)>S.cfg.discLimit).map(i=>`- ${i.code} ${i.name}: lista ${clp(i.listPrice)} · venta ${clp(i.price)} · dcto ${i.disc}%`).join('\n');
  if(kind==='req')return {to:[ap&&ap.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email,seller.email].filter(Boolean),sub:`Solicitud de aprobación ${q.num} – ${c.name}`,body:`Hola ${ap?ap.nombre.split(' ')[0]:''},\n\nSolicito aprobar la cotización ${q.num} para ${c.name} por ${clp(t.total)} (IVA incl.). Tiene productos con descuento sobre ${S.cfg.discLimit}%:\n${lines}\n\nRevisar y aprobar en el CRM: ${quoteUrl(q)}\n\n${seller.name}`};
  const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text))||{text:''};
- return {to:[seller.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email].filter(Boolean),sub:`${kind==='ok'?'Cotización aprobada':'Cotización rechazada'} ${q.num} – ${c.name}`,body:`Hola ${seller.name.split(' ')[0]},\n\n${h.text}.\nCotización ${q.num} · ${c.name} · ${clp(t.total)}\n\n${kind==='ok'?'Ya es oficial: puedes descargar el PDF y enviarla al cliente.':(CO.pdfEntregado(q)?'El cliente ya tiene el PDF: contáctalo para avisarle. ':'')+'Si hay que rehacerla, usa «Duplicar cotización»: la nueva lleva otro número.'}\n${quoteUrl(q)}\n\n${me().name}`}}
+ return {to:[seller.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email].filter(Boolean),sub:`${kind==='ok'?'Cotización aprobada':'Cotización rechazada'} ${q.num} – ${c.name}`,body:`Hola ${seller.name.split(' ')[0]},\n\n${CO.frase(h.text)}\nCotización ${q.num} · ${c.name} · ${clp(t.total)}\n\n${kind==='ok'?'Ya es oficial: puedes descargar el PDF y enviarla al cliente.':(CO.pdfEntregado(q)?'El cliente ya tiene el PDF: contáctalo para avisarle. ':'')+'Si hay que rehacerla, usa «Duplicar cotización»: la nueva lleva otro número.'}\n${quoteUrl(q)}\n\n${me().name}`}}
 // Aviso de aprobación para crm_outbox (solicitud 'req', aprobada 'ok', rechazada 'no').
 function aprobacionAviso(q,kind){const m=approvalMsg(q,kind);return {id:uid(),ts:nowIso(),event:kind==='req'?'aprobacion':'aprobacion_resp',to:[...m.to,...m.cc],subject:m.sub,body:m.body,from:me().email}}
 // yaRegistrado: el aviso ya va en la fila (cotización nueva); solo se muestra el mensaje para abrir el correo.

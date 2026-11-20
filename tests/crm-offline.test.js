@@ -651,3 +651,14 @@ test('yaAplicada: entrega null en la edición y {} en el servidor cuentan igual'
   assert.equal(C.yaAplicada(rowEd({ entrega: null }), dEd({ cambios: { ...dEd().cambios, entrega: {} } }), 'u1'), true);
   assert.equal(C.yaAplicada(rowEd({ entrega: { dir: 'y' } }), dEd({ cambios: { ...dEd().cambios, entrega: null } }), 'u1'), false);
 });
+
+test('frase: deja un solo punto final y no toca ? ! …', () => {
+  assert.equal(C.frase('máximo 30% en este producto.'), 'máximo 30% en este producto.');
+  assert.equal(C.frase('máximo 30% en este producto'), 'máximo 30% en este producto.');
+  assert.equal(C.frase('  con espacios  '), 'con espacios.');
+  assert.equal(C.frase('Rechazada por Ana: ¿por qué?'), 'Rechazada por Ana: ¿por qué?');
+  assert.equal(C.frase('sin terminar…'), 'sin terminar…');
+  assert.equal(C.frase('dos puntos..'), 'dos puntos.');
+  assert.equal(C.frase(''), '');
+  assert.equal(C.frase(null), '');
+});
