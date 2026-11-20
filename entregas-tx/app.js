@@ -249,32 +249,30 @@ const MSG_NO_SALIR = 'Tienes registros sin enviar. Conéctate y espera a que se 
 const RESULTADOS = new Map();   // id de entrada de la fila → respuesta de la RPC (aviso de distancia)
 const esperar = (ms) => new Promise(r => setTimeout(r, ms));
 const esRed = (e) => TXOfflineCore.clasificarError(e) === 'red';
-async function rpcOError(nombre, args) { const { data, error } = await sb.rpc(nombre, args); if (error) throw error; return data; }
-const datosDe = async (b) => { const { data, error } = await b; if (error) throw error; return data; };
+// Los errores llevan el status HTTP (un 502/503/504 se reintenta en vez de quedar 'problema').
+const okO = (res) => { const err = TXOfflineCore.errorDeRespuesta(res); if (err) throw err; return res.data; };
+async function rpcOError(nombre, args) { return okO(await sb.rpc(nombre, args)); }
+const datosDe = async (b) => okO(await b);
 
 // Los tipos se registran ANTES de TXOffline.iniciar (iniciar envía de inmediato lo que haya en la fila).
 TXOffline.registrarTipo(EO.T_LLEGADA, async (d, _archivos, meta) => {
   RESULTADOS.set(meta.id, await rpcOError('ent_marcar_llegada', EO.argsLlegada(d)));
 });
 TXOffline.registrarTipo(EO.T_CIERRE, async (d, archivos, meta) => {
-  // rutas fijas guardadas en la fila + upsert: subir de nuevo en un reintento no duplica nada
-  for (const ruta of [...d.fotos, d.firma]) {
-    const blob = archivos[ruta];
-    if (!blob) throw new Error('Falta en el teléfono el archivo ' + ruta);
-    const { error } = await sb.storage.from('entregas').upload(ruta, blob, { contentType: ruta.endsWith('.png') ? 'image/png' : 'image/jpeg', upsert: true });
-    if (error) throw error;
-  }
-  RESULTADOS.set(meta.id, await rpcOError('ent_cerrar_entrega', EO.argsCierre(d)));
+  // rutas fijas guardadas en la fila; sin upsert (el bucket no permite sobrescribir): en un reintento
+  // "ya existe" cuenta como subida y se sigue a la RPC, que es idempotente
+  RESULTADOS.set(meta.id, await EO.enviarCierre(d, archivos, {
+    subir: (ruta, blob, opts) => sb.storage.from('entregas').upload(ruta, blob, opts),
+    rpc: rpcOError,
+  }));
 });
 TXOffline.registrarTipo(EO.T_JORNADA, async (d) => {
   // cierra la jornada anterior (si la había) y crea la nueva con el id generado en el teléfono;
   // ON CONFLICT DO NOTHING: reenviarla no duplica ni falla
   if (d.cerrar) {
-    const { error } = await sb.from('ent_jornadas').update({ fin_at: d.fin_at }).eq('id', d.cerrar).is('fin_at', null);
-    if (error) throw error;
+    okO(await sb.from('ent_jornadas').update({ fin_at: d.fin_at }).eq('id', d.cerrar).is('fin_at', null));
   }
-  const { error } = await sb.from('ent_jornadas').upsert(EO.filaJornada(d), { onConflict: 'id', ignoreDuplicates: true });
-  if (error) throw error;
+  okO(await sb.from('ent_jornadas').upsert(EO.filaJornada(d), { onConflict: 'id', ignoreDuplicates: true }));
 });
 TXOffline.registrarTipo(EO.T_RUTA, async (d, _archivos, meta) => {
   try {

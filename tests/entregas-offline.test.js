@@ -184,3 +184,65 @@ test('jornadasConProblema: solo jornadas con problema, con patente y motivo, en 
   ]);
   assert.deepEqual(E.jornadasConProblema([]), []);
 });
+
+// ---------- fix revisión final: cierre repetible con fotos ya subidas ----------
+test('subidaYaExiste: 409 / "already exists" / "Duplicate" cuentan como ya subida; otros no', () => {
+  assert.equal(E.subidaYaExiste({ statusCode: '409', error: 'Duplicate', message: 'The resource already exists' }), true);
+  assert.equal(E.subidaYaExiste({ status: 409, message: 'x' }), true);
+  assert.equal(E.subidaYaExiste({ status: 400, message: 'The resource already exists' }), true);
+  assert.equal(E.subidaYaExiste({ message: 'duplicate key value violates unique constraint' }), true);
+  assert.equal(E.subidaYaExiste({ statusCode: '403', message: 'new row violates row-level security policy' }), false);
+  assert.equal(E.subidaYaExiste(new TypeError('Failed to fetch')), false);
+  assert.equal(E.subidaYaExiste(null), false);
+});
+
+// Almacenamiento falso: como el bucket real sin política UPDATE (subir dos veces la misma ruta → 409).
+function bucketFalso({ fallaRedEn = null } = {}) {
+  const objetos = new Map(), llamadas = [];
+  return {
+    objetos, llamadas,
+    async subir(ruta, blob, opts) {
+      llamadas.push({ ruta, opts });
+      if (fallaRedEn === ruta) { fallaRedEn = null; objetos.set(ruta, blob); throw new TypeError('Failed to fetch'); } // subió, pero se perdió la respuesta
+      if (objetos.has(ruta)) {
+        if (opts && opts.upsert) return { error: { statusCode: '403', message: 'new row violates row-level security policy' } };
+        return { error: { statusCode: '409', error: 'Duplicate', message: 'The resource already exists' } };
+      }
+      objetos.set(ruta, blob);
+      return { error: null };
+    },
+  };
+}
+const dCierre = { guia: 'g', resultado: 'entregada', fotos: ['g/foto_1_1.jpg', 'g/foto_1_2.jpg'], firma: 'g/firma_1.png', receptor_nombre: 'Ana', at: '2026-11-19T10:05:00.000Z' };
+const archCierre = { 'g/foto_1_1.jpg': 'F1', 'g/foto_1_2.jpg': 'F2', 'g/firma_1.png': 'FI' };
+
+test('enviarCierre: sube sin upsert y llama a ent_cerrar_entrega con los args del cierre', async () => {
+  const b = bucketFalso(), rpcs = [];
+  const r = await E.enviarCierre(dCierre, archCierre, { subir: b.subir, rpc: async (n, a) => { rpcs.push([n, a]); return { id: 'e1' }; } });
+  assert.deepEqual(r, { id: 'e1' });
+  assert.deepEqual(b.llamadas.map(l => l.ruta), ['g/foto_1_1.jpg', 'g/foto_1_2.jpg', 'g/firma_1.png']);
+  assert.ok(b.llamadas.every(l => l.opts.upsert === false));
+  assert.equal(b.llamadas[2].opts.contentType, 'image/png');
+  assert.equal(b.llamadas[0].opts.contentType, 'image/jpeg');
+  assert.deepEqual(rpcs, [['ent_cerrar_entrega', E.argsCierre(dCierre)]]);
+});
+
+test('enviarCierre: reintento tras subida parcial (respuesta perdida) llega a la RPC', async () => {
+  const b = bucketFalso({ fallaRedEn: 'g/foto_1_2.jpg' });
+  let rpcs = 0;
+  const deps = { subir: b.subir, rpc: async () => { rpcs++; return { id: 'e1' }; } };
+  await assert.rejects(E.enviarCierre(dCierre, archCierre, deps), TypeError);
+  assert.equal(rpcs, 0);
+  const r = await E.enviarCierre(dCierre, archCierre, deps);   // segundo intento: las dos primeras ya existen (409)
+  assert.deepEqual(r, { id: 'e1' });
+  assert.equal(rpcs, 1);
+  // y un tercer reenvío completo (respuesta de la RPC perdida) también pasa
+  await E.enviarCierre(dCierre, archCierre, deps);
+  assert.equal(rpcs, 2);
+});
+
+test('enviarCierre: otro error de subida se relanza; falta de archivo en el teléfono también', async () => {
+  const deps = { subir: async () => ({ error: { statusCode: '403', message: 'new row violates row-level security policy' } }), rpc: async () => assert.fail('no debe llamar la RPC') };
+  await assert.rejects(E.enviarCierre(dCierre, archCierre, deps), (e) => /row-level security/.test(e.message));
+  await assert.rejects(E.enviarCierre(dCierre, { 'g/foto_1_1.jpg': 'F1' }, { subir: async () => ({ error: null }), rpc: async () => 1 }), /Falta en el teléfono el archivo g\/foto_1_2\.jpg/);
+});

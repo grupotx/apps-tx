@@ -22,6 +22,27 @@
     };
   }
 
+  // El bucket no deja sobrescribir (sin política UPDATE): en un reintento la foto/firma ya subida
+  // responde 409 "already exists". Las rutas son únicas por entrada de la fila, así que es la misma.
+  function subidaYaExiste(error) {
+    if (!error) return false;
+    if (String(error.statusCode) === '409' || error.status === 409) return true;
+    return /already exists|duplicate/i.test(String(error.message || '') + ' ' + String(error.error || ''));
+  }
+
+  // Envía un cierre de la fila: sube fotos y firma (sin upsert; "ya existe" = ya subida) y llama a
+  // ent_cerrar_entrega (idempotente con la misma firma). deps: subir(ruta, blob, opts) → { error },
+  // rpc(nombre, args) → data (o lanza).
+  async function enviarCierre(d, archivos, { subir, rpc }) {
+    for (const ruta of [...d.fotos, d.firma]) {
+      const blob = archivos[ruta];
+      if (!blob) throw new Error('Falta en el teléfono el archivo ' + ruta);
+      const { error } = await subir(ruta, blob, { contentType: ruta.endsWith('.png') ? 'image/png' : 'image/jpeg', upsert: false });
+      if (error && !subidaYaExiste(error)) throw error;
+    }
+    return rpc('ent_cerrar_entrega', argsCierre(d));
+  }
+
   // Rutas fijas en el bucket para un intento de cierre (se guardan en la fila: los reintentos reusan las mismas).
   function rutasCierre(guiaId, ts, nFotos) {
     const fotos = [];
@@ -129,7 +150,7 @@
       .map(e => ({ id: e.id, patente: (e.datos && e.datos.patente) || '', error: e.error || 'No se pudo enviar' }));
   }
 
-  const api = { T_LLEGADA, T_CIERRE, T_JORNADA, T_RUTA, argsLlegada, argsCierre, rutasCierre, llegadaEnFila, aplicarFila,
+  const api = { T_LLEGADA, T_CIERRE, T_JORNADA, T_RUTA, argsLlegada, argsCierre, subidaYaExiste, enviarCierre, rutasCierre, llegadaEnFila, aplicarFila,
     patenteParaLlegada, filaJornada, argsRuta, rutaYaHecha, aplicarFilaRutas, jornadasConProblema };
   g.EntregasOffline = api;
   if (typeof module !== 'undefined') module.exports = api;
