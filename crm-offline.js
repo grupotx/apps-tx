@@ -61,7 +61,10 @@
       if (d.tarea && S.tasks) agregar(S.tasks, d.tarea, e);
       if (d.opp && d.opp.modo === 'nueva' && S.opps) agregar(S.opps, d.opp.obj, e);
     } else if (e.tipo === 'crm.cotizacion') {
+      if (d.prospecto) agregar(S.clients, d.prospecto, e);
       agregar(S.quotes, d.cotizacion, e);
+      if (d.tarea && S.tasks) agregar(S.tasks, d.tarea, e);
+      if (d.opp && d.opp.modo === 'nueva' && S.opps) agregar(S.opps, d.opp.obj, e);
     } else if (e.tipo === 'crm.cotizacion.editar') {
       const q = S.quotes.find((x) => x.id === d.id);
       if (!q) return;
@@ -88,6 +91,7 @@
   function reasignarCliente(datos, nuevoId) {
     const r = clonar(datos);
     if (r.visita) r.visita.clientId = nuevoId;
+    if (r.cotizacion) r.cotizacion.clientId = nuevoId;
     if (r.tarea) r.tarea.clientId = nuevoId;
     if (r.opp && r.opp.obj) r.opp.obj.clientId = nuevoId;
     return r;
@@ -106,17 +110,21 @@
       if (x) x.clientId = nuevoId;
     };
     mover(S.visits, datos.visita);
+    mover(S.quotes, datos.cotizacion);
     mover(S.tasks, datos.tarea);
     if (datos.opp && datos.opp.modo === 'nueva') mover(S.opps, datos.opp.obj);
   }
 
   // Entrada descartada: lo que solo existía por ella (marcado con su id) sale de S.
   function quitarEntrada(S, id) {
-    // (cotizaciones: las edita el flujo de cotizaciones; una editada del servidor no debe salir)
     for (const k of ['visits', 'clients', 'tasks', 'opps']) {
       const l = S[k] || [];
       for (let i = l.length - 1; i >= 0; i--) if (l[i]._fila && l[i]._fila.id === id) l.splice(i, 1);
     }
+    // Cotizaciones: solo la creada por la entrada (sin _base); una del servidor con edición pendiente se
+    // queda (su reversión la hace aplicarFilaCRM).
+    const qs = S.quotes || [];
+    for (let i = qs.length - 1; i >= 0; i--) if (qs[i]._fila && qs[i]._fila.id === id && !qs[i]._base) qs.splice(i, 1);
   }
 
   // Envío directo (sin fila): lo agregado con el id ficticio deja de estar "Pendiente de enviar";
@@ -144,7 +152,7 @@
     const m = typeof error === 'string' ? error : error && error.message;
     return typeof m === 'string' && m.includes('CLIENTE_EXISTE') ? MSG_CLIENTE_EXISTE : null;
   }
-  const textoProspectoExistia = (nombre) => 'El prospecto «' + nombre + '» ya existía; la visita quedó en ese cliente.';
+  const textoProspectoExistia = (nombre, que = 'la visita') => 'El prospecto «' + nombre + '» ya existía; ' + que + ' quedó en ese cliente.';
 
   const esConflicto = (error) => {
     const m = typeof error === 'string' ? error : error && error.message;
@@ -156,6 +164,28 @@
     if (q.status === 'pendiente') return 'sujeta';
     if (!q.num) return 'borrador';
     return 'oficial';
+  }
+
+  // Marca de agua del PDF ({texto, sub} o null). Sin número siempre "BORRADOR" (el número lo pone el servidor
+  // al enviarse); pendiente → "SUJETA A APROBACIÓN" (se puede entregar); guardada como borrador → "BORRADOR";
+  // rechazada → "RECHAZADA"; emitida o aprobada → sin marca.
+  function marcaAguaPdf(q) {
+    if (q.status === 'rechazada') return { texto: 'RECHAZADA', sub: null };
+    if (!q.num) return { texto: 'BORRADOR', sub: q.status === 'pendiente' ? 'SUJETA A APROBACIÓN' : null };
+    if (q.status === 'borrador') return { texto: 'BORRADOR', sub: null };
+    if (estadoPdf(q) === 'sujeta') return { texto: 'SUJETA A APROBACIÓN', sub: null };
+    return null;
+  }
+
+  // El cliente ya tiene el PDF: se envió (sentAt o historia "Enviada…") o se descargó/compartió.
+  const pdfEntregado = (q) => !!(q && (q.sentAt || (q.history || []).some((h) => /^(Enviada|PDF descargado|PDF compartido)/.test((h && h.text) || ''))));
+
+  // Aviso al vendedor: cotización rechazada cuyo PDF ya tiene el cliente. Deja de avisar al cerrarla
+  // (perdida) o al duplicarla (la nueva lleva otro número).
+  function alertaRechazo(q, quotes) {
+    if (!q || q.status !== 'rechazada' || !pdfEntregado(q)) return null;
+    if ((quotes || []).some((x) => x.dupFrom && x.dupFrom === q.num)) return null;
+    return 'Contacta al cliente: la cotización ' + q.num + ' fue rechazada';
   }
 
   // Aviso de la barra cuando se muestra la copia local (hora local del equipo; si la copia es de otro
@@ -184,7 +214,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

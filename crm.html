@@ -152,7 +152,7 @@ td.r,th.r{text-align:right}
 .st-negociacion{background:var(--accent-2);color:var(--accent);border-color:transparent}
 .st-pendiente{background:var(--amber-bg);color:var(--amber);border-color:transparent}
 .st-ganada{background:var(--good-bg);color:var(--good);border-color:transparent}
-.st-perdida{background:var(--bad-bg);color:var(--bad);border-color:transparent}
+.st-perdida,.st-rechazada{background:var(--bad-bg);color:var(--bad);border-color:transparent}
 .st-vencida{background:var(--panel-2);color:var(--fg-3);text-decoration:line-through}
 .age-ok{background:var(--good-bg);color:var(--good);border-color:transparent}
 .age-30{background:var(--amber-bg);color:var(--amber);border-color:transparent}
@@ -232,7 +232,7 @@ td.r,th.r{text-align:right}
 .sheet.q2{position:relative;overflow:hidden;min-height:1120px;padding:34px 40px 30px;color:#1b1f24;font-size:11.5px;line-height:1.4;--navy:#1d2b4f}
 .q2 .hx{position:absolute;pointer-events:none}.q2 .hx1{left:0;top:0;width:240px;height:210px}.q2 .hx2{right:0;bottom:0;width:230px;height:200px}
 .q2>*:not(.hx){position:relative}
-.sheet.q2>.q-wm{position:absolute;left:0;right:0;top:40%;text-align:center;transform:rotate(-22deg);font-size:64px;font-weight:800;line-height:1;color:rgba(228,3,46,.13);pointer-events:none;z-index:5}.sheet.q2>.q-wm small{font-size:24px;letter-spacing:.08em}
+.sheet.q2>.q-wm{position:absolute;left:0;right:0;top:40%;text-align:center;transform:rotate(-22deg);font-size:64px;font-weight:800;line-height:1;color:rgba(228,3,46,.13);pointer-events:none;z-index:5}.sheet.q2>.q-wm small{font-size:24px;letter-spacing:.08em}.sheet.q2>.q-wm.l{font-size:46px}
 tr.over td{background:color-mix(in srgb,var(--amber-bg) 60%,transparent)}.neg{color:var(--bad);font-weight:700}
 .q2 .q-hd{display:grid;grid-template-columns:150px 1fr auto;gap:22px;align-items:center;margin-bottom:18px}
 .q2 .q-logo img{width:150px;height:auto;display:block}
@@ -463,7 +463,7 @@ const LISTS=()=>Object.values(S.lists).sort((a,b)=>{const i=LIST_ORDER.indexOf(a
 const ROLES={vendedor:'Vendedor',supervisor:'Jefe comercial',admin:'Administrador',gerencia:'Gerencia'};
 const PERM_DEF=[
  ['ver_todo','Ver clientes y cotizaciones de todos los vendedores'],['crear_cliente','Crear y editar clientes'],['registrar_visita','Registrar visitas'],['cotizar','Crear y editar cotizaciones'],['aprobar_desc','Aprobar descuentos sobre el límite'],['productos','Crear y editar productos'],['precios','Editar e importar listas de precios'],['config','Usuarios, permisos, correos y alertas'],['dash_equipo','Dashboard del equipo'],['exportar','Exportar a Excel']];
-const STATUS={borrador:'Borrador',enviada:'Enviada',negociacion:'En negociación',pendiente:'Pendiente aprobación',ganada:'Ganada',perdida:'Perdida',vencida:'Vencida'};
+const STATUS={borrador:'Borrador',enviada:'Enviada',negociacion:'En negociación',pendiente:'Pendiente aprobación',rechazada:'Rechazada',ganada:'Ganada',perdida:'Perdida',vencida:'Vencida'};
 const STAGES=[['visita','Visita'],['cotizacion','Cotización'],['negociacion','Negociación'],['ganada','Ganada'],['perdida','Perdida']];
 const LOSS=['Precio','Competencia','Cliente desistió','Producto no disponible','Plazo','Otro'];
 const REASONS=['Presentación comercial','Prospección (cliente nuevo)','Visita a instalación Grupo TX','Seguimiento de cotización','Levantamiento de obra','Reclamo / postventa','Cobranza','Capacitación técnica','Cierre de negocio'];
@@ -705,7 +705,7 @@ function sendMail(ev,subject,body,extraTo){const m=armarMail(ev,subject,body,ext
 function alertsFor(){
  const out=[];const cl=S.clients.filter(c=>mine(c)&&!(c.origen==='SAP'&&!lastVisit(c.id)));const qs=visibleQuotes();
  S.quotes.filter(q=>q.status==='pendiente'&&canApprove(q)&&q.userId!==S.me).forEach(q=>out.push({k:'a',sev:3,text:`Aprobar descuento: ${q.num||''} · ${(C(q.clientId)||{}).name||''}`,sub:`${U(q.userId).name} · ${clp(qTotals(q).total)} · dcto. máx ${maxDisc(q)}%`,go:'#cotizacion/'+q.id}));
- S.quotes.filter(q=>q.userId===S.me).forEach(q=>{const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text));if(h&&h.user!==S.me&&daysBetween(pd(h.ts.slice(0,10)),TODAY)<=7)out.push({k:'a',sev:3,text:`${q.num}: ${h.text}`,sub:(C(q.clientId)||{}).name||'',go:'#cotizacion/'+q.id})});
+ S.quotes.filter(q=>q.userId===S.me).forEach(q=>{const ar=CO.alertaRechazo(q,S.quotes);if(ar){out.push({k:'a',sev:3,text:ar,sub:(C(q.clientId)||{}).name||'',go:'#cotizacion/'+q.id});return}const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text));if(h&&h.user!==S.me&&daysBetween(pd(h.ts.slice(0,10)),TODAY)<=7)out.push({k:'a',sev:3,text:`${q.num}: ${h.text}`,sub:(C(q.clientId)||{}).name||'',go:'#cotizacion/'+q.id})});
  const scopeTasks=S.tasks.filter(t=>!t.done&&(can('ver_todo')&&me().role!=='vendedor'?true:t.userId===S.me));
  scopeTasks.filter(t=>t.date<ymd(TODAY)).forEach(t=>out.push({k:'t',sev:2,text:`Actividad vencida: ${t.title}`,sub:((C(t.clientId)||{}).name||'Sin cliente')+' · '+fd(t.date),go:'#agenda'}));
  qs.filter(q=>openQ(q)&&q.status!=='borrador').forEach(q=>{const d=Math.ceil((qExpiry(q)-TODAY)/864e5);if(d>=0&&d<=S.cfg.expWarn)out.push({k:'q',sev:2,text:`${q.num} vence en ${d} día${d===1?'':'s'}`,sub:C(q.clientId).name+' · '+clp(qTotals(q).total),go:'#cotizacion/'+q.id});
@@ -819,7 +819,7 @@ function vClients(){
   let rows=cl.filter(c=>{const q=norm(CF.q);if(q&&!norm([c.name,c.razon,c.rut,c.comuna,c.email,(c.contacts||[]).map(x=>x.name).join(' ')].join(' ')).includes(q))return false;if(CF.region&&c.region!==CF.region)return false;if(CF.seller&&!c.sellers.includes(CF.seller))return false;if(CF.vsap&&c.vendedor!==CF.vsap)return false;if(CF.age&&daysSince(c.id)<+CF.age)return false;if(CF.seg&&c.segment!==CF.seg)return false;return true});
   const sorters={compra:(a,b)=>actKey(b).localeCompare(actKey(a)),name:(a,b)=>a.name.localeCompare(b.name),days:(a,b)=>daysSince(b.id)-daysSince(a.id),region:(a,b)=>a.region.localeCompare(b.region)||a.comuna.localeCompare(b.comuna)};
   rows.sort(sorters[CF.sort]);const total=rows.length;const LIM=300;rows=rows.slice(0,LIM);
-  $('#cl-table').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th class="s" data-sort="name">Cliente ↕</th><th class="hide-m">RUT</th><th class="s" data-sort="region">Región / comuna ↕</th><th class="hide-m">Vendedor</th><th class="s" data-sort="days">Última visita ↕</th><th class="hide-m">Última cotización</th></tr></thead><tbody>${rows.map(c=>{const lq=lastQuote(c.id);const lv=lastVisit(c.id);return `<tr class="click" data-go="#cliente/${c.id}"><td><b>${esc(c.name)}</b> ${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto</span>':`<span class="chip" title="Segmento">${c.segment}</span>`} ${filaChip(c)}<div class="small muted">${esc(c.type)}</div></td><td class="hide-m mono small">${c.rut}</td><td>${esc(c.comuna)}<div class="small muted">${regName(c.region)}</div></td><td class="hide-m"><span class="row">${c.sellers.map(avatar).join('')}</span>${c.vendedor?`<div class="small muted">SAP: ${esc(c.vendedor)}</div>`:''}</td><td>${agePill(daysSince(c.id))}<div class="small muted">${lv?fd(lv.date.slice(0,10)):''}</div></td><td class="hide-m">${lq?`<span class="mono small">${lq.num}</span><br>${stPill(lq)}`:'<span class="muted">—</span>'}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${total} de ${cl.length} clientes${total>LIM?` · se muestran los primeros ${LIM}; usa la búsqueda o los filtros para encontrar el resto`:''}</p>`:'<div class="card empty">No hay clientes que coincidan con los filtros.</div>';
+  $('#cl-table').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th class="s" data-sort="name">Cliente ↕</th><th class="hide-m">RUT</th><th class="s" data-sort="region">Región / comuna ↕</th><th class="hide-m">Vendedor</th><th class="s" data-sort="days">Última visita ↕</th><th class="hide-m">Última cotización</th></tr></thead><tbody>${rows.map(c=>{const lq=lastQuote(c.id);const lv=lastVisit(c.id);return `<tr class="click" data-go="#cliente/${c.id}"><td><b>${esc(c.name)}</b> ${isProsp(c)?'<span class="chip" style="color:var(--amber)">Prospecto</span>':`<span class="chip" title="Segmento">${c.segment}</span>`} ${filaChip(c)}<div class="small muted">${esc(c.type)}</div></td><td class="hide-m mono small">${c.rut}</td><td>${esc(c.comuna)}<div class="small muted">${regName(c.region)}</div></td><td class="hide-m"><span class="row">${c.sellers.map(avatar).join('')}</span>${c.vendedor?`<div class="small muted">SAP: ${esc(c.vendedor)}</div>`:''}</td><td>${agePill(daysSince(c.id))}<div class="small muted">${lv?fd(lv.date.slice(0,10)):''}</div></td><td class="hide-m">${lq?`<span class="mono small">${esc(qn(lq))}</span><br>${stPill(lq)}`:'<span class="muted">—</span>'}</td></tr>`}).join('')}</tbody></table></div><p class="small muted">${total} de ${cl.length} clientes${total>LIM?` · se muestran los primeros ${LIM}; usa la búsqueda o los filtros para encontrar el resto`:''}</p>`:'<div class="card empty">No hay clientes que coincidan con los filtros.</div>';
  };
  draw();
  M().oninput=e=>{const id=e.target.id;if(id&&id.startsWith('cf-')){CF[id.slice(3)]=e.target.value;draw()}};
@@ -847,7 +847,7 @@ function vClient(id){
  const closed=qs.filter(q=>['ganada','perdida'].includes(q.status));
  const d=daysSince(id);const L=listFor(c);
  const tl=[...vs.map(v=>({ts:v.date,k:'v',t:'Visita · '+v.reason,s:v.result+' — '+v.comments,u:v.userId,link:null,extra:v})),
-  ...qs.map(q=>({ts:q.createdAt,k:'q',t:`Cotización ${q.num} · ${clp(qTotals(q).total)}`,s:STATUS[qStatus(q)],u:q.userId,link:'#cotizacion/'+q.id})),
+  ...qs.map(q=>({ts:q.createdAt,k:'q',t:`Cotización ${qn(q)} · ${clp(qTotals(q).total)}`,s:STATUS[qStatus(q)],u:q.userId,link:'#cotizacion/'+q.id})),
   ...won.map(q=>({ts:q.won.date+'T18:00',k:'w',t:`Pedido ${q.won.order} · ${clp(q.won.amount)}`,s:'Cotización '+q.num+' ganada',u:q.userId,link:'#cotizacion/'+q.id})),
   ...qs.filter(q=>q.lost).map(q=>({ts:q.lost.date+'T18:00',k:'l',t:`Cotización ${q.num} perdida`,s:'Motivo: '+q.lost.reason,u:q.userId,link:'#cotizacion/'+q.id})),
   ...cm.map(m=>({ts:m.date,k:'m',t:m.channel,s:m.text,u:m.userId})),
@@ -945,11 +945,17 @@ function vVisits(){
 // Lo registrado en el teléfono que aún no llega al servidor (_fila): chip y, si falló, Reintentar / Descartar.
 function filaChip(x){const f=x&&x._fila;if(!f)return '';return f.estado==='problema'?`<span class="chip" style="color:var(--bad);white-space:normal">No se pudo enviar: ${esc(f.error||'')}</span>`:'<span class="chip" style="color:var(--amber)">Pendiente de enviar</span>'}
 function filaAcc(x){const f=x&&x._fila;return f&&f.estado==='problema'?`<span class="row" style="margin-top:4px"><button type="button" class="btn sm" data-fila-acc="reintentar" data-eid="${f.id}">${ico('send')}Reintentar</button><button type="button" class="btn sm ghost" data-fila-acc="descartar" data-eid="${f.id}">${ico('x')}Descartar</button></span>`:''}
+// Textos por tipo de entrada: [qué se descarta, descartada, enviada]
+const TXT_FILA={'crm.visita':['la visita sin enviar? Se borrará del teléfono (foto incluida)','Visita descartada.','Visita enviada.'],
+ 'crm.cotizacion':['la cotización sin enviar? Se borrará del teléfono (su número queda sin usar)','Cotización descartada.','Cotización enviada.'],
+ 'crm.cotizacion.entrega':['el registro de entrega del PDF? Se borrará del teléfono','Registro descartado.','Registro enviado.']};
 async function accionFilaCRM(b){const eid=b.dataset.eid,acc=b.dataset.filaAcc;
- if(acc==='descartar'){if(!confirm('¿Descartar la visita sin enviar? Se borrará del teléfono (foto incluida) y no se enviará.'))return;CO.quitarEntrada(S,eid);try{await TXOffline.descartar(eid)}catch(e){console.error(e)}toast('Visita descartada.')}
+ let tipo='crm.visita';try{const e0=(await TXOffline.entradas()).find(x=>x.id===eid);if(e0)tipo=e0.tipo}catch(_){}
+ const tx=TXT_FILA[tipo]||['el registro sin enviar? Se borrará del teléfono','Registro descartado.','Registro enviado.'];
+ if(acc==='descartar'){if(!confirm('¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid);try{await TXOffline.descartar(eid)}catch(e){console.error(e)}toast(tx[1])}
  else{b.disabled=true;esperandoEnvio.add(eid);try{await Promise.race([TXOffline.reintentar(eid),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
   let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===eid)}catch(_){}
-  toast(!e?esc(resolverAviso(eid)||'Visita enviada.'):e.estado==='problema'?'Sigue con problema: '+esc(e.error||''):'Pendiente de enviar. Se enviará al volver la señal.')}
+  toast(!e?esc(resolverAviso(eid)||tx[2]):e.estado==='problema'?'Sigue con problema: '+esc(e.error||''):'Pendiente de enviar. Se enviará al volver la señal.')}
  closeModal();await aplicarFila();rerender()}
 function showVisit(id){const v=S.visits.find(x=>x.id===id);if(!v){toast('La visita ya no está en este equipo.');return}const c=VC(v);
  openModal('Visita · '+esc(c.name),`<dl class="kv"><dt>Fecha y hora</dt><dd>${fdt(v.date)}</dd><dt>Vendedor</dt><dd>${esc(U(v.userId).name)}</dd><dt>Dirección</dt><dd>${esc(v.address)}</dd><dt>Motivo</dt><dd>${esc(v.reason)}</dd><dt>Comentarios</dt><dd>${esc(v.comments)}</dd><dt>Resultado</dt><dd>${esc(v.result)}</dd><dt>Próximo paso</dt><dd>${esc(v.next)}</dd><dt>Fecha seguimiento</dt><dd>${fd(v.followDate)}</dd><dt>Ubicación</dt><dd class="small"><span class="mono">${(+v.lat).toFixed(5)}, ${(+v.lng).toFixed(5)}</span> ${v.gps?'(GPS del teléfono)':'(comuna del cliente)'} · <a href="https://www.google.com/maps?q=${v.lat},${v.lng}" target="_blank" rel="noopener">Abrir en mapa</a></dd><dt>Evidencia</dt><dd id="vPhoto">${!v.photo?'Sin foto':v._fila?'Foto guardada en el teléfono; se verá cuando la visita se envíe.':'Cargando foto…'}</dd>${v._fila?`<dt>Envío</dt><dd>${filaChip(v)}${filaAcc(v)}</dd>`:''}</dl>`,c.id?`<a class="btn" href="#cliente/${c.id}">Ver ficha del cliente</a>`:'','narrow');
@@ -1075,6 +1081,87 @@ TIPOS_FILA['crm.visita']=async(d0,archivos,meta)=>{
  for(const a of [nuevoId?null:d.auditoriaProspecto,d.auditoria])if(a)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,a.ts?['ts',...COLS.audit]:COLS.audit))));
  if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d.prospecto.name),datos:d0,nuevoId});
 };
+// Prospecto del teléfono → id del servidor (crm_resolver_cliente es idempotente). Devuelve [datos, nuevoId|null].
+async function resolverProspecto(d){
+ if(!d.prospecto)return [d,null];
+ let cid;try{cid=okR(await sb.rpc('crm_resolver_cliente',{p:toRow(d.prospecto,COLS.clients)}))}
+ catch(e){const m=CO.errorClienteExiste(e);if(m)throw new Error(m);throw e}
+ return cid&&cid!==d.prospecto.id?[CO.reasignarCliente(d,cid),cid]:[d,null];
+}
+
+/* ---- Cotizaciones sin señal: reserva de números oficiales ---- */
+// Texto provisorio donde iría el número (tarea, aviso, auditoría) si la cotización se guardó sin número;
+// el envío lo reemplaza por el que asigna el servidor.
+const NUM_PEND='(sin número)';
+const qn=q=>q.num||'Sin número';
+// Reserva local 'crm.numeros' (por usuario). Leer y descontar bajo un Web Lock: dos pestañas nunca toman el mismo.
+const conNumeros=fn=>navigator.locks?navigator.locks.request('crm-numeros-'+S.me,fn):fn();
+async function tomarNumeroReservado(){
+ try{return await conNumeros(async()=>{const res=(await TXOffline.leerLocal('crm.numeros'))||[];const {num,resto}=CO.tomarNumero(res);if(num)await TXOffline.guardarLocal('crm.numeros',resto);return num})}
+ catch(e){console.warn('[CRM] sin reserva de números:',e);return null}
+}
+// Con señal: completa la reserva (al iniciar, al volver la señal y después de usar un número).
+let reponiendo=false;
+async function reponerNumeros(){
+ if(reponiendo||!S.me||!can('cotizar')||navigator.onLine===false)return;
+ reponiendo=true;
+ try{
+  const res=(await TXOffline.leerLocal('crm.numeros'))||[];
+  if(!CO.necesitaReponer(res))return;
+  const n=Math.min(20,CO.cantidadAReservar(res));if(!n)return;
+  const nuevos=okR(await sb.rpc('crm_reservar_numeros',{p_n:n}))||[];
+  await conNumeros(async()=>{const act=(await TXOffline.leerLocal('crm.numeros'))||[];await TXOffline.guardarLocal('crm.numeros',[...act,...nuevos.filter(x=>!act.includes(x))])});
+ }catch(e){console.warn('[CRM] no se pudieron reservar números:',e)}
+ finally{reponiendo=false}
+}
+window.addEventListener('online',()=>{if(lastLoad)reponerNumeros()});
+// El servidor asignó el número (cotización guardada sin reserva): se actualiza la copia en pantalla.
+function numeroAsignado(d,num){const q=S.quotes.find(x=>x.id===d.cotizacion.id);if(q&&!q.num)q.num=num;
+ const t=d.tarea&&S.tasks.find(x=>x.id===d.tarea.id);if(t&&t.title)t.title=t.title.split(NUM_PEND).join(num)}
+// Envío de una cotización nueva de la fila (repetible: ids del teléfono, insert sin duplicar).
+// Obligatorio: prospecto, oportunidad nueva (la cotización la referencia) y cotización. Lo demás, secundario.
+TIPOS_FILA['crm.cotizacion']=async(d0,archivos,meta)=>{
+ const [d,nuevoId]=await resolverProspecto(d0);
+ const q=d.cotizacion;
+ if(d.opp&&d.opp.modo==='nueva')okR(await sb.from('crm_opps').upsert(toRow(d.opp.obj,COLS.opps),{onConflict:'id',ignoreDuplicates:true}));
+ // crm_set_quote_num valida que el número sea de la reserva de este usuario (idempotente por id);
+ // sin número lo asigna el servidor y se lee de vuelta.
+ okR(await sb.from('crm_quotes').upsert(toRow(q,COLS.quotes),{onConflict:'id',ignoreDuplicates:true}));
+ let num=q.num;
+ if(!num){num=okR(await sb.from('crm_quotes').select('num').eq('id',q.id).single()).num;numeroAsignado(d,num)}
+ const put=s=>q.num||s==null?s:String(s).split(NUM_PEND).join(num);
+ if(d.opp)await secundario(async()=>okR(await sb.from('crm_opps').update(toRow(d.opp.obj,['stage','amount','quoteIds','nextAction','nextDate'])).eq('id',d.opp.obj.id)));
+ if(d.tarea)await secundario(async()=>okR(await sb.from('crm_tasks').upsert(toRow({...d.tarea,title:put(d.tarea.title)},COLS.tasks),{onConflict:'id',ignoreDuplicates:true})));
+ for(const a of d.avisos||[])await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow({...a,subject:put(a.subject),body:put(a.body)},COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
+ if(d.auditoria){const a={...d.auditoria,ref:put(d.auditoria.ref),detail:put(d.auditoria.detail)};await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,['ts',...COLS.audit]))))}
+ if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d0.prospecto.name,'la cotización'),datos:d0,nuevoId});
+};
+// PDF entregado (descargado, compartido o enviado por correo): línea de historia, fecha de envío y estado
+// borrador→enviada, más aviso y auditoría. Por la fila para que funcione sin señal; repetible (la línea no se duplica).
+TIPOS_FILA['crm.cotizacion.entrega']=async d=>{
+ // registrada antes de tener número: la auditoría se completa con el que asignó el servidor
+ const sinNum=!!(d.auditoria&&String(d.auditoria.ref).includes(NUM_PEND));let num=null;
+ if(d.linea||d.sentAt||d.aEnviada||sinNum){
+  const r=okR(await sb.from('crm_quotes').select('history,status,sent_at,num').eq('id',d.id).maybeSingle());
+  if(!r)throw new Error('La cotización no está en el servidor.');
+  const h=Array.isArray(r.history)?r.history:[];
+  const ya=d.linea&&h.some(x=>x&&x.ts===d.linea.ts&&x.text===d.linea.text&&x.user===d.linea.user);
+  const upd={};if(d.linea&&!ya)upd.history=[...h,d.linea];if(d.sentAt&&r.sent_at!==d.sentAt)upd.sent_at=d.sentAt;if(d.aEnviada&&r.status==='borrador')upd.status='enviada';
+  if(Object.keys(upd).length)okR(await sb.from('crm_quotes').update(upd).eq('id',d.id));
+  num=r.num;
+ }
+ if(d.aviso)await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(d.aviso,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
+ if(d.auditoria){const a=sinNum&&num?{...d.auditoria,ref:String(d.auditoria.ref).split(NUM_PEND).join(num)}:d.auditoria;await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,['ts',...COLS.audit]))))}
+};
+// Registra la entrega del PDF: en pantalla al tiro y por la fila (depende del envío de la cotización si aún no se envía).
+async function registrarEntrega(q,o){
+ const linea=o.texto?{ts:nowIso(),user:S.me,text:o.texto}:null;
+ const datos={id:q.id,linea,sentAt:o.sentAt||null,aEnviada:!!o.aEnviada,aviso:o.aviso||null,auditoria:o.auditoria?{ts:nowIso(),...o.auditoria}:null};
+ if(linea)(q.history=q.history||[]).push(linea);if(o.sentAt)q.sentAt=o.sentAt;if(o.aEnviada&&q.status==='borrador')q.status='enviada';
+ if(o.aviso)S.outbox.unshift(o.aviso);if(datos.auditoria)S.audit.unshift({user:S.me,...datos.auditoria});
+ try{await TXOffline.encolar('crm.cotizacion.entrega',datos,{dependeDe:q._fila?q._fila.id:null})}
+ catch(e){console.error(e);try{escrituras++;await TIPOS_FILA['crm.cotizacion.entrega'](datos,{},{id:uid(),intentos:0})}catch(e2){console.error(e2);toast(esRed(e2)?MSG_REQUIERE_RED:'No se pudo registrar la entrega del PDF: '+esc((e2&&e2.message)||e2))}finally{escrituras++}}
+}
 
 /* ============ MAP ============ */
 let MF={seller:'',region:'',comuna:'',client:'',from:ymd(addD(TODAY,-90)),to:ymd(TODAY),showC:true,showV:true};
@@ -1129,8 +1216,8 @@ function vQuotes(){
  M().innerHTML=`<div class="ph"><div><h1>Cotizaciones</h1><p>${qs.length} cotizaciones · abiertas por ${clp(qs.filter(openQ).reduce((s,q)=>s+qTotals(q).total,0))}</p></div><div class="row">${can('exportar')?`<button class="btn" data-act="export" data-what="cotizaciones">${ico('dl')}Exportar</button>`:''}${can('cotizar')?`<button class="btn pri" data-act="newQuote">${ico('plus')}Nueva cotización</button>`:''}</div></div>
  <div class="tabs" id="qtabs"><button data-st="" class="${!QF.st?'on':''}">Todas<span class="c">${qs.length}</span></button>${Object.keys(STATUS).map(s=>`<button data-st="${s}" class="${QF.st===s?'on':''}">${STATUS[s]}<span class="c">${counts[s]||0}</span></button>`).join('')}</div>
  <div class="filters"><input type="search" id="qf-q" placeholder="N°, cliente, producto…" value="${esc(QF.q)}">${can('ver_todo')?`<select id="qf-seller"><option value="">Todos los vendedores</option>${S.users.filter(u=>u.role==='vendedor').map(u=>`<option value="${u.id}" ${QF.seller===u.id?'selected':''}>${u.name}</option>`).join('')}</select>`:''}</div><div id="qt"></div>`;
- const draw=()=>{const rows=qs.filter(q=>{if(QF.st&&qStatus(q)!==QF.st)return false;if(QF.seller&&q.userId!==QF.seller)return false;if(QF.q&&!norm(q.num+C(q.clientId).name+q.items.map(i=>i.name).join(' ')).includes(norm(QF.q)))return false;return true}).sort((a,b)=>b.date.localeCompare(a.date)||b.num.localeCompare(a.num));
-  $('#qt').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th>N°</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Emisión</th><th class="hide-m">Vence</th><th class="r">Total</th><th>Estado</th><th class="hide-m">Próxima acción</th></tr></thead><tbody>${rows.map(q=>{const exp=qExpiry(q);const dl=Math.ceil((exp-TODAY)/864e5);const o=openQ(q);return `<tr class="click" data-go="#cotizacion/${q.id}"><td class="mono small">${q.num}</td><td><b>${esc(C(q.clientId).name)}</b><div class="small muted">${q.items.length} producto${q.items.length>1?'s':''}</div></td><td class="hide-m">${esc(U(q.userId).name)}</td><td class="small">${fd(q.date)}</td><td class="hide-m small">${fd(exp)}${o&&dl>=0&&dl<=S.cfg.expWarn?` <span class="pill age-30 nodot">${dl}d</span>`:''}</td><td class="r num">${clp(qTotals(q).total)}</td><td>${stPill(q)}</td><td class="hide-m small">${o&&q.nextAction?esc(q.nextAction)+'<br><span class="muted">'+fds(q.nextDate)+'</span>':''}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="card empty">No hay cotizaciones con estos filtros.</div>'};
+ const draw=()=>{const rows=qs.filter(q=>{if(QF.st&&qStatus(q)!==QF.st)return false;if(QF.seller&&q.userId!==QF.seller)return false;if(QF.q&&!norm(q.num+C(q.clientId).name+q.items.map(i=>i.name).join(' ')).includes(norm(QF.q)))return false;return true}).sort((a,b)=>b.date.localeCompare(a.date)||String(b.num||'').localeCompare(String(a.num||'')));
+  $('#qt').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th>N°</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Emisión</th><th class="hide-m">Vence</th><th class="r">Total</th><th>Estado</th><th class="hide-m">Próxima acción</th></tr></thead><tbody>${rows.map(q=>{const exp=qExpiry(q);const dl=Math.ceil((exp-TODAY)/864e5);const o=openQ(q);return `<tr class="click" data-go="#cotizacion/${q.id}"><td class="mono small">${esc(qn(q))}</td><td><b>${esc(C(q.clientId).name)}</b> ${filaChip(q)}<div class="small muted">${q.items.length} producto${q.items.length>1?'s':''}</div></td><td class="hide-m">${esc(U(q.userId).name)}</td><td class="small">${fd(q.date)}</td><td class="hide-m small">${fd(exp)}${o&&dl>=0&&dl<=S.cfg.expWarn?` <span class="pill age-30 nodot">${dl}d</span>`:''}</td><td class="r num">${clp(qTotals(q).total)}</td><td>${stPill(q)}</td><td class="hide-m small">${o&&q.nextAction?esc(q.nextAction)+'<br><span class="muted">'+fds(q.nextDate)+'</span>':''}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="card empty">No hay cotizaciones con estos filtros.</div>'};
  draw();
  M().onclick=e=>{const t=e.target.closest('[data-st]');if(t){QF.st=t.dataset.st;vQuotes()}};
  M().oninput=e=>{if(e.target.id&&e.target.id.startsWith('qf-')){QF[e.target.id.slice(3)]=e.target.value;draw()}};M().onchange=M().oninput;
@@ -1176,14 +1263,17 @@ function vQuote(id){
  if(q._edit)return quoteEditor(q,false);
  const c=C(q.clientId);const t=qTotals(q);const st=qStatus(q);const closed=['ganada','perdida'].includes(st);
  const mine=q.userId===S.me||can('ver_todo');const canAct=can('cotizar')||can('aprobar_desc');
- M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${q.num}</div><h1>${q.num} · ${esc(c.name)}</h1><p class="row">${stPill(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${q.dupFrom}</span>`:''}</p></div>
+ // rechazada: solo se puede cerrar como perdida o duplicar (otro número); sin enviar (en la fila): sin cambios de estado ni edición
+ const rech=q.status==='rechazada',enFila=!!q._fila,hRech=rech?((q.history||[]).slice().reverse().find(x=>/^Rechazada por/.test(x.text))||{text:'Rechazada'}).text:'';
+ M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${esc(qn(q))}</div><h1>${esc(qn(q))} · ${esc(c.name)}</h1><p class="row">${stPill(q)}${filaChip(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${q.dupFrom}</span>`:''}</p>${filaAcc(q)}</div>
   <div class="stat-actions">
-   ${!closed&&canAct&&mine&&q.status!=='pendiente'?`<button class="btn good" data-act="win" data-id="${q.id}">${ico('check')}Marcar como ganada</button><button class="btn bad" data-act="lose" data-id="${q.id}">${ico('x')}Marcar como perdida</button>`:''}
+   ${!closed&&canAct&&mine&&!enFila&&q.status!=='pendiente'?`${rech?'':`<button class="btn good" data-act="win" data-id="${q.id}">${ico('check')}Marcar como ganada</button>`}<button class="btn bad" data-act="lose" data-id="${q.id}">${ico('x')}Marcar como perdida</button>`:''}
    <button class="btn" data-act="pdf" data-id="${q.id}">${ico('dl')}Descargar PDF</button>
-   ${can('cotizar')&&q.status!=='pendiente'?`<button class="btn" data-act="mailQ" data-id="${q.id}">${ico('send')}Enviar por correo</button><button class="btn" data-act="dupQ" data-id="${q.id}">${ico('copy')}Duplicar cotización</button>`:''}
-   ${!closed&&can('cotizar')&&mine?`<button class="btn ghost" data-act="editQ" data-id="${q.id}">${ico('edit')}Editar</button>`:''}
+   ${can('cotizar')&&!rech?`<button class="btn" data-act="mailQ" data-id="${q.id}">${ico('send')}${navigator.onLine===false?'Compartir PDF':'Enviar por correo'}</button>`:''}${can('cotizar')&&q.status!=='pendiente'?`<button class="btn" data-act="dupQ" data-id="${q.id}">${ico('copy')}Duplicar cotización</button>`:''}
+   ${!closed&&!rech&&!enFila&&can('cotizar')&&mine?`<button class="btn ghost" data-act="editQ" data-id="${q.id}">${ico('edit')}Editar</button>`:''}
   </div></div>
- ${q.status==='pendiente'?`<div class="note warn" style="margin-bottom:12px">${ico('alert')}<span><b>Borrador pendiente de aprobación.</b> Tiene productos con descuento sobre ${S.cfg.discLimit}% (máx. ${maxDisc(q)}%). Debe aprobarla <b>${esc((approverOf(q)||{nombre:'la jefatura comercial'}).nombre)}</b>. ${canApprove(q)?`<button class="btn sm good" data-act="approve" data-id="${q.id}">${ico('check')}Aprobar</button> <button class="btn sm bad" data-act="reject" data-id="${q.id}">Rechazar</button>`:`<button class="btn sm" data-act="askApproval" data-id="${q.id}">${ico('send')}Avisar por correo</button>`}</span></div>`:isApproved(q)&&overLimit(q)?`<div class="note" style="background:var(--good-bg);margin-bottom:12px">${ico('check')}<span>${esc((q.history.slice().reverse().find(x=>/^Aprobada por/.test(x.text))||{}).text||'')}</span></div>`:''}
+ ${rech?`<div class="note" style="background:var(--bad-bg);margin-bottom:12px">${ico('x')}<span><b>${esc(hRech)}.</b> ${CO.alertaRechazo(q,S.quotes)?'<b>El cliente ya tiene el PDF: contáctalo.</b> ':''}Si hay que rehacerla, usa «Duplicar cotización»: la nueva lleva otro número.</span></div>`:''}
+ ${q.status==='pendiente'?`<div class="note warn" style="margin-bottom:12px">${ico('alert')}<span><b>Pendiente de aprobación.</b> Tiene productos con descuento sobre ${S.cfg.discLimit}% (máx. ${maxDisc(q)}%). Debe aprobarla <b>${esc((approverOf(q)||{nombre:'la jefatura comercial'}).nombre)}</b>. El PDF se puede entregar: dice «Sujeta a aprobación». ${canApprove(q)?`<button class="btn sm good" data-act="approve" data-id="${q.id}">${ico('check')}Aprobar</button> <button class="btn sm bad" data-act="reject" data-id="${q.id}">Rechazar</button>`:`<button class="btn sm" data-act="askApproval" data-id="${q.id}">${ico('send')}Avisar por correo</button>`}</span></div>`:isApproved(q)&&overLimit(q)?`<div class="note" style="background:var(--good-bg);margin-bottom:12px">${ico('check')}<span>${esc((q.history.slice().reverse().find(x=>/^Aprobada por/.test(x.text))||{}).text||'')}</span></div>`:''}
  ${q.won?`<div class="note" style="background:var(--good-bg);margin-bottom:12px">${ico('check')}<span><b>Ganada.</b> Pedido ${esc(q.won.order)} · compra estimada ${fd(q.won.date)} · monto final ${clp(q.won.amount)}${q.won.notes?' · '+esc(q.won.notes):''}</span></div>`:''}
  ${q.lost?`<div class="note" style="background:var(--bad-bg);margin-bottom:12px">${ico('x')}<span><b>Perdida por: ${esc(q.lost.reason)}.</b> ${q.lost.competitor?'Competidor: '+esc(q.lost.competitor)+'. ':''}${esc(q.lost.notes||'')}</span></div>`:''}
  <div class="grid g-main">
@@ -1193,11 +1283,11 @@ function vQuote(id){
   </div>
   <div class="grid" style="align-content:start">
    <div class="card"><h2>Condiciones</h2><dl class="kv"><dt>Cliente</dt><dd><a href="#cliente/${c.id}">${esc(c.name)}</a><br><span class="small muted">Atención: ${esc(q.contact||((c.contacts||[])[0]||{}).name)}</span></dd><dt>Zona de precios</dt><dd>${esc((qList(q)||listFor(c)).name)}</dd><dt>Forma de pago</dt><dd>${esc(q.payment)}</dd><dt>Vigencia</dt><dd>${q.validDays} días</dd><dt>Condiciones</dt><dd style="white-space:pre-line">${esc(q.conditions)}</dd><dt>Observaciones</dt><dd>${esc(q.notes)||'—'}</dd></dl></div>
-   ${!closed?`<div class="card"><h2>Seguimiento</h2><dl class="kv"><dt>Próxima acción</dt><dd>${esc(q.nextAction)||'—'}</dd><dt>Fecha</dt><dd>${q.nextDate?fd(q.nextDate):'—'}</dd></dl>${can('cotizar')&&mine?`<div class="fld" style="margin-top:10px"><label>Cambiar estado</label><select data-act-change="status" data-id="${q.id}">${['borrador','enviada','negociacion','pendiente'].filter(s=>!(overLimit(q)&&!isApproved(q)&&!canApprove(q)&&['enviada','negociacion'].includes(s))||q.status===s).map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${STATUS[s]}</option>`).join('')}</select></div>`:''}</div>`:''}
+   ${!closed?`<div class="card"><h2>Seguimiento</h2><dl class="kv"><dt>Próxima acción</dt><dd>${esc(q.nextAction)||'—'}</dd><dt>Fecha</dt><dd>${q.nextDate?fd(q.nextDate):'—'}</dd></dl>${can('cotizar')&&mine&&!rech&&!enFila?`<div class="fld" style="margin-top:10px"><label>Cambiar estado</label><select data-act-change="status" data-id="${q.id}">${['borrador','enviada','negociacion','pendiente'].filter(s=>!(overLimit(q)&&!isApproved(q)&&!canApprove(q)&&['enviada','negociacion'].includes(s))||q.status===s).map(s=>`<option value="${s}" ${q.status===s?'selected':''}>${STATUS[s]}</option>`).join('')}</select></div>`:''}</div>`:''}
    <div class="card"><h2>Historial</h2>${q.history.slice().reverse().map(h=>`<div class="list-item small"><div class="grow">${esc(h.text)}<div class="muted">${fdt(h.ts)} · ${esc(U(h.user).name)}</div></div></div>`).join('')}</div>
   </div>
  </div>`;
- M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=null;
+ M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=e=>{const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
 }
 function totalsBox(t){return `<div class="totals"><span>Subtotal bruto</span><span class="num">${clp(t.bruto)}</span><span>Descuentos</span><span class="num">− ${clp(t.desc)}</span><span>Neto</span><span class="num">${clp(t.neto)}</span><span>IVA 19%</span><span class="num">${clp(t.iva)}</span><span class="T">Total</span><span class="T num">${clp(t.total)}</span></div>`}
 function quoteEditor(q,isNew){
@@ -1230,7 +1320,7 @@ function quoteEditor(q,isNew){
    ${q.items.map((i,k)=>`<tr class="${i.disc>S.cfg.discLimit?'over':''}"><td style="min-width:150px"><b class="small">${esc(i.name)}</b><div class="small muted mono">${i.code} · ${esc(i.unit)}</div></td><td class="r"><input class="w-q num" type="number" min="0" data-i="${k}" data-f="qty" value="${i.qty}"></td><td class="r num muted small">${clp(i.listPrice)}</td><td class="r"><input class="w-p num" type="number" min="0" step="1" data-i="${k}" data-f="price" value="${i.price}" title="Precio real de venta"></td><td class="r"><input class="w-d num ${i.disc>S.cfg.discLimit?'chg':''}" type="number" min="0" max="100" step="0.01" data-i="${k}" data-f="disc" value="${+(+i.disc||0).toFixed(2)}"></td><td class="r num">${clp(i.qty*i.price)}</td><td><button class="btn sm ghost" data-rm="${k}" aria-label="Quitar">${ico('x')}</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">Agrega productos a la cotización.</td></tr>'}
   </tbody></table></div>
   <div class="acw" style="margin-top:10px"><input id="q-addp-s" autocomplete="off" placeholder="+ Agregar producto: escribe código o nombre" ${c?'':'disabled'}><div class="sres" id="q-addp-r" hidden></div></div>
-  ${over?`<div class="note warn" style="margin-top:10px">${ico('alert')}<span>Hay productos con descuento sobre ${S.cfg.discLimit}%. ${c&&selfApproves(q)?'Como jefatura del vendedor, al guardar quedará aprobada por ti.':`Al guardar quedará como <b>borrador pendiente de aprobación</b> de ${esc((approverOf(q)||{nombre:'la jefatura comercial'}).nombre)}.`}</span></div>`:''}
+  ${over?`<div class="note warn" style="margin-top:10px">${ico('alert')}<span>Hay productos con descuento sobre ${S.cfg.discLimit}%. ${c&&selfApproves(q)?'Como jefatura del vendedor, al guardar quedará aprobada por ti.':`Al guardar quedará <b>pendiente de aprobación</b> (el PDF dirá «Sujeta a aprobación») de ${esc((approverOf(q)||{nombre:'la jefatura comercial'}).nombre)}.`}</span></div>`:''}
   <div style="margin-top:14px">${totalsBox(qTotals(q))}</div>
   </div>
   <div class="card"><div class="form" style="grid-template-columns:1fr">
@@ -1261,17 +1351,51 @@ function quoteEditor(q,isNew){
   if(!q.nextAction.trim()||!q.nextDate){toast('Registra la próxima acción y su fecha.');return}
   const over=!asDraft&&overLimit(q)&&!selfApproves(q);const autoOk=!asDraft&&overLimit(q)&&selfApproves(q);
   delete q._listChanged;
-  if(isNew){$('#qSave').disabled=$('#qSaveDraft').disabled=true;const nq={...q,id:uid(),num:null,status:asDraft?'borrador':over?'pendiente':'enviada',createdAt:nowIso(),updatedAt:nowIso(),history:[{ts:nowIso(),user:S.me,text:q.dupFrom?`Cotización creada (duplicada desde ${q.dupFrom})`:'Cotización creada'}]};
+  if(isNew){$('#qSave').disabled=$('#qSaveDraft').disabled=true;$('#qSave').textContent='Guardando…';
+   // Número oficial de la reserva del teléfono (se descuenta antes de encolar: nunca se entrega dos veces).
+   // Sin reserva: num null y el servidor lo asigna al enviarse.
+   const numRes=await tomarNumeroReservado();
+   const nq={...q,id:uid(),num:numRes,status:asDraft?'borrador':over?'pendiente':'enviada',createdAt:nowIso(),updatedAt:nowIso(),history:[{ts:nowIso(),user:S.me,text:q.dupFrom?`Cotización creada (duplicada desde ${q.dupFrom})`:'Cotización creada'}]};
+   delete nq._listChanged;delete nq._edit;delete nq._bak;
    if(over)nq.history.push({ts:nowIso(),user:S.me,text:`Solicitud de aprobación a ${(approverOf(nq)||{nombre:'jefatura comercial'}).nombre} (dcto. máx ${maxDisc(nq)}%)`});if(autoOk)nq.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(nq)}%)`});
-   const t=qTotals(nq).total;let op=S.opps.find(o=>o.clientId===nq.clientId&&o.stage==='visita');
-   const isNewOp=!op;if(!op)op={id:uid(),clientId:nq.clientId,userId:nq.userId,name:oppName(nq),stage:'cotizacion',amount:t,nextAction:nq.nextAction,nextDate:nq.nextDate,createdAt:nowIso(),quoteIds:[]};
-   nq.oppId=op.id;delete nq._listChanged;
-   try{if(isNewOp)await dbIns('opps',op);const r=await dbRun(sb.from('crm_quotes').insert(toRow(nq,COLS.quotes)).select('num').single());nq.num=r.num}catch(e){const b1=$('#qSave'),b2=$('#qSaveDraft');if(b1){b1.disabled=b2.disabled=false}return}
-   op.stage='cotizacion';op.amount=t;op.quoteIds=[...(op.quoteIds||[]),nq.id];op.nextAction=nq.nextAction;op.nextDate=nq.nextDate;if(isNewOp)S.opps.push(op);dbUpd('opps',op,['stage','amount','quoteIds','nextAction','nextDate']).catch(ignore);
-   S.quotes.push(nq);const tk={id:uid(),userId:nq.userId,clientId:nq.clientId,type:'seguimiento',title:`${nq.num} · ${nq.nextAction}`,date:nq.nextDate,time:'10:00',done:false};S.tasks.push(tk);dbIns('tasks',tk).catch(ignore);
-   audit('Cotización',nq.num,'Creada',`${C(nq.clientId).name} · ${clp(t)}${q.dupFrom?' · duplicada de '+q.dupFrom:''}`);
-   sendMail('cotizacion',`Nueva cotización ${nq.num} – ${C(nq.clientId).name}`,`${U(nq.userId).name} creó la cotización ${nq.num} por ${clp(t)}.`);
-   DRAFT=null;location.hash='#cotizacion/'+nq.id;if(over)setTimeout(()=>notifyModal(nq,'req'),400);else toast(asDraft?'Borrador guardado.':'Cotización guardada.');
+   const t=qTotals(nq).total;const op=S.opps.find(o=>o.clientId===nq.clientId&&o.stage==='visita');
+   const opObj=op?(CO.prospectoParaFila(op)||op):{id:uid(),clientId:nq.clientId,userId:nq.userId,name:oppName(nq),createdAt:nowIso(),quoteIds:[]};
+   nq.oppId=opObj.id;
+   const campos={stage:'cotizacion',amount:t,quoteIds:[...(opObj.quoteIds||[]).filter(x=>x!==nq.id),nq.id],nextAction:nq.nextAction,nextDate:nq.nextDate};
+   // Oportunidad nueva o que solo existe en el teléfono (de una visita sin enviar): se crea si falta (repetible).
+   const oppD=!op||op._fila?{modo:'nueva',obj:{...opObj,...campos}}:{modo:'actualizar',obj:{id:op.id,...campos}};
+   const N=nq.num||NUM_PEND,cn=C(nq.clientId);
+   const tk={id:uid(),userId:nq.userId,clientId:nq.clientId,type:'seguimiento',title:`${N} · ${nq.nextAction}`,date:nq.nextDate,time:'10:00',done:false};
+   const auditoria={ts:nowIso(),entity:'Cotización',ref:N,action:'Creada',detail:`${cn.name} · ${clp(t)}${q.dupFrom?' · duplicada de '+q.dupFrom:''}`};
+   const avisos=[armarMail('cotizacion',`Nueva cotización ${N} – ${cn.name}`,`${U(nq.userId).name} creó la cotización ${N} por ${clp(t)}.`)];
+   if(over)avisos.push(aprobacionAviso({...nq,num:N},'req'));
+   // Cliente que solo existe en el teléfono (prospecto de una visita sin enviar): va también como prospecto.
+   const prospFila=CO.prospectoParaFila(cn);
+   const datos={cotizacion:nq,prospecto:prospFila,tarea:tk,opp:oppD,avisos:avisos.filter(Boolean),auditoria};
+   let id=null,r;
+   try{id=await TXOffline.encolar('crm.cotizacion',datos,{dependeDe:prospFila?cn._fila.id:null})}
+   catch(e){
+    // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
+    console.error(e);const mid=uid();esperandoEnvio.add(mid);
+    try{escrituras++;await TIPOS_FILA['crm.cotizacion'](datos,{},{id:mid,intentos:0})}
+    catch(e2){console.error(e2);const b1=$('#qSave'),b2=$('#qSaveDraft');if(b1){b1.disabled=b2.disabled=false;b1.textContent='Guardar y emitir'}toast(esRed(e2)?'Sin conexión y sin espacio en el teléfono: la cotización no se guardó.':'No se pudo guardar la cotización: '+esc((e2&&e2.message)||e2));return}
+    finally{escrituras++;esperandoEnvio.delete(mid)}
+    id=mid;r={estado:'enviado'};CO.superponerEntrada(S,{id,tipo:'crm.cotizacion',datos,estado:'pendiente',error:null});CO.soltarEntrada(S,id);
+    const sq=S.quotes.find(x=>x.id===nq.id);if(sq)delete sq._fila;
+   }
+   // Pantalla al tiro con lo local (marcado "Pendiente de enviar" hasta que se envíe).
+   if(!r){esperandoEnvio.add(id);CO.superponerEntrada(S,{id,tipo:'crm.cotizacion',datos,estado:'pendiente',error:null})}
+   const sOp=S.opps.find(o=>o.id===opObj.id);if(sOp)Object.assign(sOp,campos);
+   for(const a of datos.avisos)S.outbox.unshift(a);
+   S.audit.unshift({user:S.me,...auditoria});
+   reponerNumeros();
+   if(!r){r=await esperarEnvio(id);esperandoEnvio.delete(id)}
+   DRAFT=null;location.hash='#cotizacion/'+nq.id;
+   const sq=S.quotes.find(x=>x.id===nq.id)||nq;
+   if(over)setTimeout(()=>notifyModal(sq,'req',true),400);
+   if(r.estado==='enviado'){const tx=resolverAviso(id);if(tx)toast(esc(tx));else if(!over)toast(asDraft?'Borrador guardado.':'Cotización guardada.')}
+   else if(r.estado==='problema')toast('La cotización quedó en el teléfono, pero no se pudo enviar: '+esc(r.error||'')+' Revísala en Cotizaciones.');
+   else toast(sq.num?'Cotización guardada en el teléfono. Se enviará al volver la señal. Ya puedes entregar el PDF.':'Cotización guardada en el teléfono. Sin número: se asignará al volver la señal. El PDF dirá BORRADOR.');
   }else{const before=S.quotes.find(x=>x.id===q.id);before.history.push({ts:nowIso(),user:S.me,text:'Cotización editada · total '+clp(qTotals(q).total)});let askNow=false;if(over){if(before.status!=='pendiente')askNow=true;before.status='pendiente';before.history.push({ts:nowIso(),user:S.me,text:`Solicitud de aprobación a ${(approverOf(before)||{nombre:'jefatura comercial'}).nombre} (dcto. máx ${maxDisc(before)}%)`})}else if(autoOk){before.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(before)}%)`});if(before.status==='pendiente')before.status='enviada'}delete before._edit;delete before._bak;saveQ(before);audit('Cotización',q.num,'Modificada','Total '+clp(qTotals(q).total));rerender();if(askNow)notifyModal(before,'req');else toast('Cambios guardados.')}
  };
  $('#qSave').onclick=()=>save(false);$('#qSaveDraft').onclick=()=>save(true);
@@ -1280,16 +1404,20 @@ function approvalMsg(q,kind){const c=C(q.clientId)||{};const t=qTotals(q);const 
  const lines=q.items.filter(i=>(+i.disc||0)>S.cfg.discLimit).map(i=>`- ${i.code} ${i.name}: lista ${clp(i.listPrice)} · venta ${clp(i.price)} · dcto ${i.disc}%`).join('\n');
  if(kind==='req')return {to:[ap&&ap.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email,seller.email].filter(Boolean),sub:`Solicitud de aprobación ${q.num} – ${c.name}`,body:`Hola ${ap?ap.nombre.split(' ')[0]:''},\n\nSolicito aprobar la cotización ${q.num} para ${c.name} por ${clp(t.total)} (IVA incl.). Tiene productos con descuento sobre ${S.cfg.discLimit}%:\n${lines}\n\nRevisar y aprobar en el CRM: ${quoteUrl(q)}\n\n${seller.name}`};
  const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text))||{text:''};
- return {to:[seller.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email].filter(Boolean),sub:`${kind==='ok'?'Cotización aprobada':'Cotización rechazada'} ${q.num} – ${c.name}`,body:`Hola ${seller.name.split(' ')[0]},\n\n${h.text}.\nCotización ${q.num} · ${c.name} · ${clp(t.total)}\n\n${kind==='ok'?'Ya es oficial: puedes descargar el PDF y enviarla al cliente.':'Revisa los descuentos y vuelve a enviarla.'}\n${quoteUrl(q)}\n\n${me().name}`}}
-function notifyModal(q,kind){const m=approvalMsg(q,kind);const ev=kind==='req'?'aprobacion':'aprobacion_resp';const o={id:uid(),ts:nowIso(),event:ev,to:[...m.to,...m.cc],subject:m.sub,body:m.body,from:me().email};S.outbox.unshift(o);dbIns('outbox',o).catch(ignore);
+ return {to:[seller.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email].filter(Boolean),sub:`${kind==='ok'?'Cotización aprobada':'Cotización rechazada'} ${q.num} – ${c.name}`,body:`Hola ${seller.name.split(' ')[0]},\n\n${h.text}.\nCotización ${q.num} · ${c.name} · ${clp(t.total)}\n\n${kind==='ok'?'Ya es oficial: puedes descargar el PDF y enviarla al cliente.':(CO.pdfEntregado(q)?'El cliente ya tiene el PDF: contáctalo para avisarle. ':'')+'Si hay que rehacerla, usa «Duplicar cotización»: la nueva lleva otro número.'}\n${quoteUrl(q)}\n\n${me().name}`}}
+// Aviso de aprobación para crm_outbox (solicitud 'req', aprobada 'ok', rechazada 'no').
+function aprobacionAviso(q,kind){const m=approvalMsg(q,kind);return {id:uid(),ts:nowIso(),event:kind==='req'?'aprobacion':'aprobacion_resp',to:[...m.to,...m.cc],subject:m.sub,body:m.body,from:me().email}}
+// yaRegistrado: el aviso ya va en la fila (cotización nueva); solo se muestra el mensaje para abrir el correo.
+function notifyModal(q,kind,yaRegistrado){if(!q.num)q={...q,num:qn(q)};const m=approvalMsg(q,kind);if(!yaRegistrado){const o=aprobacionAviso(q,kind);S.outbox.unshift(o);dbIns('outbox',o).catch(ignore)}
  const who=kind==='req'?(approverOf(q)||{nombre:'la jefatura'}).nombre:U(q.userId).name;
- openModal(kind==='req'?'Solicitud de aprobación':'Avisar al vendedor',`<p>${kind==='req'?`La cotización quedó como <b>borrador pendiente de aprobación</b>. <b>${esc(who)}</b> la verá en sus alertas del CRM apenas entre.`:`<b>${esc(who)}</b> verá el resultado en sus alertas del CRM.`}</p><p class="small muted">Para avisar ahora por correo, abre el mensaje ya redactado en tu correo y envíalo.</p><div class="box small" style="white-space:pre-line;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px">${esc('Para: '+m.to.join(', ')+(m.cc.length?'\nCC: '+m.cc.join(', '):'')+'\nAsunto: '+m.sub+'\n\n'+m.body)}</div>`,`<button class="btn" data-close>Cerrar</button><button class="btn pri" id="nmMail">${ico('send')}Abrir correo</button>`,'narrow');
+ openModal(kind==='req'?'Solicitud de aprobación':'Avisar al vendedor',`<p>${kind==='req'?`La cotización quedó <b>pendiente de aprobación</b> (su PDF dice «Sujeta a aprobación»). <b>${esc(who)}</b> la verá en sus alertas del CRM apenas entre.`:`<b>${esc(who)}</b> verá el resultado en sus alertas del CRM.`}</p><p class="small muted">Para avisar ahora por correo, abre el mensaje ya redactado en tu correo y envíalo.</p><div class="box small" style="white-space:pre-line;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px">${esc('Para: '+m.to.join(', ')+(m.cc.length?'\nCC: '+m.cc.join(', '):'')+'\nAsunto: '+m.sub+'\n\n'+m.body)}</div>`,`<button class="btn" data-close>Cerrar</button><button class="btn pri" id="nmMail">${ico('send')}Abrir correo</button>`,'narrow');
  $('#nmMail').onclick=()=>{openMailto(m.to,m.cc,m.sub,m.body);closeModal()}}
-function approveQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q)){toast('Solo la jefatura del vendedor puede aprobar.');return}
+// Acciones de jefatura: requieren señal (escritura de oficina).
+function approveQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q)){toast('Solo la jefatura del vendedor puede aprobar.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
  q.status='enviada';q.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(q)}%)`});saveQ(q);audit('Cotización',q.num,'Descuento aprobado',`Dcto. máx ${maxDisc(q)}%`);rerender();notifyModal(q,'ok')}
-function rejectQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q))return;
+function rejectQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q))return;if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
  openModal('Rechazar '+q.num,`<div class="fld"><label>Motivo <span class="req">*</span></label><textarea id="rj-note" rows="3" placeholder="Ej: máximo 30% en este producto"></textarea></div>`,`<button class="btn" data-close>Cancelar</button><button class="btn bad" id="rjOk">Rechazar</button>`,'narrow');
- $('#rjOk').onclick=()=>{const n=$('#rj-note').value.trim();if(!n){toast('Indica el motivo.');return}q.status='borrador';q.history.push({ts:nowIso(),user:S.me,text:`Rechazada por ${me().name}: ${n}`});saveQ(q);audit('Cotización',q.num,'Descuento rechazado',n);closeModal();rerender();notifyModal(q,'no')}}
+ $('#rjOk').onclick=()=>{const n=$('#rj-note').value.trim();if(!n){toast('Indica el motivo.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}q.status='rechazada';q.history.push({ts:nowIso(),user:S.me,text:`Rechazada por ${me().name}: ${n}`});saveQ(q);audit('Cotización',q.num,'Descuento rechazado',n);closeModal();rerender();notifyModal(q,'no')}}
 function winModal(id){const q=S.quotes.find(x=>x.id===id);const t=qTotals(q);
  openModal('Marcar como ganada · '+q.num,`<form class="form"><div class="fld"><label>N° de pedido <span class="req">*</span></label><input id="w-order" placeholder="Ej: PED-48120"></div><div class="fld"><label>Fecha estimada de compra <span class="req">*</span></label><input type="date" id="w-date" value="${ymd(addD(TODAY,3))}"></div><div class="fld"><label>Monto final (con IVA)</label><input type="number" id="w-amount" value="${Math.round(t.total)}"><span class="hint">Cotizado: ${clp(t.total)}</span></div><div class="fld"><label>Avisar a</label><input disabled value="${S.cfg.on.ganada?S.cfg.emails.ganada.join(', '):'Aviso desactivado'}"></div><div class="fld full"><label>Observaciones</label><textarea id="w-notes" placeholder="Ej: despacho parcializado en 3 entregas"></textarea></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn good" id="wOk">${ico('check')}Confirmar venta ganada</button>`,'narrow');
  $('#wOk').onclick=()=>{const order=$('#w-order').value.trim();if(!order){toast('Ingresa el número de pedido.');return}
@@ -1312,7 +1440,8 @@ function pdfSheet(q){const c=C(q.clientId);const t=qTotals(q);const co=S.cfg.com
  const kv=(l,v,cls='')=>`<div class="q-kv ${cls}"><span>${l}</span><b>${esc(v||'—')}</b></div>`;
  const cond=String(q.conditions||'').split('\n').map(x=>x.trim()).filter(Boolean);
  const obs=[['Contacto',E.contacto],['Celular',E.celular],['Administrador',E.admin]].filter(x=>x[1]);
- return `<div class="sheet q2">${['pendiente','borrador'].includes(q.status)?`<div class="q-wm">BORRADOR${q.status==='pendiente'?'<br><small>PENDIENTE DE APROBACIÓN</small>':''}</div>`:''}<img class="hx hx1" alt="" src="${HEXBG[0]}"><img class="hx hx2" alt="" src="${HEXBG[1]}">
+ const wm=CO.marcaAguaPdf(q);
+ return `<div class="sheet q2">${wm?`<div class="q-wm${wm.texto.length>12?' l':''}">${wm.texto}${wm.sub?'<br><small>'+wm.sub+'</small>':''}</div>`:''}<img class="hx hx1" alt="" src="${HEXBG[0]}"><img class="hx hx2" alt="" src="${HEXBG[1]}">
  <div class="q-hd"><div class="q-logo">${co.logo?`<img src="${co.logo}" alt="">`:logo}</div>
   <div class="q-co"><b>${esc(co.razon)}</b><span>RUT: ${esc(co.rut)}</span><span>Dirección de Facturación: ${esc(co.dir)}</span></div>
   <div class="q-num"><span>Cotización</span><b>${esc(q.num||'Borrador')}</b><small>${fd(q.date)}</small><small>Válida hasta ${fd(qExpiry(q))}</small></div></div>
@@ -1328,11 +1457,26 @@ function pdfSheet(q){const c=C(q.clientId);const t=qTotals(q);const co=S.cfg.com
   <div class="q-tot">${t.desc?`<div><span>Subtotal</span><b>${clp(t.bruto)}</b></div><div><span>Descuentos</span><b>− ${clp(t.desc)}</b></div>`:''}<div><span>Neto</span><b>${clp(t.neto)}</b></div><div><span>IVA 19%</span><b>${clp(t.iva)}</b></div><div class="T"><span>Total</span><b>${clp(t.total)}</b></div></div></div>
  ${cond.length?`<div class="q-cond"><h5>Condiciones de venta</h5><ul>${cond.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}
  <div class="q-end"><span>${esc(co.name)} · ${esc(co.web)}</span><span>Consultas: ${esc(u.name)} · ${esc(u.email||'')}</span></div></div>`}
-function pdfModal(id){const q=S.quotes.find(x=>x.id===id);openModal('PDF · '+q.num,`<div class="sheet-wrap">${pdfSheet(q)}</div>`,`<span class="small muted" style="margin-right:auto">Vista previa del PDF con formato corporativo</span><button class="btn" data-act="mailQ" data-id="${q.id}">${ico('send')}Enviar por correo</button><button class="btn pri" id="dlPdf">${ico('dl')}Descargar PDF</button>`,'wide');$('#dlPdf').onclick=async()=>{const b=$('#dlPdf');b.disabled=true;b.textContent='Generando…';const ok=await downloadPdf(q);b.disabled=false;b.innerHTML=ico('dl')+'Descargar PDF';if(ok)audit('Cotización',q.num,'PDF descargado','')}}
-function mailQModal(id){const q=S.quotes.find(x=>x.id===id);if(q.status==='pendiente'){toast('La cotización está pendiente de aprobación: aún no se puede enviar al cliente.');return}const c=C(q.clientId);const ct=(c.contacts||[]).find(k=>k.name===q.contact)||((c.contacts||[])[0]||{});
- openModal('Enviar cotización por correo',`<form class="form" style="grid-template-columns:1fr"><div class="fld"><label>Para</label><input id="m-to" value="${esc(ct.email||c.email)}"></div><div class="fld"><label>CC</label><input id="m-cc" value="${esc(U(q.userId).email||'')}"></div><div class="fld"><label>Asunto</label><input id="m-sub" value="Cotización ${q.num} – ${esc(S.cfg.company.name)}"></div><div class="fld"><label>Mensaje</label><textarea id="m-body" rows="7">Estimado/a ${esc(ct.name.split(' ')[0])}:\n\nJunto con saludar, adjunto la cotización ${q.num} por un total de ${clp(qTotals(q).total)} (IVA incluido), válida hasta el ${fd(qExpiry(q))}.\n\nQuedo atento/a a sus comentarios.\n\nSaludos,\n${esc(U(q.userId).name)}\n${esc(S.cfg.company.name)}</textarea></div><div class="note">${ico('doc')}<span>Se descargará ${q.num}.pdf y se abrirá tu programa de correo con el mensaje listo. Adjunta el PDF descargado y envía.</span></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn pri" id="mSend">${ico('send')}Descargar PDF y abrir correo</button>`,'narrow');
- $('#mSend').onclick=async()=>{const to=$('#m-to').value.trim(),cc=$('#m-cc').value.trim(),sub=$('#m-sub').value,body=$('#m-body').value;if(!to){toast('Indica el correo del destinatario.');return}const b=$('#mSend');b.disabled=true;b.textContent='Generando PDF…';await downloadPdf(q);
-  const m={id:uid(),ts:nowIso(),event:'cotizacion_cliente',to:[to,...(cc?[cc]:[])],subject:sub,body,attach:q.num+'.pdf',from:me().email};S.outbox.unshift(m);dbIns('outbox',m).catch(ignore);if(q.status==='borrador'){q.status='enviada'}q.sentAt=ymd(new Date());q.history.push({ts:nowIso(),user:S.me,text:'Enviada por correo a '+to});saveQ(q);audit('Cotización',q.num,'Enviada por correo',(m.to||[]).join(', '));
+function pdfModal(id){const q=S.quotes.find(x=>x.id===id);const rech=q.status==='rechazada';openModal('PDF · '+esc(qn(q)),`<div class="sheet-wrap">${pdfSheet(q)}</div>`,`<span class="small muted" style="margin-right:auto">Vista previa del PDF con formato corporativo</span>${rech?'':`<button class="btn" data-act="mailQ" data-id="${q.id}">${ico('send')}${navigator.onLine===false?'Compartir PDF':'Enviar por correo'}</button>`}<button class="btn pri" id="dlPdf">${ico('dl')}Descargar PDF</button>`,'wide');
+ $('#dlPdf').onclick=async()=>{const b=$('#dlPdf');b.disabled=true;b.textContent='Generando…';const ok=await downloadPdf(q);b.disabled=false;b.innerHTML=ico('dl')+'Descargar PDF';
+  // la línea "PDF descargado" cuenta como entregado al cliente: solo si lo descarga el vendedor de la cotización
+  if(ok)registrarEntrega(q,{texto:q.userId===S.me?'PDF descargado':null,auditoria:{entity:'Cotización',ref:q.num||NUM_PEND,action:'PDF descargado',detail:''}})}}
+// Pendiente también se puede enviar (el PDF dice "Sujeta a aprobación"). Sin señal no hay correo: se comparte
+// el PDF (WhatsApp, correo…) con navigator.share y, si el teléfono no puede, se descarga.
+function mailQModal(id){const q=S.quotes.find(x=>x.id===id);if(q.status==='rechazada'){toast('La cotización fue rechazada: duplícala para emitir una nueva (lleva otro número).');return}const c=C(q.clientId);const ct=(c.contacts||[]).find(k=>k.name===q.contact)||((c.contacts||[])[0]||{});
+ const sinRed=navigator.onLine===false,N=qn(q),R=q.num||NUM_PEND;
+ // sin señal el PDF se genera al abrir: compartir debe llamarse pegado al toque del botón
+ const pdfP=sinRed?generarPdf(q,'blob'):null;
+ openModal(sinRed?'Compartir cotización':'Enviar cotización por correo',`<form class="form" style="grid-template-columns:1fr">${sinRed?'':`<div class="fld"><label>Para</label><input id="m-to" value="${esc(ct.email||c.email)}"></div><div class="fld"><label>CC</label><input id="m-cc" value="${esc(U(q.userId).email||'')}"></div>`}<div class="fld"><label>Asunto</label><input id="m-sub" value="Cotización ${N} – ${esc(S.cfg.company.name)}"></div><div class="fld"><label>Mensaje</label><textarea id="m-body" rows="7">Estimado/a ${esc((ct.name||'').split(' ')[0])}:\n\nJunto con saludar, adjunto la cotización ${N} por un total de ${clp(qTotals(q).total)} (IVA incluido), válida hasta el ${fd(qExpiry(q))}.${q.status==='pendiente'?'\n\nLa cotización está sujeta a aprobación de descuentos; le confirmaremos a la brevedad.':''}\n\nQuedo atento/a a sus comentarios.\n\nSaludos,\n${esc(U(q.userId).name)}\n${esc(S.cfg.company.name)}</textarea></div><div class="note">${ico('doc')}<span>${sinRed?'Sin señal: se abrirá el menú para compartir el PDF (WhatsApp, correo u otra app) con este mensaje. Si el teléfono no permite compartir, el PDF se descarga.':`Se descargará ${N}.pdf y se abrirá tu programa de correo con el mensaje listo. Adjunta el PDF descargado y envía.`}</span></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn pri" id="mSend">${ico('send')}${sinRed?'Compartir PDF':'Descargar PDF y abrir correo'}</button>`,'narrow');
+ $('#mSend').onclick=async()=>{const sub=$('#m-sub').value,body=$('#m-body').value;const b=$('#mSend');
+  if(sinRed){b.disabled=true;b.textContent='Preparando PDF…';const r=await compartirPdf(q,await pdfP,sub,body);
+   if(!r){b.disabled=false;b.innerHTML=ico('send')+'Compartir PDF';return}
+   if(r==='compartido')registrarEntrega(q,{texto:'Enviada al cliente (PDF compartido sin señal)',sentAt:ymd(new Date()),aEnviada:true,auditoria:{entity:'Cotización',ref:R,action:'PDF compartido',detail:'Sin señal'}});
+   else registrarEntrega(q,{texto:q.userId===S.me?'PDF descargado':null,auditoria:{entity:'Cotización',ref:R,action:'PDF descargado',detail:''}});
+   closeModal();rerender();toast(r==='compartido'?'PDF compartido.':'PDF descargado. Envíaselo al cliente por otra app o cuando vuelva la señal.');return}
+  const to=$('#m-to').value.trim(),cc=$('#m-cc').value.trim();if(!to){toast('Indica el correo del destinatario.');return}b.disabled=true;b.textContent='Generando PDF…';await downloadPdf(q);
+  const m={id:uid(),ts:nowIso(),event:'cotizacion_cliente',to:[to,...(cc?[cc]:[])],subject:sub,body,attach:nombrePdf(q),from:me().email};
+  registrarEntrega(q,{texto:'Enviada por correo a '+to,sentAt:ymd(new Date()),aEnviada:true,aviso:m,auditoria:{entity:'Cotización',ref:R,action:'Enviada por correo',detail:(m.to||[]).join(', ')}});
   location.href=`mailto:${encodeURIComponent(to)}?${cc?'cc='+encodeURIComponent(cc)+'&':''}subject=${encodeURIComponent(sub)}&body=${encodeURIComponent(body)}`;closeModal();rerender();toast('PDF descargado. Adjúntalo en el correo que se abrió.')};
 }
 
@@ -1536,12 +1680,27 @@ function resetPw(id){const u=U(id);const pw=genPass();openModal('Nueva contrase�
 
 /* ============ files: photos, PDF, Excel ============ */
 function compressImage(file,max=1280,q=.72){return new Promise((res,rej)=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height;const k=Math.min(1,max/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);cv.toBlob(b=>b?res(b):rej(new Error('blob')),'image/jpeg',q);URL.revokeObjectURL(img.src)};img.onerror=rej;img.src=URL.createObjectURL(file)})}
-async function downloadPdf(q){
- if(!window.html2pdf){toast('No se pudo cargar el generador de PDF. Revisa tu conexión.');return false}
+const nombrePdf=q=>(q.num||'cotizacion-borrador')+'.pdf';
+// salida 'save' (descarga, → true) o 'blob' (→ Blob). Error → null (con aviso).
+async function generarPdf(q,salida){
+ if(!window.html2pdf){toast('No se pudo cargar el generador de PDF. Revisa tu conexión.');return null}
  const host=document.createElement('div');host.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#fff';host.innerHTML=pdfSheet(q);document.body.appendChild(host);
  const el=host.firstElementChild;el.style.boxShadow='none';el.style.maxWidth='794px';
- try{await html2pdf().set({margin:0,filename:q.num+'.pdf',image:{type:'jpeg',quality:.95},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'pt',format:'a4',orientation:'portrait'},pagebreak:{mode:['css'],avoid:['tr','.q-foot','.q-cond','.q-grid','.q-hd','h5']}}).from(el).save();return true}
- catch(e){console.error(e);toast('No se pudo generar el PDF.');return false}finally{host.remove()}
+ try{const w=html2pdf().set({margin:0,filename:nombrePdf(q),image:{type:'jpeg',quality:.95},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'pt',format:'a4',orientation:'portrait'},pagebreak:{mode:['css'],avoid:['tr','.q-foot','.q-cond','.q-grid','.q-hd','h5']}}).from(el);
+  if(salida==='blob')return await w.outputPdf('blob');await w.save();return true}
+ catch(e){console.error(e);toast('No se pudo generar el PDF.');return null}finally{host.remove()}
+}
+const downloadPdf=async q=>!!(await generarPdf(q,'save'));
+// Comparte el PDF (menú del teléfono); sin soporte o si el sistema lo impide, lo descarga.
+// → 'compartido' | 'descargado' | null (cancelado o sin PDF)
+async function compartirPdf(q,blob,titulo,texto){
+ if(!blob)return null;
+ const f=new File([blob],nombrePdf(q),{type:'application/pdf'});
+ if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){
+  try{await navigator.share({files:[f],title:titulo,text:texto});return 'compartido'}
+  catch(e){if(e&&e.name==='AbortError')return null;console.warn('[CRM] no se pudo compartir; se descarga:',e)}}
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=nombrePdf(q);document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+ return 'descargado';
 }
 function genPass(){const a='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';const r=crypto.getRandomValues(new Uint8Array(10));return 'TX-'+[...r].map(x=>a[x%a.length]).join('')}
 function saveCfg(){return dbRun(sb.from('crm_settings').update({value:S.cfg}).eq('key','cfg')).catch(ignore)}
@@ -1578,6 +1737,8 @@ async function boot(){
  const p=S.users.find(u=>u.id===S.me);
  if(!p||!p.active){showGate(`<div class="gate-card"><h1>Sin acceso al CRM</h1><p>Tu cuenta (${esc(user.email)}) no tiene acceso al CRM Comercial o está desactivada. Pídele al administrador del CRM que te agregue.</p><div class="row"><a class="btn pri" href="./">Volver al portal</a><button class="btn" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`);return}
  hideGate();router();
+ // con señal: completa la reserva de números de cotización
+ if(!copiaSinRed)reponerNumeros();
  if(user.user_metadata&&user.user_metadata.must_change)setTimeout(()=>passModal(true),300);
 }
 // SIGNED_OUT ajeno (otra pestaña, token revocado): al portal. No por un corte de red: supabase no borra la

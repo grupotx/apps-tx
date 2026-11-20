@@ -387,3 +387,78 @@ test('soltarEntrada: quita solo las marcas de esa entrada, sin revertir edicione
   assert.equal(S.quotes[0]._fila.id, 'e9');
   assert.equal(S.quotes[0].notes, 'nuevo');
 });
+
+// ── Task 6: cotizaciones sin señal ──
+const S6 = () => ({ clients: [], visits: [], quotes: [], tasks: [], opps: [] });
+const cotDatos = () => ({
+  cotizacion: { id: 'q1', num: 'COT-2026-0101', clientId: 'p1', status: 'enviada', history: [] },
+  prospecto: { id: 'p1', name: 'Obra X' },
+  tarea: { id: 't1', clientId: 'p1', title: 'COT-2026-0101 · Llamar', done: false },
+  opp: { modo: 'nueva', obj: { id: 'o1', clientId: 'p1', stage: 'cotizacion' } },
+});
+
+test('superponerEntrada cotización: agrega cotización, prospecto, tarea y oportunidad nueva marcados', () => {
+  const S = S6();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.cotizacion', cotDatos())]);
+  assert.deepEqual([S.quotes.length, S.clients.length, S.tasks.length, S.opps.length], [1, 1, 1, 1]);
+  for (const k of ['quotes', 'clients', 'tasks', 'opps']) assert.equal(S[k][0]._fila.id, 'e1');
+  const S2 = S6();
+  const d = cotDatos(); d.opp = { modo: 'actualizar', obj: { id: 'o1', stage: 'cotizacion' } }; d.prospecto = null;
+  C.aplicarFilaCRM(S2, [ent('e1', 'crm.cotizacion', d)]);
+  assert.equal(S2.opps.length, 0);
+  assert.equal(S2.clients.length, 0);
+});
+
+test('quitarEntrada: cotización creada por la entrada sale; la editada del servidor se queda', () => {
+  const S = S6();
+  S.quotes.push({ id: 'qs', notes: 'srv' });
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.cotizacion', cotDatos()), ent('e2', 'crm.cotizacion.editar', { id: 'qs', cambios: { notes: 'tel' } }, 'pendiente', 1)]);
+  C.quitarEntrada(S, 'e1');
+  assert.deepEqual(S.quotes.map((q) => q.id), ['qs']);
+  assert.deepEqual([S.clients.length, S.tasks.length, S.opps.length], [0, 0, 0]);
+  C.quitarEntrada(S, 'e2');
+  assert.deepEqual(S.quotes.map((q) => q.id), ['qs']);
+});
+
+test('reasignarCliente y reasignarEnS también mueven la cotización', () => {
+  const d = cotDatos();
+  const r = C.reasignarCliente(d, 'c9');
+  assert.equal(r.cotizacion.clientId, 'c9');
+  assert.equal(d.cotizacion.clientId, 'p1');
+  const S = S6();
+  C.aplicarFilaCRM(S, [ent('e1', 'crm.cotizacion', d)]);
+  C.reasignarEnS(S, d, 'c9');
+  assert.equal(S.quotes[0].clientId, 'c9');
+  assert.equal(S.clients.length, 0);
+});
+
+test('textoProspectoExistia: dice qué quedó en el cliente', () => {
+  assert.equal(C.textoProspectoExistia('Obra X', 'la cotización'), 'El prospecto «Obra X» ya existía; la cotización quedó en ese cliente.');
+});
+
+test('marcaAguaPdf: sujeta, borrador sin número, borrador guardado, rechazada, oficial', () => {
+  assert.deepEqual(C.marcaAguaPdf({ status: 'pendiente', num: 'C-1' }), { texto: 'SUJETA A APROBACIÓN', sub: null });
+  assert.deepEqual(C.marcaAguaPdf({ status: 'enviada', num: null }), { texto: 'BORRADOR', sub: null });
+  assert.deepEqual(C.marcaAguaPdf({ status: 'pendiente', num: null }), { texto: 'BORRADOR', sub: 'SUJETA A APROBACIÓN' });
+  assert.deepEqual(C.marcaAguaPdf({ status: 'borrador', num: 'C-1' }), { texto: 'BORRADOR', sub: null });
+  assert.deepEqual(C.marcaAguaPdf({ status: 'rechazada', num: 'C-1' }), { texto: 'RECHAZADA', sub: null });
+  assert.equal(C.marcaAguaPdf({ status: 'enviada', num: 'C-1' }), null);
+  assert.equal(C.marcaAguaPdf({ status: 'ganada', num: 'C-1' }), null);
+});
+
+test('pdfEntregado: sentAt o historia Enviada / PDF descargado', () => {
+  assert.equal(C.pdfEntregado({ history: [] }), false);
+  assert.equal(C.pdfEntregado({ sentAt: '2026-11-20', history: [] }), true);
+  assert.equal(C.pdfEntregado({ history: [{ text: 'Enviada por correo a a@b.cl' }] }), true);
+  assert.equal(C.pdfEntregado({ history: [{ text: 'PDF descargado' }] }), true);
+  assert.equal(C.pdfEntregado({ history: [{ text: 'Cotización creada' }] }), false);
+  assert.equal(C.pdfEntregado({}), false);
+});
+
+test('alertaRechazo: solo rechazada con PDF entregado y sin duplicar', () => {
+  const q = { id: 'q1', num: 'COT-2026-0101', status: 'rechazada', history: [{ text: 'PDF descargado' }] };
+  assert.equal(C.alertaRechazo(q, [q]), 'Contacta al cliente: la cotización COT-2026-0101 fue rechazada');
+  assert.equal(C.alertaRechazo({ ...q, history: [] }, [q]), null);
+  assert.equal(C.alertaRechazo({ ...q, status: 'perdida' }, [q]), null);
+  assert.equal(C.alertaRechazo(q, [q, { id: 'q2', num: 'COT-2026-0102', dupFrom: 'COT-2026-0101' }]), null);
+});
