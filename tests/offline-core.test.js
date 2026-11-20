@@ -95,3 +95,39 @@ test('resumen: cuenta pendientes y problemas, ignora enviadas', () => {
   const r = resumen([{ estado: 'pendiente' }, { estado: 'pendiente' }, { estado: 'problema' }, { estado: 'enviado' }]);
   assert.deepEqual(r, { pendientes: 2, problemas: 1 });
 });
+
+// ---------- fix revisión final: errores transitorios del servidor y red anclada ----------
+test('clasificarError: timeout y conflictos de serialización de Postgres son de red', () => {
+  assert.equal(clasificarError({ code: '57014', message: 'canceling statement due to statement timeout' }), 'red');
+  assert.equal(clasificarError({ code: '40001', message: 'could not serialize access' }), 'red');
+  assert.equal(clasificarError({ code: '40P01', message: 'deadlock detected' }), 'red');
+  assert.equal(clasificarError({ code: 'P0001', message: 'Guía no asignada a este chofer' }), 'regla');
+});
+
+test('clasificarError: 5xx del servidor llega como red cuando el error trae el status', () => {
+  for (const s of [500, 502, 503, 504, 520, 522]) assert.equal(clasificarError({ message: 'x', code: '', status: s }), 'red');
+  assert.equal(clasificarError({ message: 'TypeError: Failed to fetch', code: '', status: 0 }), 'red');
+  assert.equal(clasificarError({ message: 'violates row-level security policy', status: 403 }), 'regla');
+});
+
+test('clasificarError: "red"/"network" dentro de un mensaje de regla no es de red', () => {
+  assert.equal(clasificarError({ message: 'La red de distribución no existe' }), 'regla');
+  assert.equal(clasificarError({ message: 'network policy denied' }), 'regla');
+  assert.equal(clasificarError({ message: 'Failed to fetch' }), 'red');
+  assert.equal(clasificarError({ message: 'TypeError: Failed to fetch' }), 'red');
+  assert.equal(clasificarError({ message: 'NetworkError when attempting to fetch resource.' }), 'red');
+  assert.equal(clasificarError({ message: 'Load failed' }), 'red');
+  assert.equal(clasificarError(new TypeError('Load failed')), 'red');
+  const ab = new Error('Tiempo de espera agotado'); ab.name = 'AbortError';
+  assert.equal(clasificarError(ab), 'red');
+});
+
+test('errorDeRespuesta: null sin error; con error le pega el status HTTP de la respuesta', () => {
+  const { errorDeRespuesta } = require('../offline-core.js');
+  assert.equal(errorDeRespuesta({ data: 1, error: null, status: 200 }), null);
+  const e = errorDeRespuesta({ data: null, error: { message: 'Bad gateway', code: '' }, status: 502 });
+  assert.equal(e.status, 502);
+  assert.equal(clasificarError(e), 'red');
+  const e2 = errorDeRespuesta({ error: { message: 'x', status: 409 }, status: 400 });
+  assert.equal(e2.status, 409, 'no pisa un status que ya traía');
+});

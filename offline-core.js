@@ -19,9 +19,24 @@
     const status = e && e.status;
     if (status === 401 || (e && e.code === 'PGRST301') || /JWT expired|invalid JWT|Auth session missing/i.test(msg)) return 'sesion';
     if (e instanceof TypeError || (e && e.name === 'AbortError')) return 'red';
-    if (/Failed to fetch|NetworkError|Load failed|network/i.test(msg)) return 'red';
+    // mensajes de fetch caído, anclados (postgrest-js los antepone con "TypeError: "); "red"/"network"
+    // a secas dentro de un mensaje del servidor es un rechazo, no falta de señal
+    if (/^(?:[a-z]*error: )?(failed to fetch|networkerror|load failed)/i.test(msg)) return 'red';
+    // timeout de sentencia, serialización y deadlock: transitorios, se reintenta
+    if (e && (e.code === '57014' || e.code === '40001' || e.code === '40P01')) return 'red';
     if (status === 0 || status === 408 || status === 429 || status >= 500) return 'red';
     return 'regla';
+  }
+
+  // Respuesta de supabase-js ({ data, error, status }) → el error con el status HTTP pegado
+  // (PostgrestError no lo trae, y sin él un 502/503/504 se clasificaría 'regla'), o null.
+  function errorDeRespuesta(res) {
+    const err = res && res.error;
+    if (!err) return null;
+    if (err.status === undefined && res.status !== undefined) {
+      try { err.status = res.status; } catch (_) { /* objeto congelado: se queda sin status */ }
+    }
+    return err;
   }
 
   // Envía las pendientes en orden de creación. Se detiene ante error de red o sesión.
@@ -70,7 +85,7 @@
     };
   }
 
-  const api = { nuevaEntrada, clasificarError, procesarFila, resumen };
+  const api = { nuevaEntrada, clasificarError, errorDeRespuesta, procesarFila, resumen };
   g.TXOfflineCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
