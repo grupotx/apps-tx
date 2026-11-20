@@ -33,6 +33,17 @@
 
   function aplicarFilaCRM(S, entradas) {
     const pend = (entradas || []).filter((e) => e.estado === 'pendiente' || e.estado === 'problema').sort(porCreada);
+    // Reversión: sin edición pendiente para la cotización, vuelven los valores del servidor
+    // y se quita la marca si su entrada ya no está activa (enviada o desaparecida).
+    const conEdicion = new Set(pend.filter((e) => e.tipo === 'crm.cotizacion.editar' && e.estado === 'pendiente').map((e) => e.datos.id));
+    const activas = new Set(pend.map((e) => e.id));
+    for (const q of S.quotes) {
+      if (q._base && !conEdicion.has(q.id)) {
+        Object.assign(q, clonar(q._base));
+        delete q._base;
+      }
+      if (q._fila && !activas.has(q._fila.id)) delete q._fila;
+    }
     for (const e of pend) {
       const d = e.datos || {};
       if (e.tipo === 'crm.visita') {

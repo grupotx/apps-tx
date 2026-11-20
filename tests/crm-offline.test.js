@@ -161,3 +161,50 @@ test('estadoPdf: oficial, sujeta, borrador', () => {
   assert.equal(C.estadoPdf({ status: 'borrador', num: null }), 'borrador');
   assert.equal(C.estadoPdf({ status: 'enviada', num: 'C-1' }), 'oficial');
 });
+
+// ── Reversión del overlay ──
+const originalesOk = (q) => {
+  assert.equal(q.status, 'enviada');
+  assert.equal(q.notes, 'viejo');
+  assert.deepEqual(q.items, [1]);
+  assert.equal(q._base, undefined);
+};
+
+test('aplicarFilaCRM: pendiente → problema revierte el overlay y deja la marca', () => {
+  const S = S0(); S.quotes.push(qServ());
+  C.aplicarFilaCRM(S, [edicion('pendiente', { requiereAprobacion: true })]);
+  assert.equal(S.quotes[0].status, 'pendiente');
+  const e = edicion('problema', { requiereAprobacion: true }, 'CONFLICTO: x');
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [e]);
+  originalesOk(S.quotes[0]);
+  assert.deepEqual(S.quotes[0]._fila, { estado: 'problema', error: 'CONFLICTO: x', id: 'e1' });
+});
+
+test('aplicarFilaCRM: pendiente → enviado revierte y quita la marca', () => {
+  const S = S0(); S.quotes.push(qServ());
+  C.aplicarFilaCRM(S, [edicion('pendiente', { requiereAprobacion: true })]);
+  C.aplicarFilaCRM(S, [edicion('enviado')]);
+  C.aplicarFilaCRM(S, [edicion('enviado')]);
+  originalesOk(S.quotes[0]);
+  assert.equal(S.quotes[0]._fila, undefined);
+});
+
+test('aplicarFilaCRM: pendiente → entrada desaparecida revierte y quita la marca', () => {
+  const S = S0(); S.quotes.push(qServ());
+  C.aplicarFilaCRM(S, [edicion('pendiente', { requiereAprobacion: true })]);
+  C.aplicarFilaCRM(S, []);
+  originalesOk(S.quotes[0]);
+  assert.equal(S.quotes[0]._fila, undefined);
+});
+
+test('aplicarFilaCRM: si otra edición sigue pendiente el overlay se mantiene', () => {
+  const S = S0(); S.quotes.push(qServ());
+  const e1 = edicion('pendiente');
+  const e2 = { ...edicion('pendiente'), id: 'e2', creada: '2026-11-20T11:00:00.000Z' };
+  C.aplicarFilaCRM(S, [e1, e2]);
+  C.aplicarFilaCRM(S, [{ ...e1, estado: 'problema', error: 'CONFLICTO' }, e2]);
+  assert.equal(S.quotes[0].notes, 'nuevo');
+  assert.ok(S.quotes[0]._base);
+  assert.equal(S.quotes[0]._base.notes, 'viejo');
+});
