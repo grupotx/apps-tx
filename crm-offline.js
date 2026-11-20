@@ -49,6 +49,8 @@
     for (const k of ['visits', 'clients', 'tasks', 'opps']) {
       for (const x of S[k] || []) if (x._fila && !activas.has(x._fila.id)) delete x._fila;
     }
+    // La marca de entrega del PDF se rehace desde las entradas activas.
+    for (const q of S.quotes) delete q._filaEntrega;
     for (const e of pend) superponerEntrada(S, e);
   }
 
@@ -65,6 +67,20 @@
       agregar(S.quotes, d.cotizacion, e);
       if (d.tarea && S.tasks) agregar(S.tasks, d.tarea, e);
       if (d.opp && d.opp.modo === 'nueva' && S.opps) agregar(S.opps, d.opp.obj, e);
+    } else if (e.tipo === 'crm.cotizacion.entrega') {
+      // Entrega del PDF sin enviar: línea de historia (sin duplicar), fecha de envío y borrador→enviada.
+      // Marca aparte (_filaEntrega): la cotización sigue siendo del servidor (acciones, quitarEntrada).
+      const q = S.quotes.find((x) => x.id === d.id);
+      if (!q) return;
+      const l = d.linea;
+      if (l) {
+        q.history = q.history || [];
+        if (!q.history.some((h) => h && h.ts === l.ts && h.text === l.text && h.user === l.user)) q.history.push(clonar(l));
+      }
+      if (d.sentAt) q.sentAt = d.sentAt;
+      if (d.aEnviada && q.status === 'borrador') q.status = 'enviada';
+      // con varias entregas pendientes, un problema no queda tapado por una pendiente posterior
+      if (!q._filaEntrega || q._filaEntrega.estado !== 'problema' || e.estado === 'problema') q._filaEntrega = marca(e);
     } else if (e.tipo === 'crm.cotizacion.editar') {
       const q = S.quotes.find((x) => x.id === d.id);
       if (!q) return;
@@ -125,6 +141,17 @@
     // queda (su reversión la hace aplicarFilaCRM).
     const qs = S.quotes || [];
     for (let i = qs.length - 1; i >= 0; i--) if (qs[i]._fila && qs[i]._fila.id === id && !qs[i]._base) qs.splice(i, 1);
+  }
+
+  // Ids de las entradas que dependen (en cadena, vía dependeDe) de la entrada id: se descartan con ella.
+  function dependientes(entradas, id) {
+    const out = [];
+    const cola = [id];
+    while (cola.length) {
+      const p = cola.shift();
+      for (const e of entradas || []) if (e.dependeDe === p && !out.includes(e.id) && e.id !== id) { out.push(e.id); cola.push(e.id); }
+    }
+    return out;
   }
 
   // Envío directo (sin fila): lo agregado con el id ficticio deja de estar "Pendiente de enviar";
@@ -214,7 +241,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

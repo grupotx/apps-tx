@@ -245,9 +245,12 @@
     await sincronizar();
   }
 
-  async function descartar(id) {
+  // Solo entradas con problema; { aunPendiente: true } también descarta una pendiente (p. ej. la que
+  // depende de una entrada descartada y ya no podría enviarse).
+  async function descartar(id, opciones) {
     const e = await leer('fila', id);
-    if (!e || e.estado !== 'problema') return;
+    const aun = !!(opciones && opciones.aunPendiente);
+    if (!e || !(e.estado === 'problema' || (aun && e.estado === 'pendiente'))) return;
     for (const clave of e.archivos || []) await borrar('archivos', clave);
     await borrar('fila', id);
     await emitir();

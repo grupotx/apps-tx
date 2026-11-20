@@ -952,7 +952,9 @@ const TXT_FILA={'crm.visita':['la visita sin enviar? Se borrará del teléfono (
 async function accionFilaCRM(b){const eid=b.dataset.eid,acc=b.dataset.filaAcc;
  let tipo='crm.visita';try{const e0=(await TXOffline.entradas()).find(x=>x.id===eid);if(e0)tipo=e0.tipo}catch(_){}
  const tx=TXT_FILA[tipo]||['el registro sin enviar? Se borrará del teléfono','Registro descartado.','Registro enviado.'];
- if(acc==='descartar'){if(!confirm('¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid);try{await TXOffline.descartar(eid)}catch(e){console.error(e)}toast(tx[1])}
+ if(acc==='descartar'){if(!confirm('¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid);
+  // lo que depende de una cotización descartada (entregas del PDF) ya no podría enviarse: se descarta con ella
+  try{if(tipo==='crm.cotizacion'){const ents=await TXOffline.entradas();for(const d of CO.dependientes(ents,eid)){CO.quitarEntrada(S,d);await TXOffline.descartar(d,{aunPendiente:true})}}await TXOffline.descartar(eid)}catch(e){console.error(e)}toast(tx[1])}
  else{b.disabled=true;esperandoEnvio.add(eid);try{await Promise.race([TXOffline.reintentar(eid),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
   let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===eid)}catch(_){}
   toast(!e?esc(resolverAviso(eid)||tx[2]):e.estado==='problema'?'Sigue con problema: '+esc(e.error||''):'Pendiente de enviar. Se enviará al volver la señal.')}
@@ -1102,15 +1104,20 @@ async function tomarNumeroReservado(){
 }
 // Con señal: completa la reserva (al iniciar, al volver la señal y después de usar un número).
 let reponiendo=false;
+// Todo bajo el mismo Web Lock (se revisa la reserva dentro): dos pestañas no piden números a la vez.
+// Si falla (sin red, tope del servidor…) no se avisa: se reintenta en el próximo disparo.
 async function reponerNumeros(){
  if(reponiendo||!S.me||!can('cotizar')||navigator.onLine===false)return;
  reponiendo=true;
  try{
-  const res=(await TXOffline.leerLocal('crm.numeros'))||[];
-  if(!CO.necesitaReponer(res))return;
-  const n=Math.min(20,CO.cantidadAReservar(res));if(!n)return;
-  const nuevos=okR(await sb.rpc('crm_reservar_numeros',{p_n:n}))||[];
-  await conNumeros(async()=>{const act=(await TXOffline.leerLocal('crm.numeros'))||[];await TXOffline.guardarLocal('crm.numeros',[...act,...nuevos.filter(x=>!act.includes(x))])});
+  await conNumeros(async()=>{
+   const res=(await TXOffline.leerLocal('crm.numeros'))||[];
+   if(!CO.necesitaReponer(res))return;
+   const n=Math.min(20,CO.cantidadAReservar(res));if(!n)return;
+   const nuevos=okR(await sb.rpc('crm_reservar_numeros',{p_n:n}))||[];
+   const act=(await TXOffline.leerLocal('crm.numeros'))||[];
+   await TXOffline.guardarLocal('crm.numeros',[...act,...nuevos.filter(x=>!act.includes(x))]);
+  });
  }catch(e){console.warn('[CRM] no se pudieron reservar números:',e)}
  finally{reponiendo=false}
 }
@@ -1141,7 +1148,13 @@ TIPOS_FILA['crm.cotizacion']=async(d0,archivos,meta)=>{
 TIPOS_FILA['crm.cotizacion.entrega']=async d=>{
  // registrada antes de tener número: la auditoría se completa con el que asignó el servidor
  const sinNum=!!(d.auditoria&&String(d.auditoria.ref).includes(NUM_PEND));let num=null;
- if(d.linea||d.sentAt||d.aEnviada||sinNum){
+ if(!d.ajena&&(d.linea||d.sentAt||d.aEnviada)){
+  // cotización propia: crm_registrar_entrega agrega la línea de forma atómica (sin duplicar) y no cambia
+  // updated_at (una edición sin conexión hecha sobre la versión anterior no queda en CONFLICTO)
+  okR(await sb.rpc('crm_registrar_entrega',{p_id:d.id,p_linea:d.linea||null,p_sent_at:d.sentAt||null,p_a_enviada:!!d.aEnviada}));
+  if(sinNum)num=(okR(await sb.from('crm_quotes').select('num').eq('id',d.id).maybeSingle())||{}).num||null;
+ }else if(d.linea||d.sentAt||d.aEnviada||sinNum){
+  // cotización de otro vendedor (jefatura con ver_todo): como antes, lectura y actualización
   const r=okR(await sb.from('crm_quotes').select('history,status,sent_at,num').eq('id',d.id).maybeSingle());
   if(!r)throw new Error('La cotización no está en el servidor.');
   const h=Array.isArray(r.history)?r.history:[];
@@ -1156,7 +1169,7 @@ TIPOS_FILA['crm.cotizacion.entrega']=async d=>{
 // Registra la entrega del PDF: en pantalla al tiro y por la fila (depende del envío de la cotización si aún no se envía).
 async function registrarEntrega(q,o){
  const linea=o.texto?{ts:nowIso(),user:S.me,text:o.texto}:null;
- const datos={id:q.id,linea,sentAt:o.sentAt||null,aEnviada:!!o.aEnviada,aviso:o.aviso||null,auditoria:o.auditoria?{ts:nowIso(),...o.auditoria}:null};
+ const datos={id:q.id,ajena:q.userId!==S.me,linea,sentAt:o.sentAt||null,aEnviada:!!o.aEnviada,aviso:o.aviso||null,auditoria:o.auditoria?{ts:nowIso(),...o.auditoria}:null};
  if(linea)(q.history=q.history||[]).push(linea);if(o.sentAt)q.sentAt=o.sentAt;if(o.aEnviada&&q.status==='borrador')q.status='enviada';
  if(o.aviso)S.outbox.unshift(o.aviso);if(datos.auditoria)S.audit.unshift({user:S.me,...datos.auditoria});
  try{await TXOffline.encolar('crm.cotizacion.entrega',datos,{dependeDe:q._fila?q._fila.id:null})}
@@ -1265,7 +1278,7 @@ function vQuote(id){
  const mine=q.userId===S.me||can('ver_todo');const canAct=can('cotizar')||can('aprobar_desc');
  // rechazada: solo se puede cerrar como perdida o duplicar (otro número); sin enviar (en la fila): sin cambios de estado ni edición
  const rech=q.status==='rechazada',enFila=!!q._fila,hRech=rech?((q.history||[]).slice().reverse().find(x=>/^Rechazada por/.test(x.text))||{text:'Rechazada'}).text:'';
- M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${esc(qn(q))}</div><h1>${esc(qn(q))} · ${esc(c.name)}</h1><p class="row">${stPill(q)}${filaChip(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${q.dupFrom}</span>`:''}</p>${filaAcc(q)}</div>
+ M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${esc(qn(q))}</div><h1>${esc(qn(q))} · ${esc(c.name)}</h1><p class="row">${stPill(q)}${filaChip(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${esc(q.dupFrom)}</span>`:''}</p>${filaAcc(q)}${q._filaEntrega?`<p class="row small"><span>Entrega del PDF:</span>${filaChip({_fila:q._filaEntrega})}</p>${filaAcc({_fila:q._filaEntrega})}`:''}</div>
   <div class="stat-actions">
    ${!closed&&canAct&&mine&&!enFila&&q.status!=='pendiente'?`${rech?'':`<button class="btn good" data-act="win" data-id="${q.id}">${ico('check')}Marcar como ganada</button>`}<button class="btn bad" data-act="lose" data-id="${q.id}">${ico('x')}Marcar como perdida</button>`:''}
    <button class="btn" data-act="pdf" data-id="${q.id}">${ico('dl')}Descargar PDF</button>
@@ -1295,7 +1308,7 @@ function quoteEditor(q,isNew){
  const c=q.clientId?C(q.clientId):null;if(c&&!q.listId)q.listId=listFor(c).id;const L=c?qList(q):null;if(!q.entrega)q.entrega=entregaDe(c);const E=q.entrega;
  const prods=S.products.filter(p=>p.active);
  const over=q.items.some(i=>(i.disc||0)>S.cfg.discLimit);
- M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${isNew?'nueva':q.num}</div><h1>${isNew?(q.dupFrom?'Nueva cotización (duplicada de '+q.dupFrom+')':'Nueva cotización'):'Editar '+q.num}</h1><p>${q.dupFrom?'Revisa cliente, productos, cantidades, precios y descuentos antes de guardar. La cotización original no se modifica.':'Elige la zona de precios; los precios se toman de esa lista.'}</p></div>
+ M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${isNew?'nueva':q.num}</div><h1>${isNew?(q.dupFrom?'Nueva cotización (duplicada de '+esc(q.dupFrom)+')':'Nueva cotización'):'Editar '+q.num}</h1><p>${q.dupFrom?'Revisa cliente, productos, cantidades, precios y descuentos antes de guardar. La cotización original no se modifica.':'Elige la zona de precios; los precios se toman de esa lista.'}</p></div>
   <div class="row"><button class="btn" id="qCancel">Cancelar</button><button class="btn" id="qSaveDraft">Guardar borrador</button><button class="btn pri" id="qSave">${isNew?'Guardar y emitir':'Guardar cambios'}</button></div></div>
  <div class="grid g-main qed">
   <div class="card"><div class="form">
@@ -1413,11 +1426,21 @@ function notifyModal(q,kind,yaRegistrado){if(!q.num)q={...q,num:qn(q)};const m=a
  openModal(kind==='req'?'Solicitud de aprobación':'Avisar al vendedor',`<p>${kind==='req'?`La cotización quedó <b>pendiente de aprobación</b> (su PDF dice «Sujeta a aprobación»). <b>${esc(who)}</b> la verá en sus alertas del CRM apenas entre.`:`<b>${esc(who)}</b> verá el resultado en sus alertas del CRM.`}</p><p class="small muted">Para avisar ahora por correo, abre el mensaje ya redactado en tu correo y envíalo.</p><div class="box small" style="white-space:pre-line;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px">${esc('Para: '+m.to.join(', ')+(m.cc.length?'\nCC: '+m.cc.join(', '):'')+'\nAsunto: '+m.sub+'\n\n'+m.body)}</div>`,`<button class="btn" data-close>Cerrar</button><button class="btn pri" id="nmMail">${ico('send')}Abrir correo</button>`,'narrow');
  $('#nmMail').onclick=()=>{openMailto(m.to,m.cc,m.sub,m.body);closeModal()}}
 // Acciones de jefatura: requieren señal (escritura de oficina).
-function approveQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q)){toast('Solo la jefatura del vendedor puede aprobar.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
- q.status='enviada';q.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(q)}%)`});saveQ(q);audit('Cotización',q.num,'Descuento aprobado',`Dcto. máx ${maxDisc(q)}%`);rerender();notifyModal(q,'ok')}
+// Decisión de jefatura sobre la versión del servidor: se lee historia/estado, se agrega la línea y se
+// actualiza solo status e history (no sent_at ni el resto: no borra la entrega del PDF del vendedor).
+// → true si se guardó.
+async function decidirQ(q,status,linea){
+ let r;try{r=await dbRun(sb.from('crm_quotes').select('history,sent_at,status').eq('id',q.id).maybeSingle())}catch(_){return false}
+ if(!r||r.status!=='pendiente'){toast('La cotización cambió. Recarga e inténtalo de nuevo.');return false}
+ const history=[...(Array.isArray(r.history)?r.history:[]),linea];
+ try{await dbRun(sb.from('crm_quotes').update({status,history}).eq('id',q.id))}catch(_){return false}
+ q.status=status;q.history=history;q.sentAt=r.sent_at;return true}
+async function approveQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q)){toast('Solo la jefatura del vendedor puede aprobar.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
+ if(!await decidirQ(q,'enviada',{ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(q)}%)`}))return;
+ audit('Cotización',q.num,'Descuento aprobado',`Dcto. máx ${maxDisc(q)}%`);rerender();notifyModal(q,'ok')}
 function rejectQ(id){const q=S.quotes.find(x=>x.id===id);if(!canApprove(q))return;if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
  openModal('Rechazar '+q.num,`<div class="fld"><label>Motivo <span class="req">*</span></label><textarea id="rj-note" rows="3" placeholder="Ej: máximo 30% en este producto"></textarea></div>`,`<button class="btn" data-close>Cancelar</button><button class="btn bad" id="rjOk">Rechazar</button>`,'narrow');
- $('#rjOk').onclick=()=>{const n=$('#rj-note').value.trim();if(!n){toast('Indica el motivo.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}q.status='rechazada';q.history.push({ts:nowIso(),user:S.me,text:`Rechazada por ${me().name}: ${n}`});saveQ(q);audit('Cotización',q.num,'Descuento rechazado',n);closeModal();rerender();notifyModal(q,'no')}}
+ $('#rjOk').onclick=async()=>{const n=$('#rj-note').value.trim();if(!n){toast('Indica el motivo.');return}if(navigator.onLine===false){toast(MSG_REQUIERE_RED);return}const b=$('#rjOk');b.disabled=true;if(!await decidirQ(q,'rechazada',{ts:nowIso(),user:S.me,text:`Rechazada por ${me().name}: ${n}`})){b.disabled=false;return}audit('Cotización',q.num,'Descuento rechazado',n);closeModal();rerender();notifyModal(q,'no')}}
 function winModal(id){const q=S.quotes.find(x=>x.id===id);const t=qTotals(q);
  openModal('Marcar como ganada · '+q.num,`<form class="form"><div class="fld"><label>N° de pedido <span class="req">*</span></label><input id="w-order" placeholder="Ej: PED-48120"></div><div class="fld"><label>Fecha estimada de compra <span class="req">*</span></label><input type="date" id="w-date" value="${ymd(addD(TODAY,3))}"></div><div class="fld"><label>Monto final (con IVA)</label><input type="number" id="w-amount" value="${Math.round(t.total)}"><span class="hint">Cotizado: ${clp(t.total)}</span></div><div class="fld"><label>Avisar a</label><input disabled value="${S.cfg.on.ganada?S.cfg.emails.ganada.join(', '):'Aviso desactivado'}"></div><div class="fld full"><label>Observaciones</label><textarea id="w-notes" placeholder="Ej: despacho parcializado en 3 entregas"></textarea></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn good" id="wOk">${ico('check')}Confirmar venta ganada</button>`,'narrow');
  $('#wOk').onclick=()=>{const order=$('#w-order').value.trim();if(!order){toast('Ingresa el número de pedido.');return}
@@ -1467,7 +1490,8 @@ function mailQModal(id){const q=S.quotes.find(x=>x.id===id);if(q.status==='recha
  const sinRed=navigator.onLine===false,N=qn(q),R=q.num||NUM_PEND;
  // sin señal el PDF se genera al abrir: compartir debe llamarse pegado al toque del botón
  const pdfP=sinRed?generarPdf(q,'blob'):null;
- openModal(sinRed?'Compartir cotización':'Enviar cotización por correo',`<form class="form" style="grid-template-columns:1fr">${sinRed?'':`<div class="fld"><label>Para</label><input id="m-to" value="${esc(ct.email||c.email)}"></div><div class="fld"><label>CC</label><input id="m-cc" value="${esc(U(q.userId).email||'')}"></div>`}<div class="fld"><label>Asunto</label><input id="m-sub" value="Cotización ${N} – ${esc(S.cfg.company.name)}"></div><div class="fld"><label>Mensaje</label><textarea id="m-body" rows="7">Estimado/a ${esc((ct.name||'').split(' ')[0])}:\n\nJunto con saludar, adjunto la cotización ${N} por un total de ${clp(qTotals(q).total)} (IVA incluido), válida hasta el ${fd(qExpiry(q))}.${q.status==='pendiente'?'\n\nLa cotización está sujeta a aprobación de descuentos; le confirmaremos a la brevedad.':''}\n\nQuedo atento/a a sus comentarios.\n\nSaludos,\n${esc(U(q.userId).name)}\n${esc(S.cfg.company.name)}</textarea></div><div class="note">${ico('doc')}<span>${sinRed?'Sin señal: se abrirá el menú para compartir el PDF (WhatsApp, correo u otra app) con este mensaje. Si el teléfono no permite compartir, el PDF se descarga.':`Se descargará ${N}.pdf y se abrirá tu programa de correo con el mensaje listo. Adjunta el PDF descargado y envía.`}</span></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn pri" id="mSend">${ico('send')}${sinRed?'Compartir PDF':'Descargar PDF y abrir correo'}</button>`,'narrow');
+ openModal(sinRed?'Compartir cotización':'Enviar cotización por correo',`<form class="form" style="grid-template-columns:1fr">${sinRed?'':`<div class="fld"><label>Para</label><input id="m-to" value="${esc(ct.email||c.email)}"></div><div class="fld"><label>CC</label><input id="m-cc" value="${esc(U(q.userId).email||'')}"></div>`}<div class="fld"><label>Asunto</label><input id="m-sub" value="Cotización ${esc(N)} – ${esc(S.cfg.company.name)}"></div><div class="fld"><label>Mensaje</label><textarea id="m-body" rows="7">Estimado/a ${esc((ct.name||'').split(' ')[0])}:\n\nJunto con saludar, adjunto la cotización ${N} por un total de ${clp(qTotals(q).total)} (IVA incluido), válida hasta el ${fd(qExpiry(q))}.${q.status==='pendiente'?'\n\nLa cotización está sujeta a aprobación de descuentos; le confirmaremos a la brevedad.':''}\n\nQuedo atento/a a sus comentarios.\n\nSaludos,\n${esc(U(q.userId).name)}\n${esc(S.cfg.company.name)}</textarea></div><div class="note">${ico('doc')}<span>${sinRed?'Sin señal: se abrirá el menú para compartir el PDF (WhatsApp, correo u otra app) con este mensaje. Si el teléfono no permite compartir, el PDF se descarga.':`Se descargará ${N}.pdf y se abrirá tu programa de correo con el mensaje listo. Adjunta el PDF descargado y envía.`}</span></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn pri" id="mSend">${ico('send')}${sinRed?'Compartir PDF':'Descargar PDF y abrir correo'}</button>`,'narrow');
+ if(pdfP){const b0=$('#mSend');b0.disabled=true;b0.textContent='Preparando PDF…';pdfP.then(x=>{const b1=$('#mSend');if(b1!==b0)return;b1.disabled=!x;b1.innerHTML=ico('send')+(x?'Compartir PDF':'No se pudo generar el PDF')})}
  $('#mSend').onclick=async()=>{const sub=$('#m-sub').value,body=$('#m-body').value;const b=$('#mSend');
   if(sinRed){b.disabled=true;b.textContent='Preparando PDF…';const r=await compartirPdf(q,await pdfP,sub,body);
    if(!r){b.disabled=false;b.innerHTML=ico('send')+'Compartir PDF';return}

@@ -462,3 +462,47 @@ test('alertaRechazo: solo rechazada con PDF entregado y sin duplicar', () => {
   assert.equal(C.alertaRechazo({ ...q, status: 'perdida' }, [q]), null);
   assert.equal(C.alertaRechazo(q, [q, { id: 'q2', num: 'COT-2026-0102', dupFrom: 'COT-2026-0101' }]), null);
 });
+
+// ── Task 6, ronda 1: entrega del PDF superpuesta y dependientes ──
+test('superponerEntrada entrega: aplica línea, sentAt y borrador→enviada con marca aparte (_filaEntrega)', () => {
+  const S = S6();
+  S.quotes.push({ id: 'q1', num: 'C-1', status: 'borrador', history: [{ ts: 't0', user: 'u', text: 'Cotización creada' }] });
+  const linea = { ts: 't1', user: 'u', text: 'PDF compartido' };
+  const e = ent('e1', 'crm.cotizacion.entrega', { id: 'q1', linea, sentAt: '2026-11-20', aEnviada: true });
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [e]);
+  const q = S.quotes[0];
+  assert.equal(q.history.length, 2);
+  assert.equal(q.history[1].text, 'PDF compartido');
+  assert.equal(q.sentAt, '2026-11-20');
+  assert.equal(q.status, 'enviada');
+  assert.deepEqual(q._filaEntrega, { estado: 'pendiente', error: null, id: 'e1' });
+  assert.equal('_fila' in q, false);
+  // enviada o descartada: la marca se va; quitarEntrada no saca la cotización del servidor
+  C.quitarEntrada(S, 'e1');
+  assert.equal(S.quotes.length, 1);
+  C.aplicarFilaCRM(S, []);
+  assert.equal('_filaEntrega' in S.quotes[0], false);
+});
+
+test('superponerEntrada entrega: con problema la marca muestra el problema; sin cotización no hace nada', () => {
+  const S = S6();
+  S.quotes.push({ id: 'q1', num: 'C-1', status: 'enviada', history: [] });
+  C.aplicarFilaCRM(S, [
+    ent('e1', 'crm.cotizacion.entrega', { id: 'q1', linea: null }, 'problema', 0, 'falló'),
+    ent('e2', 'crm.cotizacion.entrega', { id: 'q1', linea: { ts: 't', user: 'u', text: 'PDF descargado' } }, 'pendiente', 1),
+    ent('e3', 'crm.cotizacion.entrega', { id: 'qx', linea: null }, 'pendiente', 2),
+  ]);
+  assert.equal(S.quotes[0]._filaEntrega.estado, 'problema');
+  assert.equal(S.quotes[0]._filaEntrega.id, 'e1');
+  assert.equal(S.quotes[0].status, 'enviada');
+});
+
+test('dependientes: ids de entradas que dependen (en cadena) de una entrada', () => {
+  const es = [
+    { id: 'a', dependeDe: null }, { id: 'b', dependeDe: 'a' }, { id: 'c', dependeDe: 'b' }, { id: 'd', dependeDe: 'x' },
+  ];
+  assert.deepEqual(C.dependientes(es, 'a'), ['b', 'c']);
+  assert.deepEqual(C.dependientes(es, 'd'), []);
+  assert.deepEqual(C.dependientes([], 'a'), []);
+});
