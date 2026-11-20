@@ -1,6 +1,7 @@
 // Capa de navegador de la fila de envíos sin conexión (IndexedDB + red + indicador).
 // Script clásico; requiere offline-core.js cargado antes. Expone window.TXOffline.
-// Importante: llamar registrarTipo() para todos los tipos ANTES de iniciar().
+// registrarTipo(tipo, enviar(datos, archivos, { id, intentos })): id estable para deduplicar reintentos.
+  // Importante: llamar registrarTipo() para todos los tipos ANTES de iniciar().
 (function (g) {
   'use strict';
   const Core = g.TXOfflineCore;
@@ -47,19 +48,33 @@
   // ---------- Utilidades ----------
   function msgDe(e) { return String((e && e.message) || e || ''); }
 
-  // Un TypeError que no es de red (bug del handler) se vuelve Error normal para que cuente como 'regla'.
+  // Todo error de un handler que no tenga forma de red/sesión se registra y se relanza como Error
+  // plano (clasifica 'regla' -> 'problema'); así un bug no detiene la fila en silencio.
+  function esRedOSesion(e) {
+    const t = Core.clasificarError(e);
+    if (t === 'sesion') return true;
+    if (e instanceof TypeError) return /^(failed to fetch|networkerror|load failed)/i.test(msgDe(e));
+    return t === 'red';
+  }
   function envolver(fn) {
-    return async function (datos, archivos) {
+    return async function (datos, archivos, meta) {
       try {
-        return await fn(datos, archivos);
+        return await fn(datos, archivos, meta);
       } catch (e) {
-        if (e instanceof TypeError && !/fetch|network|load failed/i.test(msgDe(e))) {
-          console.error('[TXOffline] error no de red en un envío:', e);
-          throw new Error(msgDe(e));
-        }
-        throw e;
+        if (esRedOSesion(e)) throw e;
+        console.error('[TXOffline] error no de red en un envío:', e);
+        throw new Error(msgDe(e));
       }
     };
+  }
+
+  // Una sola pasada a la vez entre pestañas (Web Locks); sin soporte, se sigue como antes.
+  async function conBloqueo(fn) {
+    if (!g.navigator || !g.navigator.locks) return fn();
+    return g.navigator.locks.request('tx-offline-' + nombreDb, { ifAvailable: true }, async lock => {
+      if (!lock) return { enviados: 0, problemas: 0, detenido: null, omitido: true };
+      return fn();
+    });
   }
 
   async function cargarArchivos(entrada) {
@@ -121,7 +136,7 @@
       enviar: async e => {
         const h = handlers[e.tipo];
         if (!h) throw new Error('Tipo de envío no registrado: ' + e.tipo);
-        await h(e.datos, await cargarArchivos(e));
+        await h(e.datos, await cargarArchivos(e), { id: e.id, intentos: e.intentos });
       },
     });
     await limpiar();
@@ -139,9 +154,9 @@
       try {
         do {
           repetir = false;
-          const r = await pasada();
+          const r = await conBloqueo(pasada);
           total.enviados += r.enviados; total.problemas += r.problemas; total.detenido = r.detenido;
-          if (r.detenido) break;
+          if (r.detenido || r.omitido) break;
         } while (repetir);
       } catch (e) {
         console.error('[TXOffline] error al sincronizar:', e);

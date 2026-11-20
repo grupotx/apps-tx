@@ -21,7 +21,11 @@
   } };
   async function pintarLista() { document.getElementById('lista').textContent = JSON.stringify(await TXOffline.entradas(), null, 2); }
   window.addEventListener('txoffline:cambio', pintarLista);
-  TXOffline.registrarTipo('eco', async () => { await fetch(location.href); });
+  TXOffline.registrarTipo('eco', async (datos, archivos, meta) => { console.log('eco', meta.id, meta.intentos); await fetch(location.href); });
+  // Tipos de prueba: 'bugref' lanza ReferenceError, 'bugtype' un TypeError que no es de red.
+  TXOffline.registrarTipo('bugref', async () => { throw new ReferenceError('x'); });
+  TXOffline.registrarTipo('bugtype', async () => { throw new TypeError("Cannot read properties of undefined (reading 'fetch')"); });
+  TXOffline.registrarTipo('meta', async (d, a, m) => { window.__meta = m; });
   TXOffline.montarIndicador(document.getElementById('ind'));
   TXOffline.iniciar({ app: 'prueba', sb, usuarioId: 'prueba' }).then(pintarLista);
 </script>
