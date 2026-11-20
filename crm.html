@@ -1011,19 +1011,24 @@ function visitForm(clientId){
   let opp=null,opAct=null;
   if(c&&!NOVISIT(v.result)&&!/^Negativo/.test(v.result)){const op=S.opps.find(o=>o.clientId===c.id&&!['ganada','perdida'].includes(o.stage));if(op){if(v.next){opAct=op;opp={modo:'actualizar',obj:{id:op.id,nextAction:v.next,nextDate:v.followDate}}}}else opp={modo:'nueva',obj:{id:uid(),clientId:c.id,userId:v.userId,name:`${v.reason} · ${c.name}`,stage:'visita',amount:0,nextAction:v.next||'',nextDate:v.followDate||null,createdAt:nowIso(),quoteIds:[]}}}
   const aviso=armarMail('visita',`Visita registrada – ${name}`,`${U(v.userId).name} registró una visita.\n\n${lugar?'Instalación':'Cliente'}: ${name}${newC?' (prospecto nuevo)':''}\nFecha: ${fdt(v.date)}\nMotivo: ${v.reason}\nResultado: ${v.result}\nComentarios: ${v.comments}\nPróximo paso: ${v.next||'—'}${v.next?' ('+fd(v.followDate)+')':''}`);
-  const auditoria={entity:'Visita',ref:name,action:'Registrada',detail:v.reason+' · '+v.result};
-  const auditoriaProspecto=newC?{entity:'Cliente',ref:newC.name,action:'Prospecto creado desde visita',detail:[(newC.contacts[0]||{}).name,newC.comuna].filter(Boolean).join(' · ')}:null;
-  const datos={visita:v,prospecto:newC,tarea:tk,opp,aviso,auditoria,auditoriaProspecto};
+  // ts del teléfono: la auditoría queda con la hora del registro, no con la del envío
+  const tsReg=nowIso();
+  const auditoria={ts:tsReg,entity:'Visita',ref:name,action:'Registrada',detail:v.reason+' · '+v.result};
+  const auditoriaProspecto=newC?{ts:tsReg,entity:'Cliente',ref:newC.name,action:'Prospecto creado desde visita',detail:[(newC.contacts[0]||{}).name,newC.comuna].filter(Boolean).join(' · ')}:null;
+  // Cliente que solo existe en el teléfono (prospecto de otra visita sin enviar): va también como prospecto
+  // y la entrada depende de la otra (si esa queda con problema, esta también; si se descarta, esta lo crea).
+  const prospFila=newC?null:CO.prospectoParaFila(c);
+  const datos={visita:v,prospecto:newC||prospFila,tarea:tk,opp,aviso,auditoria,auditoriaProspecto};
   const archivos=photo?{[ruta]:photo}:{};
   let id=null,r;
-  try{id=await TXOffline.encolar('crm.visita',datos,{archivos})}
+  try{id=await TXOffline.encolar('crm.visita',datos,{archivos,dependeDe:prospFila?c._fila.id:null})}
   catch(e){
    // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
    console.error(e);const mid=uid();esperandoEnvio.add(mid);
    try{escrituras++;await TIPOS_FILA['crm.visita'](datos,archivos,{id:mid,intentos:0})}
    catch(e2){console.error(e2);btn.disabled=false;btn.textContent='Guardar visita';toast(esRed(e2)?'Sin conexión y sin espacio en el teléfono: la visita no se guardó.':'No se pudo guardar la visita: '+esc((e2&&e2.message)||e2));return}
    finally{escrituras++;esperandoEnvio.delete(mid)}
-   id=mid;r={estado:'enviado'};CO.superponerEntrada(S,{id,tipo:'crm.visita',datos,estado:'pendiente',error:null});CO.aplicarFilaCRM(S,[]);
+   id=mid;r={estado:'enviado'};CO.superponerEntrada(S,{id,tipo:'crm.visita',datos,estado:'pendiente',error:null});CO.soltarEntrada(S,id);
   }
   // Pantalla al tiro con lo local (marcado "Pendiente de enviar" hasta que se envíe).
   if(!r){esperandoEnvio.add(id);CO.superponerEntrada(S,{id,tipo:'crm.visita',datos,estado:'pendiente',error:null})}
@@ -1067,7 +1072,7 @@ TIPOS_FILA['crm.visita']=async(d0,archivos,meta)=>{
  if(d.opp)await secundario(async()=>okR(d.opp.modo==='nueva'?await sb.from('crm_opps').upsert(toRow(d.opp.obj,COLS.opps),{onConflict:'id',ignoreDuplicates:true}):await sb.from('crm_opps').update(toRow(d.opp.obj,['nextAction','nextDate'])).eq('id',d.opp.obj.id)));
  if(d.aviso)await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(d.aviso,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
  // auditoría al final (sin id: un reintento después de esto la duplicaría)
- for(const a of [nuevoId?null:d.auditoriaProspecto,d.auditoria])if(a)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,COLS.audit))));
+ for(const a of [nuevoId?null:d.auditoriaProspecto,d.auditoria])if(a)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,a.ts?['ts',...COLS.audit]:COLS.audit))));
  if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d.prospecto.name),datos:d0,nuevoId});
 };
 

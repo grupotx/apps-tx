@@ -363,3 +363,27 @@ test('quitarEntrada: saca de S lo agregado por esa entrada (descartada) y nada m
   assert.equal(S.tasks.length, 0);
   assert.equal(S.opps.length, 0);
 });
+
+test('prospectoParaFila: cliente solo del teléfono se reenvía limpio; del servidor, null', () => {
+  const c = { id: 'p1', name: 'Obra X', contacts: [{ name: 'A' }], _fila: { estado: 'pendiente', error: null, id: 'e1' } };
+  const r = C.prospectoParaFila(c);
+  assert.deepEqual(r, { id: 'p1', name: 'Obra X', contacts: [{ name: 'A' }] });
+  assert.equal('_fila' in r, false);
+  r.contacts[0].name = 'B';
+  assert.equal(c.contacts[0].name, 'A');
+  assert.equal(C.prospectoParaFila({ id: 'c1', name: 'Server' }), null);
+  assert.equal(C.prospectoParaFila(null), null);
+});
+
+test('soltarEntrada: quita solo las marcas de esa entrada, sin revertir ediciones de cotización', () => {
+  const S = S1();
+  S.quotes.push({ id: 'q1', notes: 'nuevo', _fila: { estado: 'pendiente', error: null, id: 'e9' } });
+  S.visits.push({ id: 'v0', _fila: { estado: 'pendiente', error: null, id: 'e0' } });
+  C.superponerEntrada(S, ent('e1', 'crm.visita', visitaDatos()));
+  C.soltarEntrada(S, 'e1');
+  assert.equal(S.visits.find((v) => v.id === 'v1')._fila, undefined);
+  assert.equal(S.clients[0]._fila, undefined);
+  assert.equal(S.visits[0]._fila.id, 'e0');
+  assert.equal(S.quotes[0]._fila.id, 'e9');
+  assert.equal(S.quotes[0].notes, 'nuevo');
+});

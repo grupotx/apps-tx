@@ -119,6 +119,25 @@
     }
   }
 
+  // Envío directo (sin fila): lo agregado con el id ficticio deja de estar "Pendiente de enviar";
+  // las demás marcas y ediciones de cotización no se tocan.
+  function soltarEntrada(S, id) {
+    for (const k of ['visits', 'clients', 'tasks', 'opps']) {
+      for (const x of S[k] || []) if (x._fila && x._fila.id === id) delete x._fila;
+    }
+  }
+
+  // Cliente elegido que solo existe en el teléfono (prospecto de otra visita aún sin enviar): se reenvía
+  // como prospecto (crm_resolver_cliente es idempotente) para que la visita no dependa de que el otro envío
+  // llegue con ese mismo id. Cliente del servidor → null.
+  function prospectoParaFila(c) {
+    if (!c || !c._fila) return null;
+    const r = clonar({ ...c });
+    delete r._fila;
+    delete r._base;
+    return r;
+  }
+
   const MSG_CLIENTE_EXISTE = 'Ese RUT ya pertenece a un cliente de otro vendedor. Habla con tu jefatura.';
   // crm_resolver_cliente lanza 'CLIENTE_EXISTE: …' (cliente que este usuario no puede ver): regla, no se reintenta.
   function errorClienteExiste(error) {
@@ -165,7 +184,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
