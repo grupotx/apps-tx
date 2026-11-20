@@ -17,12 +17,17 @@
   const porCreada = (a, b) => (a.creada < b.creada ? -1 : a.creada > b.creada ? 1 : 0);
   const marca = (e) => ({ estado: e.estado, error: e.error || null, id: e.id });
 
+  // Copia profunda: lo que entra a S no comparte referencias con los datos encolados.
+  const clonar = (x) => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
+  // Campos que una edición puede superponer sobre la cotización del servidor.
+  const CAMPOS_EDITABLES = ['items', 'payment', 'conditions', 'notes', 'contact', 'nextAction', 'nextDate', 'listId', 'entrega', 'validDays'];
+
   // Agrega obj a la lista si no existe. Si ya existe y es nuestro (_fila), refresca la marca;
   // si existe sin _fila vino del servidor y gana (no se toca).
   function agregar(lista, obj, e) {
     if (!obj || obj.id == null) return;
     const actual = lista.find((x) => x.id === obj.id);
-    if (!actual) lista.push({ ...obj, _fila: marca(e) });
+    if (!actual) lista.push({ ...clonar(obj), _fila: marca(e) });
     else if (actual._fila) actual._fila = marca(e);
   }
 
@@ -38,9 +43,20 @@
       } else if (e.tipo === 'crm.cotizacion.editar') {
         const q = S.quotes.find((x) => x.id === d.id);
         if (!q) continue;
-        // Superpone los campos editados en el teléfono (idempotente).
-        const v = d.version_telefono || {};
-        Object.assign(q, d.cambios || {}, v, { id: q.id });
+        // Con varias ediciones pendientes de la misma cotización gana la última (orden por creada)
+        // y _fila.id apunta a ella. En 'problema' (p. ej. CONFLICTO) no se toca nada del servidor:
+        // la decisión del jefe no debe taparse; la versión del teléfono queda en datos.version_telefono.
+        if (e.estado === 'pendiente') {
+          if (!q._base) {
+            // Original del servidor, no enumerable para que nunca se serialice.
+            const base = {};
+            for (const k of [...CAMPOS_EDITABLES, 'status']) base[k] = clonar(q[k]);
+            Object.defineProperty(q, '_base', { value: base, enumerable: false, writable: true, configurable: true });
+          }
+          const cambios = d.cambios || {};
+          for (const k of CAMPOS_EDITABLES) if (k in cambios) q[k] = clonar(cambios[k]);
+          if (d.requiereAprobacion) q.status = 'pendiente';
+        }
         q._fila = marca(e);
       }
     }

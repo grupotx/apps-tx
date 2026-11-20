@@ -73,21 +73,74 @@ test('aplicarFilaCRM: cotización nueva pendiente queda visible', () => {
   assert.equal(S.quotes[0]._fila.estado, 'pendiente');
 });
 
-test('aplicarFilaCRM: edición se superpone sobre la cotización existente', () => {
-  const S = S0();
-  S.quotes.push({ id: 'q1', num: 'C-1', status: 'enviada', notes: 'viejo', items: [1] });
-  const e = ent('e1', 'crm.cotizacion.editar', {
-    id: 'q1', base: 'x', cambios: { notes: 'nuevo', items: [1, 2] }, requiereAprobacion: false, nota: '',
-    version_telefono: { id: 'q1', notes: 'nuevo', items: [1, 2], payment: 'contado' },
-  }, 'problema', 0, 'CONFLICTO: cambió');
+const edicion = (estado, extra = {}, error = null) => ent('e1', 'crm.cotizacion.editar', {
+  id: 'q1', base: 'x', cambios: { notes: 'nuevo', items: [1, 2] }, requiereAprobacion: false, nota: '',
+  version_telefono: { id: 'q1', notes: 'nuevo', items: [1, 2], status: 'borrador', num: null, history: [], won: true },
+  ...extra,
+}, estado, 0, error);
+const qServ = () => ({ id: 'q1', num: 'C-1', status: 'enviada', notes: 'viejo', items: [1], history: ['h1'], sentAt: 's' });
+
+test('aplicarFilaCRM: edición pendiente superpone solo los campos editables', () => {
+  const S = S0(); S.quotes.push(qServ());
+  const e = edicion('pendiente');
   C.aplicarFilaCRM(S, [e]);
   C.aplicarFilaCRM(S, [e]);
+  const q = S.quotes[0];
   assert.equal(S.quotes.length, 1);
-  assert.equal(S.quotes[0].notes, 'nuevo');
-  assert.deepEqual(S.quotes[0].items, [1, 2]);
-  assert.equal(S.quotes[0].payment, 'contado');
+  assert.equal(q.notes, 'nuevo');
+  assert.deepEqual(q.items, [1, 2]);
+  assert.equal(q.status, 'enviada');
+  assert.equal(q.num, 'C-1');
+  assert.deepEqual(q.history, ['h1']);
+  assert.equal(q.sentAt, 's');
+  assert.equal(q.won, undefined);
+  assert.deepEqual(q._fila, { estado: 'pendiente', error: null, id: 'e1' });
+});
+
+test('aplicarFilaCRM: requiereAprobacion deja la cotización en pendiente', () => {
+  const S = S0(); S.quotes.push(qServ());
+  C.aplicarFilaCRM(S, [edicion('pendiente', { requiereAprobacion: true })]);
+  assert.equal(S.quotes[0].status, 'pendiente');
   assert.equal(S.quotes[0].num, 'C-1');
-  assert.deepEqual(S.quotes[0]._fila, { estado: 'problema', error: 'CONFLICTO: cambió', id: 'e1' });
+});
+
+test('aplicarFilaCRM: _base guarda lo original, no es enumerable y sobrevive a reaplicar', () => {
+  const S = S0(); S.quotes.push(qServ());
+  const e = edicion('pendiente', { requiereAprobacion: true });
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [e]);
+  const q = S.quotes[0];
+  assert.equal(q._base.notes, 'viejo');
+  assert.deepEqual(q._base.items, [1]);
+  assert.equal(q._base.status, 'enviada');
+  assert.equal(Object.keys(q).includes('_base'), false);
+  assert.equal(JSON.stringify(q).includes('_base'), false);
+});
+
+test('aplicarFilaCRM: edición con problema no cambia nada del servidor, solo marca', () => {
+  const S = S0(); S.quotes.push(qServ());
+  const e = edicion('problema', {}, 'CONFLICTO: cambió');
+  C.aplicarFilaCRM(S, [e]);
+  C.aplicarFilaCRM(S, [e]);
+  const q = S.quotes[0];
+  assert.equal(q.status, 'enviada');
+  assert.deepEqual(q.history, ['h1']);
+  assert.equal(q.notes, 'viejo');
+  assert.deepEqual(q.items, [1]);
+  assert.equal(q._base, undefined);
+  assert.deepEqual(q._fila, { estado: 'problema', error: 'CONFLICTO: cambió', id: 'e1' });
+  assert.deepEqual(e.datos.version_telefono.items, [1, 2]);
+});
+
+test('aplicarFilaCRM: copias profundas, mutar S no toca los datos de la fila', () => {
+  const S = S0(); S.quotes.push(qServ());
+  const v = ent('e2', 'crm.visita', { visita: { id: 'v1', tags: ['a'] }, prospecto: null }, 'pendiente', 1);
+  const ed = edicion('pendiente');
+  C.aplicarFilaCRM(S, [v, ed]);
+  S.visits[0].tags.push('b');
+  S.quotes[0].items.push(99);
+  assert.deepEqual(v.datos.visita.tags, ['a']);
+  assert.deepEqual(ed.datos.cambios.items, [1, 2]);
 });
 
 test('aplicarFilaCRM: edición de cotización ausente no hace nada', () => {
