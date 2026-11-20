@@ -498,6 +498,10 @@ const AUTH_KEY='sb-'+new URL(SB_URL).hostname.split('.')[0]+'-auth-token';
 const MSG_LOGIN_SIN_RED='Necesitas conexión para iniciar sesión la primera vez';
 const MSG_NO_SALIR='Tienes registros sin enviar. Conéctate y espera a que se envíen antes de cerrar sesión.';
 const MSG_REQUIERE_RED='Esta acción requiere conexión. Inténtalo con señal.';
+// Acciones (data-act) que escriben directo en la base, sin pasar por la fila: requieren señal.
+const ACT_RED=new Set(['editClient','newTask','newComm','win','lose','askApproval','newProduct','editProduct','toggleProduct']);
+// true (y avisa) si no hay señal: para escrituras de oficina que no pasan por la fila.
+const sinSenal=()=>{if(navigator.onLine!==false)return false;toast(MSG_REQUIERE_RED);return true};
 const esperar=ms=>new Promise(r=>setTimeout(r,ms));
 const esRed=e=>TXOfflineCore.clasificarError(e)==='red';
 // Tipos de la fila de envíos: cada flujo de terreno agrega aquí su handler (TIPOS_FILA['crm.visita']=async(datos,archivos,meta)=>{…}).
@@ -505,7 +509,20 @@ const esRed=e=>TXOfflineCore.clasificarError(e)==='red';
 // Una entrada de un tipo sin handler no rompe nada: la fila la deja 'problema' y aplicarFilaCRM la ignora.
 const TIPOS_FILA={};
 // Cada envío cuenta como escritura al empezar y al terminar: una carga que se cruce con él queda vieja (CO.snapshotVigente).
-function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,async(d,a,m)=>{escrituras++;try{return await fn(d,a,m)}finally{escrituras++}})}
+// Envío exitoso → recarga programada (ver programarRecarga).
+function registrarTiposFila(){for(const [t,fn] of Object.entries(TIPOS_FILA))TXOffline.registrarTipo(t,async(d,a,m)=>{escrituras++;try{const r=await fn(d,a,m);programarRecarga();return r}finally{escrituras++}})}
+// Lo que un envío dejó en el servidor entra también a la copia local: al reabrir sin señal desde una copia
+// anterior, lo ya enviado (fuera de la fila) no desaparece.
+function copiaEnviado(tipo,datos,meta){if(!TXOffline.ajustarConsulta)return;const p=CO.enviadoParaCopia(tipo,datos,meta);TXOffline.ajustarConsulta('crm.datos',d=>CO.aplicarACopia(d,p)).catch(e=>console.warn('[CRM] copia local sin actualizar:',e))}
+// Después de enviar algo de la fila se recarga del servidor (pantalla y copia al día), haya o no aviso de copia.
+// Una ráfaga de envíos = una sola recarga; no pisa un formulario abierto (reintenta cada 2 s).
+let recargaProg=null;
+function programarRecarga(){clearTimeout(recargaProg);recargaProg=setTimeout(function rec(){recargaProg=null;if(!lastLoad||navigator.onLine===false)return;if(!puedeRepintar()){recargaProg=setTimeout(rec,2000);return}reloadData()},1500)}
+// Escritura de oficina que falló por red: lo cambiado en pantalla no se guardó. Se vuelve a lo guardado
+// (servidor si responde; si no, la copia local) con la fila superpuesta. Varias fallas seguidas = una sola vuelta.
+let restauraProg=null;
+function restaurarTrasFalla(){if(restauraProg)return;restauraProg=setTimeout(async function rec(){if(!puedeRepintar()){restauraProg=setTimeout(rec,2000);return}restauraProg=null;if(!lastLoad)return;
+ try{await loadAll(navigator.onLine===false?{soloCopia:true}:undefined);if($('#gate').hidden){renderShell();rerender()}}catch(e){console.error(e)}},300)}
 // Usuario de la sesión guardada en el equipo (para abrir sin señal cuando supabase no puede renovar el token).
 function usuarioGuardado(){try{const s=JSON.parse(localStorage.getItem(AUTH_KEY)||'null');return (s&&s.user)||null}catch(_){return null}}
 async function hayConexion(){
@@ -580,8 +597,8 @@ let escrituras=0;
 async function dbRun(promise){escrituras++;pending++;syncBadge();try{const {data,error}=await promise;if(error)throw error;return data}catch(e){dbFail(e);throw e}finally{pending--;syncBadge()}}
 function dbIns(t,o){const rows=(Array.isArray(o)?o:[o]).map(x=>toRow(x,COLS[t]));return dbRun(sb.from('crm_'+t).insert(rows))}
 function dbUpd(t,o,fields,key='id'){const r=toRow(o,fields||COLS[t]);delete r[snake(key)];return dbRun(sb.from('crm_'+t).update(r).eq(snake(key),o[key]))}
-// Sin señal no se recarga (se perdería la pantalla y la copia local no tiene el cambio): solo se avisa.
-function dbFail(e){console.error(e);if(esRed(e)){toast(MSG_REQUIERE_RED);return}const msg=(e&&e.message)||String(e);const rls=/row-level security|permission denied/i.test(msg);toast((rls?'No tienes permiso para guardar este cambio.':'No se pudo guardar: '+msg)+' Se recargaron los datos.');reloadData()}
+// Falla de red: se avisa y la pantalla vuelve a lo guardado (servidor o copia local + fila): el cambio no quedó en ninguna parte.
+function dbFail(e){console.error(e);if(esRed(e)){toast(MSG_REQUIERE_RED);restaurarTrasFalla();return}const msg=(e&&e.message)||String(e);const rls=/row-level security|permission denied/i.test(msg);toast((rls?'No tienes permiso para guardar este cambio.':'No se pudo guardar: '+msg)+' Se recargaron los datos.');reloadData()}
 const ignore=()=>{};
 async function fetchAll(t,order){let out=[],from=0;for(;;){let q=sb.from('crm_'+t).select('*').range(from,from+999);if(order)q=q.order(order,{ascending:true});if(order&&order!=='id'&&['clients','visits','quotes','opps','tasks','comms','price_lists'].includes(t))q=q.order('id',{ascending:true});const {data,error}=await q;if(error)throw error;out=out.concat(data);if(data.length<1000)break;from+=1000}return out.map(fromRow)}
 const num=x=>x==null?x:+x;
@@ -662,6 +679,8 @@ async function reloadData(){try{const r=await loadAll({conservar:true});if(!r.de
 /* ============ derived ============ */
 const U=id=>S.users.find(u=>u.id===id)||{name:'—',color:'var(--fg-3)'};
 const C=id=>S.clients.find(c=>c.id===id);
+// Cliente de una cotización; si aún no está en este equipo (p. ej. prospecto resuelto a otro cliente que la copia no trae), uno vacío.
+const CQ=q=>C(q.clientId)||{id:q.clientId||'',name:'Cliente sin cargar',comuna:'',region:'',contacts:[],sellers:[]};
 const siteOf=k=>SITES.find(x=>x.k===k)||SITES[0];
 const VC=v=>C(v.clientId)||(v.lugar?{id:'',internal:true,name:'Grupo TX · '+v.lugar,comuna:siteOf(v.lugar).comuna,region:siteOf(v.lugar).region,sellers:[],address:'',contacts:[],type:'Instalación',segment:''}:{id:'',name:'—',comuna:'',region:'RM',sellers:[],contacts:[]});
 const isProsp=c=>c&&c.origen==='prospecto';
@@ -708,8 +727,8 @@ function alertsFor(){
  S.quotes.filter(q=>q.userId===S.me).forEach(q=>{const ar=CO.alertaRechazo(q,S.quotes);if(ar){out.push({k:'a',sev:3,text:ar,sub:(C(q.clientId)||{}).name||'',go:'#cotizacion/'+q.id});return}const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text));if(h&&h.user!==S.me&&daysBetween(pd(h.ts.slice(0,10)),TODAY)<=7)out.push({k:'a',sev:3,text:`${q.num}: ${h.text}`,sub:(C(q.clientId)||{}).name||'',go:'#cotizacion/'+q.id})});
  const scopeTasks=S.tasks.filter(t=>!t.done&&(can('ver_todo')&&me().role!=='vendedor'?true:t.userId===S.me));
  scopeTasks.filter(t=>t.date<ymd(TODAY)).forEach(t=>out.push({k:'t',sev:2,text:`Actividad vencida: ${t.title}`,sub:((C(t.clientId)||{}).name||'Sin cliente')+' · '+fd(t.date),go:'#agenda'}));
- qs.filter(q=>openQ(q)&&q.status!=='borrador').forEach(q=>{const d=Math.ceil((qExpiry(q)-TODAY)/864e5);if(d>=0&&d<=S.cfg.expWarn)out.push({k:'q',sev:2,text:`${q.num} vence en ${d} día${d===1?'':'s'}`,sub:C(q.clientId).name+' · '+clp(qTotals(q).total),go:'#cotizacion/'+q.id});
-  const lastTouch=q.history.length?q.history[q.history.length-1].ts.slice(0,10):q.date;const nf=daysBetween(pd(lastTouch),TODAY);if(nf>=S.cfg.noFollow&&d>S.cfg.expWarn)out.push({k:'q',sev:1,text:`${q.num} sin seguimiento hace ${nf} días`,sub:C(q.clientId).name,go:'#cotizacion/'+q.id})});
+ qs.filter(q=>openQ(q)&&q.status!=='borrador').forEach(q=>{const d=Math.ceil((qExpiry(q)-TODAY)/864e5);if(d>=0&&d<=S.cfg.expWarn)out.push({k:'q',sev:2,text:`${q.num} vence en ${d} día${d===1?'':'s'}`,sub:CQ(q).name+' · '+clp(qTotals(q).total),go:'#cotizacion/'+q.id});
+  const lastTouch=q.history.length?q.history[q.history.length-1].ts.slice(0,10):q.date;const nf=daysBetween(pd(lastTouch),TODAY);if(nf>=S.cfg.noFollow&&d>S.cfg.expWarn)out.push({k:'q',sev:1,text:`${q.num} sin seguimiento hace ${nf} días`,sub:CQ(q).name,go:'#cotizacion/'+q.id})});
  cl.forEach(c=>{const n=qs.filter(q=>q.clientId===c.id&&openQ(q)).length;if(n>=S.cfg.maxOpen)out.push({k:'c',sev:1,text:`${c.name} tiene ${n} cotizaciones abiertas`,sub:'Consolidar o cerrar',go:'#cliente/'+c.id});
   const d=daysSince(c.id);if(c.segment==='A'&&d>=S.cfg.keyDays)out.push({k:'c',sev:2,text:`Cliente clave sin contacto: ${c.name}`,sub:d+' días desde la última visita',go:'#cliente/'+c.id});
   else if(d>=S.cfg.alerts[1])out.push({k:'c',sev:d>=S.cfg.alerts[2]?2:1,text:`${c.name} lleva ${d>=999?'sin visitas':d+' días sin visita'}`,sub:recommend(c),go:'#cliente/'+c.id})});
@@ -956,7 +975,10 @@ async function accionFilaCRM(b){const eid=b.dataset.eid,acc=b.dataset.filaAcc;
  if(acc==='descartar'){if(!confirm(tx[3]||'¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid,tipo);
   // lo que depende de una cotización descartada (entregas del PDF) ya no podría enviarse: se descarta con ella
   try{if(tipo==='crm.cotizacion'){const ents=await TXOffline.entradas();for(const d of CO.dependientes(ents,eid)){CO.quitarEntrada(S,d);await TXOffline.descartar(d,{aunPendiente:true})}}await TXOffline.descartar(eid)}catch(e){console.error(e)}toast(tx[1])}
- else{b.disabled=true;esperandoEnvio.add(eid);try{await Promise.race([TXOffline.reintentar(eid),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
+ else{b.disabled=true;esperandoEnvio.add(eid);
+  // con las que dependen de esta (quedaron "Depende de un registro con problema"): una sola pasada
+  let deps=[];try{deps=CO.dependientes(await TXOffline.entradas(),eid)}catch(_){}
+  try{await Promise.race([TXOffline.reintentar([eid,...deps]),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
   let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===eid)}catch(_){}
   toast(!e?esc(resolverAviso(eid)||tx[2]):e.estado==='problema'?'Sigue con problema: '+esc(e.error||''):'Pendiente de enviar. Se enviará al volver la señal.')}
  closeModal();await aplicarFila();rerender()}
@@ -1082,6 +1104,7 @@ TIPOS_FILA['crm.visita']=async(d0,archivos,meta)=>{
  if(d.aviso)await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(d.aviso,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
  // auditoría al final (sin id: un reintento después de esto la duplicaría)
  for(const a of [nuevoId?null:d.auditoriaProspecto,d.auditoria])if(a)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,a.ts?['ts',...COLS.audit]:COLS.audit))));
+ copiaEnviado('crm.visita',d0,{nuevoId,sinFoto:!!(d0.visita&&d0.visita.photo)&&!v.photo});
  if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d.prospecto.name),datos:d0,nuevoId});
 };
 // Prospecto del teléfono → id del servidor (crm_resolver_cliente es idempotente). Devuelve [datos, nuevoId|null].
@@ -1161,6 +1184,7 @@ TIPOS_FILA['crm.cotizacion']=async(d0,archivos,meta)=>{
  if(d.tarea)await secundario(async()=>okR(await sb.from('crm_tasks').upsert(toRow({...d.tarea,title:put(d.tarea.title)},COLS.tasks),{onConflict:'id',ignoreDuplicates:true})));
  for(const a of d.avisos||[])await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow({...a,subject:put(a.subject),body:put(a.body)},COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
  if(d.auditoria){const a={...d.auditoria,ref:put(d.auditoria.ref),detail:put(d.auditoria.detail)};await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,['ts',...COLS.audit]))))}
+ copiaEnviado('crm.cotizacion',d0,{nuevoId,num});
  if(nuevoId)avisosVisita.set(meta.id,{texto:CO.textoProspectoExistia(d0.prospecto.name,'la cotización'),datos:d0,nuevoId});
 };
 // PDF entregado (descargado, compartido o enviado por correo): línea de historia, fecha de envío y estado
@@ -1347,8 +1371,8 @@ function vQuotes(){
  M().innerHTML=`<div class="ph"><div><h1>Cotizaciones</h1><p>${qs.length} cotizaciones · abiertas por ${clp(qs.filter(openQ).reduce((s,q)=>s+qTotals(q).total,0))}</p></div><div class="row">${can('exportar')?`<button class="btn" data-act="export" data-what="cotizaciones">${ico('dl')}Exportar</button>`:''}${can('cotizar')?`<button class="btn pri" data-act="newQuote">${ico('plus')}Nueva cotización</button>`:''}</div></div>
  <div class="tabs" id="qtabs"><button data-st="" class="${!QF.st?'on':''}">Todas<span class="c">${qs.length}</span></button>${Object.keys(STATUS).map(s=>`<button data-st="${s}" class="${QF.st===s?'on':''}">${STATUS[s]}<span class="c">${counts[s]||0}</span></button>`).join('')}</div>
  <div class="filters"><input type="search" id="qf-q" placeholder="N°, cliente, producto…" value="${esc(QF.q)}">${can('ver_todo')?`<select id="qf-seller"><option value="">Todos los vendedores</option>${S.users.filter(u=>u.role==='vendedor').map(u=>`<option value="${u.id}" ${QF.seller===u.id?'selected':''}>${u.name}</option>`).join('')}</select>`:''}</div><div id="qt"></div>`;
- const draw=()=>{const rows=qs.filter(q=>{if(QF.st&&qStatus(q)!==QF.st)return false;if(QF.seller&&q.userId!==QF.seller)return false;if(QF.q&&!norm(q.num+C(q.clientId).name+q.items.map(i=>i.name).join(' ')).includes(norm(QF.q)))return false;return true}).sort((a,b)=>b.date.localeCompare(a.date)||String(b.num||'').localeCompare(String(a.num||'')));
-  $('#qt').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th>N°</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Emisión</th><th class="hide-m">Vence</th><th class="r">Total</th><th>Estado</th><th class="hide-m">Próxima acción</th></tr></thead><tbody>${rows.map(q=>{const exp=qExpiry(q);const dl=Math.ceil((exp-TODAY)/864e5);const o=openQ(q);return `<tr class="click" data-go="#cotizacion/${q.id}"><td class="mono small">${esc(qn(q))}</td><td><b>${esc(C(q.clientId).name)}</b> ${filaChip(q)}<div class="small muted">${q.items.length} producto${q.items.length>1?'s':''}</div></td><td class="hide-m">${esc(U(q.userId).name)}</td><td class="small">${fd(q.date)}</td><td class="hide-m small">${fd(exp)}${o&&dl>=0&&dl<=S.cfg.expWarn?` <span class="pill age-30 nodot">${dl}d</span>`:''}</td><td class="r num">${clp(qTotals(q).total)}</td><td>${stPill(q)}</td><td class="hide-m small">${o&&q.nextAction?esc(q.nextAction)+'<br><span class="muted">'+fds(q.nextDate)+'</span>':''}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="card empty">No hay cotizaciones con estos filtros.</div>'};
+ const draw=()=>{const rows=qs.filter(q=>{if(QF.st&&qStatus(q)!==QF.st)return false;if(QF.seller&&q.userId!==QF.seller)return false;if(QF.q&&!norm(q.num+CQ(q).name+q.items.map(i=>i.name).join(' ')).includes(norm(QF.q)))return false;return true}).sort((a,b)=>b.date.localeCompare(a.date)||String(b.num||'').localeCompare(String(a.num||'')));
+  $('#qt').innerHTML=rows.length?`<div class="tbl-w"><table><thead><tr><th>N°</th><th>Cliente</th><th class="hide-m">Vendedor</th><th>Emisión</th><th class="hide-m">Vence</th><th class="r">Total</th><th>Estado</th><th class="hide-m">Próxima acción</th></tr></thead><tbody>${rows.map(q=>{const exp=qExpiry(q);const dl=Math.ceil((exp-TODAY)/864e5);const o=openQ(q);return `<tr class="click" data-go="#cotizacion/${q.id}"><td class="mono small">${esc(qn(q))}</td><td><b>${esc(CQ(q).name)}</b> ${filaChip(q)}<div class="small muted">${q.items.length} producto${q.items.length>1?'s':''}</div></td><td class="hide-m">${esc(U(q.userId).name)}</td><td class="small">${fd(q.date)}</td><td class="hide-m small">${fd(exp)}${o&&dl>=0&&dl<=S.cfg.expWarn?` <span class="pill age-30 nodot">${dl}d</span>`:''}</td><td class="r num">${clp(qTotals(q).total)}</td><td>${stPill(q)}</td><td class="hide-m small">${o&&q.nextAction?esc(q.nextAction)+'<br><span class="muted">'+fds(q.nextDate)+'</span>':''}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="card empty">No hay cotizaciones con estos filtros.</div>'};
  draw();
  M().onclick=e=>{const t=e.target.closest('[data-st]');if(t){QF.st=t.dataset.st;vQuotes()}};
  M().oninput=e=>{if(e.target.id&&e.target.id.startsWith('qf-')){QF[e.target.id.slice(3)]=e.target.value;draw()}};M().onchange=M().oninput;
@@ -1392,7 +1416,7 @@ function vQuote(id){
  const q=S.quotes.find(x=>x.id===id);if(!q){M().innerHTML='<div class="card empty">Cotización no encontrada.</div>';return}
  if(!can('ver_todo')&&q.userId!==S.me){M().innerHTML=noPerm('esta cotización');return}
  if(q._edit)return quoteEditor(q,false);
- const c=C(q.clientId);const t=qTotals(q);const st=qStatus(q);const closed=['ganada','perdida'].includes(st);
+ const c=CQ(q);const t=qTotals(q);const st=qStatus(q);const closed=['ganada','perdida'].includes(st);
  const mine=q.userId===S.me||can('ver_todo');const canAct=can('cotizar')||can('aprobar_desc');
  // rechazada: solo se puede cerrar como perdida o duplicar (otro número); sin enviar (en la fila): sin cambios de estado ni edición
  // edición sin señal en CONFLICTO: se ve la versión del servidor (la decisión de jefatura prevalece); la del teléfono, a pedido
@@ -1421,7 +1445,7 @@ function vQuote(id){
    <div class="card"><h2>Historial</h2>${q.history.slice().reverse().map(h=>`<div class="list-item small"><div class="grow">${esc(h.text)}<div class="muted">${fdt(h.ts)} · ${esc(U(h.user).name)}</div></div></div>`).join('')}</div>
   </div>
  </div>`;
- M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=e=>{const k=e.target.closest('[data-conf]');if(k){(k.dataset.conf==='ver'?verMiVersion:descartarMiVersion)(k.dataset.eid);return}const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
+ M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){if(sinSenal()){s.value=q.status;return}const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=e=>{const k=e.target.closest('[data-conf]');if(k){(k.dataset.conf==='ver'?verMiVersion:descartarMiVersion)(k.dataset.eid);return}const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
 }
 function totalsBox(t){return `<div class="totals"><span>Subtotal bruto</span><span class="num">${clp(t.bruto)}</span><span>Descuentos</span><span class="num">− ${clp(t.desc)}</span><span>Neto</span><span class="num">${clp(t.neto)}</span><span>IVA 19%</span><span class="num">${clp(t.iva)}</span><span class="T">Total</span><span class="T num">${clp(t.total)}</span></div>`}
 function quoteEditor(q,isNew){
@@ -1547,7 +1571,7 @@ function quoteEditor(q,isNew){
  };
  $('#qSave').onclick=()=>save(false);$('#qSaveDraft').onclick=()=>save(true);
 }
-function approvalMsg(q,kind){const c=C(q.clientId)||{};const t=qTotals(q);const ap=approverOf(q);const seller=U(q.userId);
+function approvalMsg(q,kind){const c=CQ(q)||{};const t=qTotals(q);const ap=approverOf(q);const seller=U(q.userId);
  const lines=q.items.filter(i=>(+i.disc||0)>S.cfg.discLimit).map(i=>`- ${i.code} ${i.name}: lista ${clp(i.listPrice)} · venta ${clp(i.price)} · dcto ${i.disc}%`).join('\n');
  if(kind==='req')return {to:[ap&&ap.email].filter(Boolean),cc:[(asistOf(q.userId)||{}).email,seller.email].filter(Boolean),sub:`Solicitud de aprobación ${q.num} – ${c.name}`,body:`Hola ${ap?ap.nombre.split(' ')[0]:''},\n\nSolicito aprobar la cotización ${q.num} para ${c.name} por ${clp(t.total)} (IVA incl.). Tiene productos con descuento sobre ${S.cfg.discLimit}%:\n${lines}\n\nRevisar y aprobar en el CRM: ${quoteUrl(q)}\n\n${seller.name}`};
  const h=(q.history||[]).slice().reverse().find(x=>/^(Aprobada|Rechazada) por/.test(x.text))||{text:''};
@@ -1582,7 +1606,7 @@ function winModal(id){const q=S.quotes.find(x=>x.id===id);const t=qTotals(q);
   saveQ(q);const o=S.opps.find(o=>o.id===q.oppId);if(o){o.stage='ganada';o.amount=q.won.amount;dbUpd('opps',o,['stage','amount']).catch(ignore)}
   S.tasks.filter(t=>t.title.startsWith(q.num)&&!t.done).forEach(t=>{t.done=true;dbUpd('tasks',t,['done']).catch(ignore)});
   audit('Cotización',q.num,'Ganada',`Pedido ${order} · ${clp(q.won.amount)}`);
-  const m=sendMail('ganada',`Cotización ganada ${q.num} – ${C(q.clientId).name}`,`¡Venta cerrada!\n\nCliente: ${C(q.clientId).name}\nCotización: ${q.num}\nPedido: ${order}\nFecha estimada de compra: ${fd(q.won.date)}\nMonto final: ${clp(q.won.amount)}\nVendedor: ${U(q.userId).name}\nObservaciones: ${q.won.notes||'—'}`);
+  const m=sendMail('ganada',`Cotización ganada ${q.num} – ${CQ(q).name}`,`¡Venta cerrada!\n\nCliente: ${CQ(q).name}\nCotización: ${q.num}\nPedido: ${order}\nFecha estimada de compra: ${fd(q.won.date)}\nMonto final: ${clp(q.won.amount)}\nVendedor: ${U(q.userId).name}\nObservaciones: ${q.won.notes||'—'}`);
   closeModal();rerender();toast('Cotización marcada como ganada.'+(m?' Aviso registrado para '+m.to.length+' cuenta(s).':''),m?'Ver aviso':null,()=>showMail(m.id))};
 }
 function loseModal(id){const q=S.quotes.find(x=>x.id===id);
@@ -1592,7 +1616,7 @@ function loseModal(id){const q=S.quotes.find(x=>x.id===id);
 const HEX=(x,y,r,f)=>{const p=[0,1,2,3,4,5].map(k=>{const a=Math.PI/180*(60*k-90);return (x+r*Math.cos(a)).toFixed(1)+','+(y+r*Math.sin(a)).toFixed(1)}).join(' ');return `<polygon points="${p}" fill="${f}"/>`};
 const svgUri=x=>'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(x);
 const HEXBG=[svgUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="60 50 240 210" width="240" height="210">${HEX(60,40,70,'#dde7f4')+HEX(185,40,70,'#e7eef8')+HEX(0,150,70,'#d3dff0')+HEX(60,40,40,'#c3d3ea')}</svg>`),svgUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 200" width="230" height="200">${HEX(240,90,70,'#dde7f4')+HEX(120,200,70,'#e7eef8')+HEX(300,200,70,'#d3dff0')+HEX(200,215,45,'#c3d3ea')}</svg>`)];
-function pdfSheet(q){const c=C(q.clientId);const t=qTotals(q);const co=S.cfg.company;const u=U(q.userId);const E=q.entrega||{};
+function pdfSheet(q){const c=CQ(q);const t=qTotals(q);const co=S.cfg.company;const u=U(q.userId);const E=q.entrega||{};
  const logo=`<img alt="Grupo TX" width="150" height="91" src="${svgUri(TXLOGO.replace('viewBox="0 0 1181.46 500"','viewBox="0 0 1181.46 715.12" width="1181" height="715"').replace(' style="width:100%;height:auto;display:block"','').split('var(--brand)').join('#e4032e').split('currentColor').join('#1b1f24'))}">`;
  const kv=(l,v,cls='')=>`<div class="q-kv ${cls}"><span>${l}</span><b>${esc(v||'—')}</b></div>`;
  const cond=String(q.conditions||'').split('\n').map(x=>x.trim()).filter(Boolean);
@@ -1620,7 +1644,7 @@ function pdfModal(id){const q=S.quotes.find(x=>x.id===id);const rech=q.status===
   if(ok)registrarEntrega(q,{texto:q.userId===S.me?'PDF descargado':null,auditoria:{entity:'Cotización',ref:q.num||NUM_PEND,action:'PDF descargado',detail:''}})}}
 // Pendiente también se puede enviar (el PDF dice "Sujeta a aprobación"). Sin señal no hay correo: se comparte
 // el PDF (WhatsApp, correo…) con navigator.share y, si el teléfono no puede, se descarga.
-function mailQModal(id){const q=S.quotes.find(x=>x.id===id);if(q.status==='rechazada'){toast('La cotización fue rechazada: duplícala para emitir una nueva (lleva otro número).');return}const c=C(q.clientId);const ct=(c.contacts||[]).find(k=>k.name===q.contact)||((c.contacts||[])[0]||{});
+function mailQModal(id){const q=S.quotes.find(x=>x.id===id);if(q.status==='rechazada'){toast('La cotización fue rechazada: duplícala para emitir una nueva (lleva otro número).');return}const c=CQ(q);const ct=(c.contacts||[]).find(k=>k.name===q.contact)||((c.contacts||[])[0]||{});
  const sinRed=navigator.onLine===false,N=qn(q),R=q.num||NUM_PEND;
  // sin señal el PDF se genera al abrir: compartir debe llamarse pegado al toque del botón
  const pdfP=sinRed?generarPdf(q,'blob'):null;
@@ -1647,7 +1671,7 @@ function vPipeline(){
  const open=ops.filter(o=>!['ganada','perdida'].includes(o.stage));
  M().innerHTML=`<div class="ph"><div><h1>Pipeline comercial</h1><p>${open.length} oportunidades abiertas por ${clp(open.reduce((s,o)=>s+o.amount,0))}. Cada oportunidad nace con una visita y avanza sola al cotizar, negociar y cerrar. También puedes arrastrar las tarjetas o cambiar la etapa desde el selector. Cerradas: últimos 60 días.</p></div>${can('ver_todo')?`<select id="pf-seller" style="padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--panel)"><option value="">Todos los vendedores</option>${S.users.filter(u=>u.role==='vendedor').map(u=>`<option value="${u.id}" ${PF.seller===u.id?'selected':''}>${u.name}</option>`).join('')}</select>`:''}</div>
  <div class="kan">${STAGES.map(([k,l])=>{const it=ops.filter(o=>o.stage===k).sort((a,b)=>(a.nextDate||'z').localeCompare(b.nextDate||'z'));return `<div class="col" data-col="${k}"><div class="col-h"><b>${l}</b><span class="small muted num">${it.length} · ${clpK(it.reduce((s,o)=>s+o.amount,0))}</span></div>${it.map(o=>{const c=C(o.clientId);const late=o.nextDate&&o.nextDate<ymd(TODAY)&&!['ganada','perdida'].includes(k);return `<div class="opp" draggable="true" data-opp="${o.id}"><div class="small muted">${esc(c.name)}</div><b>${esc(o.name)}</b><div class="row" style="justify-content:space-between"><span class="num small">${clp(o.amount)}</span>${avatar(o.userId)}</div>${o.nextAction&&!['ganada','perdida'].includes(k)?`<div class="small ${late?'':'muted'}" style="${late?'color:var(--bad)':''}">${late?'Atrasada · ':''}${esc(o.nextAction)} · ${fds(o.nextDate)}</div>`:''}<select data-stage="${o.id}" aria-label="Etapa">${STAGES.map(([s,sl])=>`<option value="${s}" ${s===k?'selected':''}>${sl}</option>`).join('')}</select></div>`}).join('')}</div>`}).join('')}</div>`;
- const move=(oid,st)=>{const o=S.opps.find(x=>x.id===oid);if(!o||o.stage===st)return;if(st==='ganada'||st==='perdida'){const q=S.quotes.find(q=>o.quoteIds.includes(q.id)&&openQ(q));if(q){location.hash='#cotizacion/'+q.id;setTimeout(()=>st==='ganada'?winModal(q.id):loseModal(q.id),50);return}}const old=o.stage;o.stage=st;dbUpd('opps',o,['stage']).catch(ignore);audit('Oportunidad',o.name,'Cambio de etapa',`${STAGES.find(s=>s[0]===old)[1]} → ${STAGES.find(s=>s[0]===st)[1]}`);vPipeline();toast('Oportunidad movida a '+STAGES.find(s=>s[0]===st)[1])};
+ const move=(oid,st)=>{const o=S.opps.find(x=>x.id===oid);if(!o||o.stage===st)return;if(sinSenal()){rerender();return}if(st==='ganada'||st==='perdida'){const q=S.quotes.find(q=>o.quoteIds.includes(q.id)&&openQ(q));if(q){location.hash='#cotizacion/'+q.id;setTimeout(()=>st==='ganada'?winModal(q.id):loseModal(q.id),50);return}}const old=o.stage;o.stage=st;dbUpd('opps',o,['stage']).catch(ignore);audit('Oportunidad',o.name,'Cambio de etapa',`${STAGES.find(s=>s[0]===old)[1]} → ${STAGES.find(s=>s[0]===st)[1]}`);vPipeline();toast('Oportunidad movida a '+STAGES.find(s=>s[0]===st)[1])};
  M().onchange=e=>{if(e.target.dataset.stage)move(e.target.dataset.stage,e.target.value);if(e.target.id==='pf-seller'){PF.seller=e.target.value;vPipeline()}};M().oninput=null;M().onclick=null;
  M().ondragstart=e=>{const o=e.target.closest('[data-opp]');if(o)e.dataTransfer.setData('text',o.dataset.opp)};
  M().ondragover=e=>{const c=e.target.closest('[data-col]');if(c){e.preventDefault();document.querySelectorAll('.col').forEach(x=>x.classList.toggle('drag',x===c))}};
@@ -1710,7 +1734,7 @@ function vPrices(){
    <div class="card"><h2>Cambios recientes</h2>${S.audit.filter(a=>a.entity==='Lista de precios').slice(0,8).map(a=>`<div class="list-item small"><div class="grow"><b>${esc(a.ref)} · ${esc(a.action)}</b><div>${esc(a.detail)}</div><div class="muted">${fdt(a.ts)} · ${esc(U(a.user).name)}</div></div></div>`).join('')||'<div class="empty">Sin cambios.</div>'}</div>
   </div></div>`;
  M().onclick=e=>{const t=e.target.closest('[data-list]');if(t){curList=t.dataset.list;vPrices()}};
- M().onchange=e=>{const pc=e.target.dataset.price;if(pc){const old=L.prices[pc];const nv=+e.target.value;if(nv!==old){L.prices[pc]=nv;L.updated=nowIso();L.updatedBy=S.me;dbRun(sb.from('crm_price_list_items').upsert({list_id:L.id,code:pc,price:nv},{onConflict:'list_id,code'})).catch(ignore);dbRun(sb.from('crm_price_lists').update({updated:L.updated,updated_by:S.me}).eq('id',L.id)).catch(ignore);audit('Lista de precios',L.name,'Precio modificado',`${pc}: ${clp(old)} → ${clp(nv)}`);vPrices();toast(`${pc} actualizado en ${L.name}.`)}}
+ M().onchange=e=>{if((e.target.dataset.price||e.target.dataset.reglist)&&sinSenal()){rerender();return}const pc=e.target.dataset.price;if(pc){const old=L.prices[pc];const nv=+e.target.value;if(nv!==old){L.prices[pc]=nv;L.updated=nowIso();L.updatedBy=S.me;dbRun(sb.from('crm_price_list_items').upsert({list_id:L.id,code:pc,price:nv},{onConflict:'list_id,code'})).catch(ignore);dbRun(sb.from('crm_price_lists').update({updated:L.updated,updated_by:S.me}).eq('id',L.id)).catch(ignore);audit('Lista de precios',L.name,'Precio modificado',`${pc}: ${clp(old)} → ${clp(nv)}`);vPrices();toast(`${pc} actualizado en ${L.name}.`)}}
   const rg=e.target.dataset.reglist;if(rg){const old=S.regionList[rg];S.regionList[rg]=e.target.value;dbRun(sb.from('crm_settings').update({value:S.regionList}).eq('key','region_list')).catch(ignore);audit('Lista de precios',regName(rg),'Asignación de región',`${(S.lists[old]||{name:'—'}).name} → ${S.lists[e.target.value].name}`);vPrices();toast(`${regName(rg)} ahora usa la lista ${S.lists[e.target.value].name}.`)}
   if(e.target.id==='xlsIn')importXls(e.target.files[0])};
  M().oninput=null;
@@ -1732,7 +1756,7 @@ function vReports(){
  const from=RF.period==='mes'?ymd(new Date(TODAY.getFullYear(),TODAY.getMonth(),1)):RF.period==='ytd'?'2026-01-01':ymd(addD(TODAY,-(+RF.period)));
  const sellers=S.users.filter(u=>u.role==='vendedor'&&(!RF.seller||u.id===RF.seller));
  const cOk=c=>(!RF.region||c.region===RF.region);
- const qs=S.quotes.filter(q=>q.date>=from&&(!RF.seller||q.userId===RF.seller)&&cOk(C(q.clientId))&&(!RF.status||qStatus(q)===RF.status));
+ const qs=S.quotes.filter(q=>q.date>=from&&(!RF.seller||q.userId===RF.seller)&&cOk(CQ(q))&&(!RF.status||qStatus(q)===RF.status));
  const vs=S.visits.filter(v=>v.date.slice(0,10)>=from&&(!RF.seller||v.userId===RF.seller)&&cOk(VC(v)));
  const cls=S.clients.filter(c=>cOk(c)&&(!RF.seller||c.sellers.includes(RF.seller)));
  const won=qs.filter(q=>q.status==='ganada'),lost=qs.filter(q=>q.status==='perdida');
@@ -1748,7 +1772,7 @@ function vReports(){
  per.forEach(p=>p.score=Math.round(50*p.v/maxV+30*p.q/maxQ+20*(isFinite(p.conv)?p.conv:0)));
  const rank=per.slice().sort((a,b)=>b.score-a.score);
  const lossC={};lost.forEach(q=>lossC[q.lost.reason]=(lossC[q.lost.reason]||0)+1);
- const regAct=REGIONS.map(r=>({r,v:vs.filter(v=>VC(v).region===r.id).length,q:qs.filter(q=>C(q.clientId).region===r.id).length,amt:qs.filter(q=>C(q.clientId).region===r.id).reduce((s,q)=>s+qTotals(q).total,0)})).filter(x=>x.v||x.q);
+ const regAct=REGIONS.map(r=>({r,v:vs.filter(v=>VC(v).region===r.id).length,q:qs.filter(q=>CQ(q).region===r.id).length,amt:qs.filter(q=>CQ(q).region===r.id).reduce((s,q)=>s+qTotals(q).total,0)})).filter(x=>x.v||x.q);
  M().innerHTML=`<div class="ph"><div><h1>Dashboard gerencial</h1><p>Actividad comercial consolidada. ${fd(from)} – ${fd(TODAY)}.</p></div>${can('exportar')?`<button class="btn" data-act="export" data-what="actividad">${ico('dl')}Exportar actividad</button>`:''}</div>
  <div class="filters">
   <select id="rf-period">${[['mes','Mes actual'],['30','Últimos 30 días'],['90','Últimos 90 días'],['180','Últimos 180 días'],['ytd','Año 2026']].map(([k,l])=>`<option value="${k}" ${RF.period===k?'selected':''}>${l}</option>`).join('')}</select>
@@ -1914,9 +1938,9 @@ function exportData(what){if(!can('exportar')){toast('Tu perfil no puede exporta
  let rows=[];
  if(what==='clientes')rows=[['Nombre','Razón social','RUT','Tipo','Segmento','Región','Comuna','Dirección','Teléfono','Correo','Vendedores','Última visita','Días sin visita'],...visibleClients().map(c=>{const l=lastVisit(c.id);return[c.name,c.razon,c.rut,c.type,c.segment,regName(c.region),c.comuna,c.address,c.phone,c.email,c.sellers.map(s=>U(s).name).join(' / '),l?l.date.slice(0,10):'',daysSince(c.id)>=999?'':daysSince(c.id)]})];
  if(what==='visitas')rows=[['Fecha','Cliente','Vendedor','Motivo','Resultado','Comentarios','Próximo paso','Seguimiento','Lat','Lng'],...visibleVisits().map(v=>[v.date,VC(v).name,U(v.userId).name,v.reason,v.result,v.comments,v.next,v.followDate,v.lat==null?'':(+v.lat).toFixed(5),v.lng==null?'':(+v.lng).toFixed(5)])];
- if(what==='cotizaciones')rows=[['N°','Fecha','Cliente','Vendedor','Estado','Neto','Total','Pedido','Motivo pérdida'],...visibleQuotes().map(q=>{const t=qTotals(q);return[q.num,q.date,C(q.clientId).name,U(q.userId).name,STATUS[qStatus(q)],Math.round(t.neto),Math.round(t.total),q.won?q.won.order:'',q.lost?q.lost.reason:'']})];
+ if(what==='cotizaciones')rows=[['N°','Fecha','Cliente','Vendedor','Estado','Neto','Total','Pedido','Motivo pérdida'],...visibleQuotes().map(q=>{const t=qTotals(q);return[q.num,q.date,CQ(q).name,U(q.userId).name,STATUS[qStatus(q)],Math.round(t.neto),Math.round(t.total),q.won?q.won.order:'',q.lost?q.lost.reason:'']})];
  if(what==='productos')rows=[['Código','Nombre','Familia','Unidad','Precio base','Activo'],...S.products.map(p=>[p.code,p.name,p.family,p.unit,p.price,p.active?'Sí':'No'])];
- if(what==='actividad')rows=[['Fecha','Tipo','Vendedor','Cliente','Detalle'],...S.visits.map(v=>[v.date,'Visita',U(v.userId).name,VC(v).name,v.reason]),...S.quotes.map(q=>[q.date,'Cotización',U(q.userId).name,C(q.clientId).name,q.num+' '+STATUS[qStatus(q)]]),...S.tasks.map(t=>[t.date,TASKT[t.type],U(t.userId).name,(C(t.clientId)||{}).name||'',t.title])];
+ if(what==='actividad')rows=[['Fecha','Tipo','Vendedor','Cliente','Detalle'],...S.visits.map(v=>[v.date,'Visita',U(v.userId).name,VC(v).name,v.reason]),...S.quotes.map(q=>[q.date,'Cotización',U(q.userId).name,CQ(q).name,q.num+' '+STATUS[qStatus(q)]]),...S.tasks.map(t=>[t.date,TASKT[t.type],U(t.userId).name,(C(t.clientId)||{}).name||'',t.title])];
  openModal('Exportar '+what,`<p>${rows.length-1} filas listas para descargar en Excel.</p><div class="tbl-w" style="max-height:300px;overflow:auto"><table><thead><tr>${rows[0].map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1,11).map(r=>`<tr>${r.map(x=>`<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="small muted">Vista previa de las primeras 10 filas.</p>`,`<button class="btn" id="cpy">${ico('copy')}Copiar</button><button class="btn pri" id="xls">${ico('dl')}Descargar Excel</button>`,'wide');
  $('#cpy').onclick=()=>copyText(rows.map(r=>r.join('\t')).join('\n'));
  $('#xls').onclick=()=>{try{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]??'').length)))}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,what.slice(0,30));XLSX.writeFile(wb,`CRM_TX_${what}_${ymd(new Date())}.xlsx`);audit('Exportación',what,'Exportado a Excel',rows.length-1+' filas');closeModal()}catch(e){toast('No se pudo generar el Excel.')}}}
@@ -1926,7 +1950,7 @@ function fallbackCopy(t){const ta=document.createElement('textarea');ta.value=t;
 /* ============ global search + events ============ */
 function gsearch(q){const n=norm(q);if(n.length<2)return null;const res=[];
  visibleClients().filter(c=>norm(c.name+c.razon+c.rut+c.comuna).includes(n)).slice(0,6).forEach(c=>res.push(['Clientes',c.name,c.rut+' · '+c.comuna,'#cliente/'+c.id]));
- visibleQuotes().filter(q=>norm(q.num+C(q.clientId).name).includes(n)).slice(0,5).forEach(q=>res.push(['Cotizaciones',q.num,C(q.clientId).name+' · '+STATUS[qStatus(q)],'#cotizacion/'+q.id]));
+ visibleQuotes().filter(q=>norm(q.num+CQ(q).name).includes(n)).slice(0,5).forEach(q=>res.push(['Cotizaciones',q.num,CQ(q).name+' · '+STATUS[qStatus(q)],'#cotizacion/'+q.id]));
  S.products.filter(p=>norm(p.code+p.name+p.family).includes(n)).slice(0,5).forEach(p=>res.push(['Productos',p.code+' · '+p.name,p.unit+' · '+clp(p.price),'#productos']));
  S.users.filter(u=>norm(u.name).includes(n)).slice(0,4).forEach(u=>res.push(['Vendedores',u.name,ROLES[u.role],can('dash_equipo')?'#reportes':'#inicio']));
  visibleVisits().filter(v=>norm(VC(v).name+v.reason).includes(n)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4).forEach(v=>res.push(['Visitas',VC(v).name,fdt(v.date)+' · '+v.reason,'visit:'+v.id]));
@@ -1936,9 +1960,11 @@ $('#sres').addEventListener('click',e=>{const b=e.target.closest('[data-sgo]');i
 document.addEventListener('click',e=>{if(!e.target.closest('.search'))$('#sres').hidden=true;if(!e.target.closest('#notif')&&!e.target.closest('#bellBtn'))$('#notif').hidden=true;
  const go=e.target.closest('[data-go]');if(go&&!e.target.closest('a,button:not([data-go]),input,select')){location.hash=go.dataset.go;return}
  const a=e.target.closest('[data-act]');if(!a)return;const act=a.dataset.act,id=a.dataset.id,cl=a.dataset.client;
+ // escrituras de oficina sin fila: sin señal ni se empiezan (no quedan como guardadas en pantalla)
+ if(ACT_RED.has(act)&&navigator.onLine===false){toast(MSG_REQUIERE_RED);return}
  ({newClient:()=>can('crear_cliente')?clientForm():toast('Tu perfil no puede crear clientes.'),editClient:()=>clientForm(C(id)),newVisit:()=>visitForm(cl),newQuote:()=>newQuote(cl),newTask:()=>taskForm(cl),newComm:()=>commForm(cl),win:()=>winModal(id),lose:()=>loseModal(id),pdf:()=>pdfModal(id),mailQ:()=>mailQModal(id),dupQ:()=>{newQuote(null,id);toast('Cotización duplicada. Edita lo necesario y guarda; la original no cambia.')},editQ:()=>{const q=S.quotes.find(q=>q.id===id);q._bak=JSON.parse(JSON.stringify(q));q._edit=true;rerender()},approve:()=>approveQ(id),reject:()=>rejectQ(id),askApproval:()=>notifyModal(S.quotes.find(x=>x.id===id),'req'),export:()=>exportData(a.dataset.what),newProduct:()=>productForm(),editProduct:()=>productForm(id),toggleProduct:()=>{const p=P(id);p.active=!p.active;p.updatedBy=S.me;p.updatedAt=nowIso();dbUpd('products',p,['active','updatedBy','updatedAt'],'code').catch(ignore);audit('Producto',p.code,p.active?'Activado':'Desactivado','Activo: '+(p.active?'no → sí':'sí → no'));rerender()},tplXls:tplModal}[act]||(()=>{}))();
 });
-document.addEventListener('change',e=>{const t=e.target.dataset.taskDone;if(t){const k=S.tasks.find(x=>x.id===t);k.done=e.target.checked;dbUpd('tasks',k,['done']).catch(ignore);toast(k.done?'Actividad completada.':'Actividad reabierta.');setTimeout(rerender,250)}});
+document.addEventListener('change',e=>{const t=e.target.dataset.taskDone;if(t){if(sinSenal()){e.target.checked=!e.target.checked;return}const k=S.tasks.find(x=>x.id===t);k.done=e.target.checked;dbUpd('tasks',k,['done']).catch(ignore);toast(k.done?'Actividad completada.':'Actividad reabierta.');setTimeout(rerender,250)}});
 $('#userBtn').addEventListener('click',()=>{const m=$('#umenu');if(!m.hidden){m.hidden=true;return}m.innerHTML=`<div class="hd"><b>${esc(me().name)}</b><div class="muted small">${esc(me().email)} · ${ROLES[me().role]}</div></div><button data-um="pass">${ico('edit')}Cambiar mi contraseña</button><button data-um="reload">${ico('hist')}Actualizar datos</button><button data-um="portal">${ico('home')}Ir al portal de apps</button><button data-um="out">${ico('x')}Cerrar sesión</button>`;m.hidden=false});
 $('#umenu').addEventListener('click',async e=>{const b=e.target.closest('[data-um]');if(!b)return;$('#umenu').hidden=true;const a=b.dataset.um;if(a==='pass')passModal();if(a==='reload'){const r=await reloadData();toast(r&&!r.desdeCache?'Datos actualizados.':r&&r.tardia?'La carga está tardando: se muestran los datos guardados mientras termina.':'Sin conexión: se mantienen los datos guardados en este equipo.')}if(a==='portal')location.href='./';if(a==='out')cerrarSesion()});
 document.addEventListener('click',e=>{if(!e.target.closest('#umenu')&&!e.target.closest('#userBtn'))$('#umenu').hidden=true});

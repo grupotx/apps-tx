@@ -230,7 +230,54 @@
     if (!(row.history || []).some((h) => h && h.user === yo && h.text === d.nota)) return false;
     if (!d.requiereAprobacion && !EDITABLE_SIN_RED.includes(row.status)) return false;
     const c = cambiosRPC(d.cambios);
-    return Object.keys(c).every((k) => canonico(row[k]) === canonico(c[k]));
+    // entrega: la RPC guarda null como {} (coalesce): cuentan igual
+    const norm = (k, v) => (k === 'entrega' && v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length ? null : v);
+    return Object.keys(c).every((k) => canonico(norm(k, row[k])) === canonico(norm(k, c[k])));
+  }
+
+  // ── Lo enviado entra a la copia local ('crm.datos') ──
+  // Sin esto, al reabrir sin señal desde una copia anterior al envío, lo enviado (ya fuera de la fila) desaparecería.
+  const NUM_PEND = '(sin número)';
+  const sinMarcas = (o) => { const r = clonar(o); delete r._fila; delete r._base; return r; };
+  // → {upsert:{clients,visits,tasks,opps}, merge:{opps:[{id,…campos}]}, quitar:{clients:[ids]}}
+  // meta: {nuevoId (cliente resuelto si el prospecto ya existía), sinFoto, num (asignado por el servidor)}
+  function enviadoParaCopia(tipo, datos, meta) {
+    const m = meta || {};
+    const p = { upsert: {}, merge: {}, quitar: { clients: [] } };
+    if (tipo !== 'crm.visita' && tipo !== 'crm.cotizacion') return p;
+    let d = datos || {};
+    const pros = d.prospecto;
+    if (pros && m.nuevoId && m.nuevoId !== pros.id) { d = reasignarCliente(d, m.nuevoId); p.quitar.clients.push(pros.id); }
+    else if (pros) p.upsert.clients = [sinMarcas(pros)];
+    if (tipo === 'crm.visita' && d.visita) { const v = sinMarcas(d.visita); if (m.sinFoto) v.photo = null; p.upsert.visits = [v]; }
+    if (d.tarea) {
+      const t = sinMarcas(d.tarea);
+      if (m.num && typeof t.title === 'string') t.title = t.title.split(NUM_PEND).join(m.num);
+      p.upsert.tasks = [t];
+    }
+    if (d.opp && d.opp.obj) {
+      if (d.opp.modo === 'nueva') p.upsert.opps = [sinMarcas(d.opp.obj)];
+      else {
+        const campos = tipo === 'crm.visita' ? ['nextAction', 'nextDate'] : ['stage', 'amount', 'quoteIds', 'nextAction', 'nextDate'];
+        const o = { id: d.opp.obj.id };
+        for (const k of campos) if (k in d.opp.obj) o[k] = clonar(d.opp.obj[k]);
+        p.merge.opps = [o];
+      }
+    }
+    return p;
+  }
+  // Aplica el resultado de enviadoParaCopia sobre los datos de la copia (los muta y los devuelve).
+  function aplicarACopia(d, p) {
+    if (!d || !p) return d;
+    for (const [k, filas] of Object.entries(p.upsert || {})) {
+      const l = d[k] || (d[k] = []);
+      for (const f of filas) { const i = l.findIndex((x) => x && x.id === f.id); if (i >= 0) l[i] = clonar(f); else l.push(clonar(f)); }
+    }
+    for (const [k, filas] of Object.entries(p.merge || {})) {
+      for (const f of filas) { const x = (d[k] || []).find((y) => y && y.id === f.id); if (x) Object.assign(x, clonar(f)); }
+    }
+    for (const [k, ids] of Object.entries(p.quitar || {})) if (Array.isArray(d[k]) && ids.length) d[k] = d[k].filter((x) => !ids.includes(x && x.id));
+    return d;
   }
 
   const esConflicto = (error) => {
@@ -293,7 +340,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, MSG_CONFLICTO, cambiosEdicion, cambiosRPC, baseEdicion, edicionPorFila, yaAplicada, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, MSG_CONFLICTO, enviadoParaCopia, aplicarACopia, cambiosEdicion, cambiosRPC, baseEdicion, edicionPorFila, yaAplicada, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -258,13 +258,19 @@
       .sort((a, b) => (a.creada < b.creada ? -1 : a.creada > b.creada ? 1 : 0));
   }
 
+  // id o lista de ids (p. ej. una entrada y las que dependen de ella): todas vuelven a 'pendiente' antes
+  // de una sola pasada, así la dependiente no vuelve a quedar en problema por ver al padre aún en problema.
   async function reintentar(id) {
-    const e = await leer('fila', id);
-    if (e && e.estado === 'problema') {
-      e.estado = 'pendiente';
-      await poner('fila', e);
-      await emitir();
+    let hubo = false;
+    for (const x of [].concat(id)) {
+      const e = await leer('fila', x);
+      if (e && e.estado === 'problema') {
+        e.estado = 'pendiente';
+        await poner('fila', e);
+        hubo = true;
+      }
     }
+    if (hubo) await emitir();
     await sincronizar();
   }
 

@@ -598,3 +598,56 @@ test('yaAplicada (b): edición sin el cambio aplicado mientras la jefatura la de
 test('MSG_CONFLICTO en español', () => {
   assert.equal(C.MSG_CONFLICTO, 'Otra persona cambió esta cotización. Revisa tu versión.');
 });
+
+// ── Final fix pass: lo enviado entra a la copia local ('crm.datos') ──
+const visDatos = () => ({
+  visita: { id: 'v1', clientId: 'p1', photo: 'v1/foto.jpg' },
+  prospecto: { id: 'p1', name: 'Obra X', _fila: { id: 'e0', estado: 'pendiente' } },
+  tarea: { id: 't1', clientId: 'p1', title: 'Seguimiento', done: false },
+  opp: { modo: 'actualizar', obj: { id: 'o1', nextAction: 'Llamar', nextDate: '2026-11-25' } },
+});
+test('enviadoParaCopia visita: visita, prospecto (sin marcas), tarea y campos de la oportunidad', () => {
+  const p = C.enviadoParaCopia('crm.visita', visDatos(), {});
+  assert.deepEqual(p.upsert.visits, [{ id: 'v1', clientId: 'p1', photo: 'v1/foto.jpg' }]);
+  assert.deepEqual(p.upsert.clients, [{ id: 'p1', name: 'Obra X' }]);
+  assert.deepEqual(p.upsert.tasks.map((t) => t.id), ['t1']);
+  assert.deepEqual(p.merge.opps, [{ id: 'o1', nextAction: 'Llamar', nextDate: '2026-11-25' }]);
+  assert.deepEqual(p.quitar.clients, []);
+});
+test('enviadoParaCopia visita: prospecto que ya existía → todo al id resuelto y el del teléfono fuera', () => {
+  const p = C.enviadoParaCopia('crm.visita', visDatos(), { nuevoId: 'c9', sinFoto: true });
+  assert.equal(p.upsert.clients, undefined);
+  assert.deepEqual(p.quitar.clients, ['p1']);
+  assert.equal(p.upsert.visits[0].clientId, 'c9');
+  assert.equal(p.upsert.visits[0].photo, null);
+  assert.equal(p.upsert.tasks[0].clientId, 'c9');
+});
+test('enviadoParaCopia cotización: oportunidad nueva completa, tarea con el número asignado', () => {
+  const d = cotDatos(); d.cotizacion.num = null; d.tarea.title = '(sin número) · Llamar';
+  const p = C.enviadoParaCopia('crm.cotizacion', d, { num: 'COT-2026-0909' });
+  assert.deepEqual(p.upsert.opps, [{ id: 'o1', clientId: 'p1', stage: 'cotizacion' }]);
+  assert.equal(p.upsert.tasks[0].title, 'COT-2026-0909 · Llamar');
+  assert.deepEqual(p.upsert.clients, [{ id: 'p1', name: 'Obra X' }]);
+  assert.equal(p.upsert.quotes, undefined);
+  const d2 = cotDatos(); d2.prospecto = null; d2.opp = { modo: 'actualizar', obj: { id: 'o2', stage: 'cotizacion', amount: 5, quoteIds: ['q1'], nextAction: 'a', nextDate: 'b' } };
+  assert.deepEqual(C.enviadoParaCopia('crm.cotizacion', d2, {}).merge.opps, [{ id: 'o2', stage: 'cotizacion', amount: 5, quoteIds: ['q1'], nextAction: 'a', nextDate: 'b' }]);
+});
+test('enviadoParaCopia: tipo sin nada que copiar → vacío', () => {
+  const p = C.enviadoParaCopia('crm.cotizacion.entrega', { id: 'q1' }, {});
+  assert.deepEqual(p, { upsert: {}, merge: {}, quitar: { clients: [] } });
+});
+test('aplicarACopia: agrega o reemplaza por id, mezcla campos, quita; sin copia no rompe', () => {
+  const d = { clients: [{ id: 'p1', name: 'tel' }, { id: 'c1', name: 'srv' }], visits: [{ id: 'v0' }], tasks: [], opps: [{ id: 'o1', stage: 'visita', amount: 0 }] };
+  const r = C.aplicarACopia(d, { upsert: { visits: [{ id: 'v1' }, { id: 'v0', x: 1 }], tasks: [{ id: 't1' }] }, merge: { opps: [{ id: 'o1', stage: 'cotizacion' }, { id: 'zz', stage: 'x' }] }, quitar: { clients: ['p1'] } });
+  assert.equal(r, d);
+  assert.deepEqual(d.visits, [{ id: 'v0', x: 1 }, { id: 'v1' }]);
+  assert.deepEqual(d.tasks, [{ id: 't1' }]);
+  assert.deepEqual(d.opps, [{ id: 'o1', stage: 'cotizacion', amount: 0 }]);
+  assert.deepEqual(d.clients.map((c) => c.id), ['c1']);
+  assert.equal(C.aplicarACopia(null, { upsert: {}, merge: {}, quitar: { clients: [] } }), null);
+});
+test('yaAplicada: entrega null en la edición y {} en el servidor cuentan igual', () => {
+  assert.equal(C.yaAplicada(rowEd({ entrega: {} }), dEd({ cambios: { ...dEd().cambios, entrega: null } }), 'u1'), true);
+  assert.equal(C.yaAplicada(rowEd({ entrega: null }), dEd({ cambios: { ...dEd().cambios, entrega: {} } }), 'u1'), true);
+  assert.equal(C.yaAplicada(rowEd({ entrega: { dir: 'y' } }), dEd({ cambios: { ...dEd().cambios, entrega: null } }), 'u1'), false);
+});
