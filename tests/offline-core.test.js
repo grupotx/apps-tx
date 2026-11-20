@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { nuevaEntrada, clasificarError, procesarFila, resumen } = require('../offline-core.js');
+const Core = require('../offline-core.js');
+const { nuevaEntrada, clasificarError, procesarFila, resumen } = Core;
 
 // Fila en memoria para las pruebas
 function fila(entradas) {
@@ -130,4 +131,17 @@ test('errorDeRespuesta: null sin error; con error le pega el status HTTP de la r
   assert.equal(clasificarError(e), 'red');
   const e2 = errorDeRespuesta({ error: { message: 'x', status: 409 }, status: 400 });
   assert.equal(e2.status, 409, 'no pisa un status que ya traía');
+});
+
+test('subidaYaExiste: 409 (texto o número) y "already exists" cuentan como ya subida; RLS no', () => {
+  assert.equal(Core.subidaYaExiste({ statusCode: '409', message: 'x' }), true);
+  assert.equal(Core.subidaYaExiste({ statusCode: 409, message: 'x' }), true);
+  assert.equal(Core.subidaYaExiste({ status: 400, message: 'The resource already exists' }), true);
+  assert.equal(Core.subidaYaExiste({ statusCode: '403', message: 'new row violates row-level security policy' }), false);
+  assert.equal(Core.subidaYaExiste(null), false);
+});
+
+test('clasificarError: red de iPhone en subidas (StorageUnknownError / originalError TypeError) → red', () => {
+  assert.equal(Core.clasificarError({ name: 'StorageUnknownError', message: 'The network connection was lost.' }), 'red');
+  assert.equal(Core.clasificarError({ originalError: new TypeError('x'), message: 'x' }), 'red');
 });

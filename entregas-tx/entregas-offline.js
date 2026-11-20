@@ -2,6 +2,7 @@
 // Script clásico: en navegador expone window.EntregasOffline; en Node, module.exports.
 (function (g) {
   'use strict';
+  const Core = g.TXOfflineCore || require('../offline-core.js');
   const T_LLEGADA = 'ent.llegada';
   const T_CIERRE = 'ent.cierre';
 
@@ -22,13 +23,8 @@
     };
   }
 
-  // El bucket no deja sobrescribir (sin política UPDATE): en un reintento la foto/firma ya subida
-  // responde 409 "already exists". Las rutas son únicas por entrada de la fila, así que es la misma.
-  function subidaYaExiste(error) {
-    if (!error) return false;
-    if (String(error.statusCode) === '409' || error.status === 409) return true;
-    return /already exists|duplicate/i.test(String(error.message || '') + ' ' + String(error.error || ''));
-  }
+  // La lógica vive en el núcleo compartido (offline-core.js); se conserva el nombre para Entregas.
+  const subidaYaExiste = Core.subidaYaExiste;
 
   // Envía un cierre de la fila: sube fotos y firma (sin upsert; "ya existe" = ya subida) y llama a
   // ent_cerrar_entrega (idempotente con la misma firma). deps: subir(ruta, blob, opts) → { error },

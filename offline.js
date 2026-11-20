@@ -222,6 +222,13 @@
     }
   }
 
+  // Almacenamiento local simple (borradores, preferencias): mismo almacén 'consultas', prefijo propio.
+  async function guardarLocal(clave, valor) { await poner('consultas', valor, 'local:' + clave); }
+  async function leerLocal(clave) {
+    const v = await leer('consultas', 'local:' + clave);
+    return v === undefined ? null : v;
+  }
+
   async function entradas() {
     const lista = await todos('fila');
     return lista.filter(e => e.estado === 'pendiente' || e.estado === 'problema')
@@ -284,5 +291,5 @@
     });
   }
 
-  g.TXOffline = { iniciar, registrarTipo, encolar, sincronizar, consultar, entradas, reintentar, descartar, montarIndicador, puedeCerrarSesion, alCerrarSesion };
+  g.TXOffline = { iniciar, registrarTipo, encolar, sincronizar, consultar, guardarLocal, leerLocal, entradas, reintentar, descartar, montarIndicador, puedeCerrarSesion, alCerrarSesion };
 })(window);

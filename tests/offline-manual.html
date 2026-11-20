@@ -28,6 +28,8 @@
   TXOffline.registrarTipo('meta', async (d, a, m) => { window.__meta = m; });
   TXOffline.montarIndicador(document.getElementById('ind'));
   TXOffline.iniciar({ app: 'prueba', sb, usuarioId: 'prueba' }).then(pintarLista);
+  // Almacenamiento local: guardarLocal('demo', {a:1}) y, tras recargar, leerLocal('demo').then(console.log)
+  window.__local = { guardar: () => TXOffline.guardarLocal('demo', { a: 1, t: Date.now() }), leer: () => TXOffline.leerLocal('demo'), leerInexistente: () => TXOffline.leerLocal('no-existe') };
 </script>
 </body>
 </html>

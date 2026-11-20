@@ -19,6 +19,8 @@
     const status = e && e.status;
     if (status === 401 || (e && e.code === 'PGRST301') || /JWT expired|invalid JWT|Auth session missing/i.test(msg)) return 'sesion';
     if (e instanceof TypeError || (e && e.name === 'AbortError')) return 'red';
+    // subidas a Storage en iPhone: el error de red llega envuelto (StorageUnknownError / originalError TypeError)
+    if (e && (e.originalError instanceof TypeError || e.name === 'StorageUnknownError')) return 'red';
     // mensajes de fetch caído, anclados (postgrest-js los antepone con "TypeError: "); "red"/"network"
     // a secas dentro de un mensaje del servidor es un rechazo, no falta de señal
     if (/^(?:[a-z]*error: )?(failed to fetch|networkerror|load failed)/i.test(msg)) return 'red';
@@ -37,6 +39,14 @@
       try { err.status = res.status; } catch (_) { /* objeto congelado: se queda sin status */ }
     }
     return err;
+  }
+
+  // El bucket no deja sobrescribir (sin política UPDATE): en un reintento la foto/firma ya subida
+  // responde 409 "already exists". Las rutas son únicas por entrada de la fila, así que es la misma.
+  function subidaYaExiste(error) {
+    if (!error) return false;
+    if (String(error.statusCode) === '409' || error.status === 409) return true;
+    return /already exists|duplicate/i.test(String(error.message || '') + ' ' + String(error.error || ''));
   }
 
   // Envía las pendientes en orden de creación. Se detiene ante error de red o sesión.
@@ -85,7 +95,7 @@
     };
   }
 
-  const api = { nuevaEntrada, clasificarError, errorDeRespuesta, procesarFila, resumen };
+  const api = { nuevaEntrada, clasificarError, errorDeRespuesta, subidaYaExiste, procesarFila, resumen };
   g.TXOfflineCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

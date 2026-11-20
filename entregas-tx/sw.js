@@ -1,7 +1,7 @@
 // Service worker: abre la app sin señal.
 // Mismo origen: red primero (con tope de espera si hay copia), caché de respaldo. CDN con versión fija: caché primero.
 // Otros orígenes (Supabase, mapas, OSM): no se interceptan.
-const C = 'entregas-tx-v6';
+const C = 'entregas-tx-v7';
 const TOPE_RED_MS = 4000;   // con señal débil: pasado este tiempo, si hay copia en caché se sirve la copia
 const BASE = ['./', 'index.html', 'styles.css', 'app.js', 'planificacion.js', 'cliente.js', 'logistica.js', 'manifest.webmanifest', 'icon-512.png',
   'entregas-offline.js', '../offline-core.js', '../offline.js', '../foto-archivada.js'];
