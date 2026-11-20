@@ -6,7 +6,9 @@ const RADIO_ALERTA_M = 300;        // distancia máxima esperada entre "Llegué"
 const TRACK_MIN_MS = 60000;        // guardar posición cada 60 s ...
 const TRACK_MIN_M = 30;            // ... si se movió al menos 30 m (o 200 m antes)
 
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+// global.fetch busca window.fetch en cada llamada (supabase-js lo fija al crear el cliente);
+// así una simulación de "sin red" que reemplace window.fetch también afecta a sb.
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: (...a) => window.fetch(...a) } });
 
 /* ---------- utilidades ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -184,6 +186,7 @@ function construirNav() {
 function go(v) {
   const def = VIEWS.find(x => x.id === v && x.render) || VIEWS.find(x => x.render);
   S.view = def.id;
+  S.gen = (S.gen || 0) + 1;   // las vistas async comparan esto para no pintar encima de otra vista
   clearInterval(S.timer); S.timer = null;
   if (S.mapa) { try { S.mapa.remove(); } catch {} S.mapa = null; }
   $$('.navbtn[data-view]').forEach(b => b.dataset.view === def.id ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
@@ -231,11 +234,115 @@ function menuUsuario() {
     </div>
     <div class="actions block"><button class="btn danger" id="m-out">Cerrar sesión</button></div>`, { eyebrow: 'Mi cuenta' });
   $$('[data-ir]', sh).forEach(b => b.onclick = () => { closeSheet(); go(b.dataset.ir); });
-  $('#m-out', sh).onclick = async () => { closeSheet(); await sb.auth.signOut(); };
+  $('#m-out', sh).onclick = async () => { closeSheet(); await cerrarSesion(); };
   if ($('#m-pat', sh)) $('#m-pat', sh).onclick = () => { closeSheet(); pedirPatente(true); };
   if ($('#m-fin', sh)) $('#m-fin', sh).onclick = terminarJornada;
   if ($('#m-chofer', sh)) $('#m-chofer', sh).onclick = () => { closeSheet(); iniciarChofer(); };
   if ($('#m-staff', sh)) $('#m-staff', sh).onclick = () => { closeSheet(); detenerTracking(); iniciarStaff(); };
+}
+
+/* ================== SIN CONEXIÓN (fila TXOffline del chofer) ================== */
+const EO = window.EntregasOffline;
+const AUTH_KEY = 'sb-' + new URL(SUPABASE_URL).hostname.split('.')[0] + '-auth-token';
+const MSG_LOGIN_SIN_RED = 'Necesitas conexión para iniciar sesión la primera vez';
+const MSG_NO_SALIR = 'Tienes registros sin enviar. Conéctate y espera a que se envíen antes de cerrar sesión.';
+const RESULTADOS = new Map();   // id de entrada de la fila → respuesta de la RPC (aviso de distancia)
+const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+const esRed = (e) => TXOfflineCore.clasificarError(e) === 'red';
+async function rpcOError(nombre, args) { const { data, error } = await sb.rpc(nombre, args); if (error) throw error; return data; }
+const datosDe = async (b) => { const { data, error } = await b; if (error) throw error; return data; };
+
+// Los tipos se registran ANTES de TXOffline.iniciar (iniciar envía de inmediato lo que haya en la fila).
+TXOffline.registrarTipo(EO.T_LLEGADA, async (d, _archivos, meta) => {
+  RESULTADOS.set(meta.id, await rpcOError('ent_marcar_llegada', EO.argsLlegada(d)));
+});
+TXOffline.registrarTipo(EO.T_CIERRE, async (d, archivos, meta) => {
+  // rutas fijas guardadas en la fila + upsert: subir de nuevo en un reintento no duplica nada
+  for (const ruta of [...d.fotos, d.firma]) {
+    const blob = archivos[ruta];
+    if (!blob) throw new Error('Falta en el teléfono el archivo ' + ruta);
+    const { error } = await sb.storage.from('entregas').upload(ruta, blob, { contentType: ruta.endsWith('.png') ? 'image/png' : 'image/jpeg', upsert: true });
+    if (error) throw error;
+  }
+  RESULTADOS.set(meta.id, await rpcOError('ent_cerrar_entrega', EO.argsCierre(d)));
+});
+
+// Consulta con copia local; sin red conocida (navigator.onLine) va directo a la copia.
+function consultarEnt(clave, fn) {
+  return TXOffline.consultar(clave, () => {
+    if (navigator.onLine === false) throw new TypeError('Failed to fetch');
+    return fn();
+  });
+}
+
+// Intenta enviar la fila y espera hasta `ms`; informa qué pasó con la entrada `id`.
+async function resultadoEnvio(id, ms) {
+  await Promise.race([TXOffline.sincronizar(), esperar(ms)]);
+  let e = null;
+  try { e = (await TXOffline.entradas()).find(x => x.id === id); } catch { return { estado: 'pendiente' }; }
+  if (!e) { const data = RESULTADOS.get(id); RESULTADOS.delete(id); return { estado: 'enviado', data }; }
+  return { estado: e.estado, error: e.error };
+}
+
+function avisoCache(...rs) {
+  const c = rs.filter(r => r && r.desdeCache).map(r => r.guardadoEn).sort()[0];
+  if (!c) return '';
+  return `<div class="ctx" style="margin-bottom:14px">${I.alert}<span>Sin conexión · datos de las ${horaCL(c)}${diaCL(c) !== hoy() ? ' del ' + fechaCL(c) : ''}</span></div>`;
+}
+
+// Sesión guardada en el teléfono (para abrir sin señal cuando supabase no puede renovar el token).
+function usuarioGuardado() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null')?.user || null; } catch { return null; } }
+
+async function cerrarSesion() {
+  let ok = true;
+  try { ok = await TXOffline.puedeCerrarSesion(); } catch {}
+  if (!ok) { toast(MSG_NO_SALIR); return; }
+  const { error } = await sb.auth.signOut();
+  if (error) { toast(esRed(error) ? 'Sin conexión: no se pudo cerrar sesión. Intenta de nuevo con señal.' : errMsg(error)); return; }
+  try { await TXOffline.alCerrarSesion(); } catch {}
+}
+
+// Indicador común de la fila (un solo elemento, se monta una vez y se reinserta en la barra del chofer).
+let indFila = null;
+function indicadorFila() {
+  if (!indFila) { indFila = document.createElement('span'); indFila.className = 'chip warn'; indFila.id = 'filaInd'; indFila.hidden = true; TXOffline.montarIndicador(indFila); }
+  return indFila;
+}
+
+// Al cambiar la fila (se envió algo, quedó con problema…) se repinta la ruta si está a la vista.
+let resumenFila = null;
+window.addEventListener('txoffline:cambio', (ev) => {
+  const k = ev.detail.pendientes + '/' + ev.detail.problemas;
+  const cambio = resumenFila !== null && k !== resumenFila;
+  resumenFila = k;
+  if (cambio && S.modo === 'chofer' && S.view === 'ruta' && $('#sheet-bg').hidden) go('ruta');
+});
+
+async function hayConexion() {
+  if (navigator.onLine === false) return false;
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 6000);
+  // cualquier respuesta HTTP = hay red; solo un fallo de red (TypeError/abort) = sin conexión
+  try { await fetch(SUPABASE_URL + '/auth/v1/health', { headers: { apikey: SUPABASE_KEY }, cache: 'no-store', signal: ctl.signal }); return true; }
+  catch { return false; } finally { clearTimeout(t); }
+}
+async function avisoConexionLogin() {
+  const el = $('#a-net'); if (!el) return;
+  const ok = await hayConexion();
+  if ($('#a-net') !== el) return;
+  el.textContent = ok ? '' : MSG_LOGIN_SIN_RED; el.hidden = ok;
+}
+window.addEventListener('online', avisoConexionLogin);
+window.addEventListener('offline', avisoConexionLogin);
+
+function avisoInstalarIOS() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!ios || navigator.standalone) return;
+  const k = 'entx_aviso_instalar_' + S.perfil.id;
+  try { if (localStorage.getItem(k)) return; localStorage.setItem(k, '1'); } catch { return; }
+  const sh = openSheet('Instala Entregas', `<div class="ctx">${I.download}<span>Para usar Entregas sin señal, instálala: Compartir → Agregar a pantalla de inicio.</span></div>
+    <p class="muted">Si no la instalas, el iPhone puede borrar los registros guardados en el teléfono.</p>
+    <div class="actions block"><button class="btn primary" id="iosOk">Entendido</button></div>`, { eyebrow: 'Trabajo sin señal' });
+  $('#iosOk', sh).onclick = () => closeSheet();
 }
 
 /* ================== AUTENTICACIÓN ================== */
@@ -247,6 +354,7 @@ function pantallaAuth(modo = 'chofer', msg = '') {
     <h2>${titulos[modo]}</h2>
     ${['chofer', 'staff', 'cliente'].includes(modo) ? `<div class="seg-f" style="width:100%;display:grid;grid-template-columns:1fr 1fr 1fr"><button type="button" data-m="chofer" aria-pressed="${modo === 'chofer'}">Chofer</button><button type="button" data-m="staff" aria-pressed="${modo === 'staff'}">Personal TX</button><button type="button" data-m="cliente" aria-pressed="${modo === 'cliente'}">Cliente</button></div>` : ''}
     ${msg ? `<div class="ctx">${msg}</div>` : ''}
+    ${['chofer', 'staff', 'cliente'].includes(modo) ? '<div class="ctx err" id="a-net" hidden></div>' : ''}
     <form id="af" class="form" novalidate style="gap:12px">
       ${modo === 'signup' ? fld('Nombre y apellido', '<input id="a-nombre" autocomplete="name">', 1) : ''}
       ${modo === 'chofer' ? fld('RUT', '<input id="a-rut" autocomplete="username" placeholder="12.345.678-9">', 1) : ''}
@@ -269,6 +377,7 @@ function pantallaAuth(modo = 'chofer', msg = '') {
       if (modo === 'chofer' || modo === 'staff' || modo === 'cliente') {
         const email = modo === 'chofer' ? `${limpiarRut($('#a-rut').value)}@${DOMINIO_CHOFER}` : $('#a-email').value.trim().toLowerCase();
         const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if (error && esRed(error)) throw new Error(MSG_LOGIN_SIN_RED);
         if (error) throw new Error(error.message.includes('Invalid') ? (modo === 'chofer' ? 'RUT o clave incorrectos' : 'Correo o contraseña incorrectos') : error.message);
         await cargarPerfil(data.user);
       } else if (modo === 'signup') {
@@ -290,6 +399,7 @@ function pantallaAuth(modo = 'chofer', msg = '') {
     go.disabled = false;
   };
   setTimeout(() => $('#af input')?.focus(), 50);
+  avisoConexionLogin();
 }
 
 function pantallaPendiente(msg) {
@@ -298,13 +408,20 @@ function pantallaPendiente(msg) {
     <p class="muted" style="margin:0">Hola ${esc(S.perfil?.nombre || '')}. ${esc(msg)}</p>
     <div style="display:grid;gap:10px;margin-top:6px"><button class="btn primary" id="p-retry">Ya me asignaron perfil</button><button class="btn" id="p-out">Cerrar sesión</button></div>`;
   $('#p-retry').onclick = async () => { const { data } = await sb.auth.getSession(); if (data.session) cargarPerfil(data.session.user); };
-  $('#p-out').onclick = () => sb.auth.signOut();
+  $('#p-out').onclick = () => cerrarSesion();
 }
 
 async function cargarPerfil(user) {
   S.user = user;
-  const { data, error } = await sb.rpc('ent_registrarme', { p_nombre: user.user_metadata?.nombre || null });
-  if (error) return pantallaAuth('staff', 'No se pudo cargar tu perfil: ' + esc(errMsg(error)));
+  // copia local y fila por usuario: se abren antes de cualquier consulta
+  try { await TXOffline.iniciar({ app: 'entregas', sb, usuarioId: user.id }); } catch (e) { console.warn('[Entregas] sin copia local:', e); }
+  let data;
+  try {
+    ({ datos: data } = await consultarEnt('ent.perfil', () => rpcOError('ent_registrarme', { p_nombre: user.user_metadata?.nombre || null })));
+  } catch (error) {
+    if (esRed(error)) return pantallaAuth('chofer', 'Sin conexión. Necesitas señal para abrir la app por primera vez en este teléfono.');
+    return pantallaAuth('staff', 'No se pudo cargar tu perfil: ' + esc(errMsg(error)));
+  }
   S.perfil = data;
   if (!data.activo) return pantallaPendiente('Tu acceso fue desactivado. Habla con Logística.');
   if (data.rol === 'pendiente') return pantallaPendiente('Tu cuenta está creada. Un administrador debe asignarte un perfil (Chofer, Logística o Admin) para que puedas usar la aplicación.');
@@ -315,12 +432,20 @@ async function cargarPerfil(user) {
 }
 
 async function cargarCatalogos() {
-  const [p, m, v] = await Promise.all([
-    sb.from('ent_productos').select('*').order('codigo'),
-    sb.from('ent_motivos').select('*').order('id'),
-    sb.from('ent_vehiculos').select('*').order('patente'),
-  ]);
-  S.productos = p.data || []; S.motivos = m.data || []; S.vehiculos = v.data || [];
+  try {
+    const { datos } = await consultarEnt('ent.catalogos', async () => {
+      const [productos, motivos, vehiculos] = await Promise.all([
+        datosDe(sb.from('ent_productos').select('*').order('codigo')),
+        datosDe(sb.from('ent_motivos').select('*').order('id')),
+        datosDe(sb.from('ent_vehiculos').select('*').order('patente')),
+      ]);
+      return { productos, motivos, vehiculos };
+    });
+    S.productos = datos.productos || []; S.motivos = datos.motivos || []; S.vehiculos = datos.vehiculos || [];
+  } catch (e) {
+    console.warn('[Entregas] catálogos:', e);
+    S.productos = S.productos || []; S.motivos = S.motivos || []; S.vehiculos = S.vehiculos || [];
+  }
 }
 
 async function iniciar() {
@@ -331,10 +456,15 @@ async function iniciar() {
     if (ev === 'PASSWORD_RECOVERY') { recuperando = true; pantallaAuth('newpass'); }
     if (ev === 'SIGNED_OUT') { detenerTracking(); S.user = S.perfil = null; S.jornada = null; pantallaAuth('chofer'); }
   });
-  const { data } = await sb.auth.getSession();
-  if (recuperando && data.session) return pantallaAuth('newpass');
-  if (data.session) await cargarPerfil(data.session.user);
-  else pantallaAuth('chofer');
+  // Sin señal y con el token vencido, supabase reintenta renovarlo ~30 s: no se espera tanto,
+  // se abre con el usuario guardado en el teléfono (la fila renueva la sesión al volver la señal).
+  const r = await Promise.race([sb.auth.getSession(), esperar(5000).then(() => null)]);
+  const session = r?.data?.session || null;
+  if (recuperando && session) return pantallaAuth('newpass');
+  if (session) return cargarPerfil(session.user);
+  const guardado = (!r || (r.error && esRed(r.error))) ? usuarioGuardado() : null;
+  if (guardado) return cargarPerfil(guardado);
+  pantallaAuth('chofer');
 }
 
 /* ================== VISTA CHOFER ================== */
@@ -349,13 +479,18 @@ async function iniciarChofer() {
   ];
   let j = jornadaLocal();
   if (!j) {
-    const { data } = await sb.from('ent_jornadas').select('*').eq('chofer_id', S.perfil.id).eq('fecha', hoy()).is('fin_at', null).order('inicio_at', { ascending: false }).limit(1);
-    if (data && data[0]) { j = { uid: S.perfil.id, fecha: hoy(), patente: data[0].patente, id: data[0].id }; guardarJornada(j); }
+    let data = null;
+    try {
+      ({ datos: data } = await consultarEnt('ent.jornada', () => datosDe(sb.from('ent_jornadas').select('*').eq('chofer_id', S.perfil.id).eq('fecha', hoy()).is('fin_at', null).order('inicio_at', { ascending: false }).limit(1))));
+    } catch (e) { console.warn('[Entregas] jornada:', e); }
+    const d = data && data[0];
+    if (d && (!d.fecha || d.fecha === hoy())) { j = { uid: S.perfil.id, fecha: hoy(), patente: d.patente, id: d.id }; guardarJornada(j); }
   }
   S.jornada = j;
   montarShell('chofer');
   if (j) iniciarTracking();
   iniciarAvisos();
+  avisoInstalarIOS();
 }
 
 /* --- avisos al chofer (cargas asignadas) --- */
@@ -394,6 +529,7 @@ function topChofer() {
   $('#top-actions').innerHTML = (S.jornada
     ? `<span class="gps" id="gpsInd"></span><button class="pat" id="bPat" title="Cambiar patente">${esc(S.jornada.patente)}</button>`
     : '') + `<button class="xbtn bellbtn" id="bAvisos" aria-label="Avisos"></button>`;
+  $('#top-actions').prepend(indicadorFila());
   if ($('#bPat')) $('#bPat').onclick = () => pedirPatente(true);
   $('#bAvisos').onclick = verAvisos;
   pintarGps(); pintarCampana();
@@ -488,8 +624,12 @@ function pintarGps() {
 
 function tarjetaGuia(g, conAcciones = true, bloqueada = false) {
   const nav = g.dest_lat ? `${g.dest_lat},${g.dest_lng}` : encodeURIComponent([g.direccion, g.comuna].filter(Boolean).join(', '));
+  const problema = g.fila?.estado === 'problema';
+  if (problema) conAcciones = false;   // con un registro con problema solo se ofrece Reintentar / Descartar
   return `<div class="card gcard ${g.estado}" data-id="${g.id}">
-    <div class="top"><div><span class="eyebrow">${g.orden ? 'Parada ' + g.orden + ' · ' : ''}Guía</span><div class="folio">${esc(g.folio)}</div></div>${badge(g.estado)}</div>
+    <div class="top"><div><span class="eyebrow">${g.orden ? 'Parada ' + g.orden + ' · ' : ''}Guía</span><div class="folio">${esc(g.folio)}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${badge(g.estado)}${g.fila?.estado === 'pendiente' ? '<span class="chip warn">Pendiente de enviar</span>' : ''}</div></div>
+    ${problema ? `<div><span class="chip bad" style="white-space:normal">No se pudo enviar: ${esc(g.fila.error)}</span></div>
+    <div class="act"><button class="btn sm" data-fila="reintentar">${I.refresh}Reintentar</button><button class="btn sm danger" data-fila="descartar">${I.x}Descartar</button></div>` : ''}
     <div class="cli">${esc(g.cliente)}${g.obra ? ` <span class="muted" style="font-weight:500">· ${esc(g.obra)}</span>` : ''}</div>
     <div class="dir">${I.pin}<span>${esc(g.direccion)}${g.comuna ? ', ' + esc(g.comuna) : ''}</span></div>
     ${g.contacto || g.telefono ? `<div class="sub">${esc(g.contacto || '')}${g.telefono ? ` · <a href="tel:${esc(g.telefono)}">${esc(g.telefono)}</a>` : ''}</div>` : ''}
@@ -508,15 +648,28 @@ function tarjetaGuia(g, conAcciones = true, bloqueada = false) {
 }
 
 async function vistaRuta(el) {
-  const { data: rutas } = await sb.from('ent_rutas').select('*').eq('chofer_id', S.perfil.id).in('estado', ['asignada', 'aceptada', 'en_ruta']).gte('fecha', sumarDias(hoy(), -1)).order('fecha').order('asignada_at');
-  S.rutasChofer = rutas || [];
-  if (!S.jornada && !S.rutasChofer.length) { topChofer(); return pedirPatente(false); }
+  const gen = S.gen;
+  let rRutas = null, rGuias = null, fila = [];
+  try {
+    rRutas = await consultarEnt('ent.rutas', () => datosDe(sb.from('ent_rutas').select('*').eq('chofer_id', S.perfil.id).in('estado', ['asignada', 'aceptada', 'en_ruta']).gte('fecha', sumarDias(hoy(), -1)).order('fecha').order('asignada_at')));
+  } catch (e) { console.warn('[Entregas] rutas:', e); }
+  if (gen !== S.gen) return;
+  S.rutasChofer = rRutas?.datos || [];
+  if (!S.jornada && !S.rutasChofer.length && rRutas) { topChofer(); return pedirPatente(false); }
   topChofer();
-  const { data, error } = await sb.from('ent_guias').select('*')
-    .eq('chofer_id', S.perfil.id).neq('estado', 'anulada')
-    .or(`fecha.eq.${hoy()},estado.in.(asignada,en_destino)`)
-    .order('fecha').order('orden').order('created_at');
-  if (error) { el.innerHTML = `<div class="ctx err">${esc(errMsg(error))}</div>`; return; }
+  try {
+    rGuias = await consultarEnt('ent.guias', () => datosDe(sb.from('ent_guias').select('*')
+      .eq('chofer_id', S.perfil.id).neq('estado', 'anulada')
+      .or(`fecha.eq.${hoy()},estado.in.(asignada,en_destino)`)
+      .order('fecha').order('orden').order('created_at')));
+    fila = await TXOffline.entradas().catch(() => []);
+  } catch (error) {
+    if (gen !== S.gen) return;
+    el.innerHTML = `<div class="ctx err">${esRed(error) ? 'Sin conexión y sin datos guardados en este teléfono. Conéctate para cargar tu ruta.' : esc(errMsg(error))}</div>`;
+    return;
+  }
+  if (gen !== S.gen) return;
+  const data = EO.aplicarFila(rGuias.datos || [], fila);
   S.guiasChofer = data;
   const rutaDe = (g) => g.ruta_id ? S.rutasChofer.find(r => r.id === g.ruta_id) : null;
   const bloqueada = (g) => { const r = rutaDe(g); return r && r.estado !== 'en_ruta'; };
@@ -525,7 +678,7 @@ async function vistaRuta(el) {
   const hechas = data.filter(g => !['asignada', 'en_destino'].includes(g.estado));
   const tot = data.length || 1;
   const n = (e) => data.filter(g => g.estado === e).length;
-  el.innerHTML = cargasHtml + `
+  el.innerHTML = avisoCache(rRutas, rGuias) + cargasHtml + `
     <div class="hero" style="grid-template-columns:minmax(0,1fr)">
       <div>
         <span class="eyebrow" style="color:color-mix(in srgb,var(--bg) 70%,transparent)">${esc(S.perfil.nombre)} · ${fechaLarga(hoy())}</span>
@@ -541,7 +694,22 @@ async function vistaRuta(el) {
     <div class="sec-h"><div><h2>Por entregar</h2><p>En el orden en que Logística las asignó.</p></div><button class="btn sm" id="bRef">${I.refresh}Actualizar</button></div>
     <div class="grid" style="gap:12px">${pend.length ? pend.map(g => tarjetaGuia(g, true, bloqueada(g))).join('') : `<div class="card empty"><b>No tienes entregas pendientes</b>Si esperas guías, pide a Logística que te las asigne y presiona Actualizar.</div>`}</div>
     ${hechas.length ? `<div class="sec-h block"><div><h2>Completadas hoy</h2></div></div><div class="grid" style="gap:12px">${hechas.map(g => tarjetaGuia(g, false)).join('')}</div>` : ''}`;
-  $('#bRef').onclick = () => go('ruta');
+  $('#bRef').onclick = () => { TXOffline.sincronizar(); go('ruta'); };
+  $$('[data-fila]', el).forEach(b => b.onclick = async () => {
+    const g = S.guiasChofer.find(x => x.id === b.closest('.gcard').dataset.id);
+    const ids = g?.fila?.ids || [];
+    if (b.dataset.fila === 'descartar') {
+      if (!confirm(`¿Descartar lo registrado sin enviar de la guía ${g.folio}? Se borrará del teléfono (fotos y firma incluidas) y no se enviará.`)) return;
+      for (const id of ids) await TXOffline.descartar(id);
+      toast('Registro descartado');
+    } else {
+      b.disabled = true;
+      for (const id of ids) await TXOffline.reintentar(id);   // en orden: llegada antes que cierre
+      const quedan = (await TXOffline.entradas()).filter(e => ids.includes(e.id));
+      toast(!quedan.length ? 'Enviado' : quedan.some(e => e.estado === 'problema') ? 'Sigue con problema: ' + (quedan.find(e => e.estado === 'problema').error || '') : 'Pendiente de enviar. Se enviará al volver la señal.');
+    }
+    go('ruta');
+  });
   $$('[data-racc]', el).forEach(b => b.onclick = async () => {
     const r = S.rutasChofer.find(x => x.id === b.closest('[data-ruta]').dataset.ruta), acc = b.dataset.racc;
     if (acc === 'salir' && !confirm('¿Confirmas que el camión está cargado y sales a ruta?')) return;
@@ -559,11 +727,20 @@ async function vistaRuta(el) {
 }
 
 async function vistaHistorial(el) {
+  const gen = S.gen;
   topChofer();
   const desde = sumarDias(hoy(), -14);
-  const { data, error } = await sb.from('ent_guias').select('*, ent_entregas(*)').eq('chofer_id', S.perfil.id).gte('fecha', desde).not('estado', 'in', '(asignada,en_destino,anulada)').order('fecha', { ascending: false }).order('orden');
-  if (error) { el.innerHTML = `<div class="ctx err">${esc(errMsg(error))}</div>`; return; }
-  el.innerHTML = `<div class="sec-h"><div><h2>Últimos 14 días</h2><p>${data.length} entregas registradas.</p></div></div>
+  let r;
+  try {
+    r = await consultarEnt('ent.historial', () => datosDe(sb.from('ent_guias').select('*, ent_entregas(*)').eq('chofer_id', S.perfil.id).gte('fecha', desde).not('estado', 'in', '(asignada,en_destino,anulada)').order('fecha', { ascending: false }).order('orden')));
+  } catch (error) {
+    if (gen !== S.gen) return;
+    el.innerHTML = `<div class="ctx err">${esRed(error) ? 'Sin conexión y sin datos guardados en este teléfono. Conéctate para ver tu historial.' : esc(errMsg(error))}</div>`;
+    return;
+  }
+  if (gen !== S.gen) return;
+  const data = r.datos || [];
+  el.innerHTML = avisoCache(r) + `<div class="sec-h"><div><h2>Últimos 14 días</h2><p>${data.length} entregas registradas.</p></div></div>
     <div class="card tbl-wrap">${data.length ? `<table><thead><tr><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Llegada</th><th>Recibió</th><th>Estado</th></tr></thead><tbody>
     ${data.map(g => { const e = entregaDe(g) || {}; return `<tr><td class="num">${fechaCL(g.fecha)}</td><td class="num"><b>${esc(g.folio)}</b></td><td>${esc(g.cliente)}</td><td class="num">${horaCL(e.llegada_at)}</td><td>${esc(e.receptor_nombre || '')}</td><td>${badge(g.estado)}</td></tr>`; }).join('')}
     </tbody></table>` : '<div class="empty"><b>Sin entregas</b>Aún no registras entregas en este período.</div>'}</div>`;
@@ -573,18 +750,29 @@ async function marcarLlegada(id, btn) {
   const g = S.guiasChofer.find(x => x.id === id);
   if (!confirm(`¿Confirmas que llegaste a ${g.cliente || 'destino'} (guía ${g.folio})?`)) return;
   btn.disabled = true; btn.innerHTML = `${I.pin}Obteniendo ubicación…`;
+  let idFila;
   try {
-    const pos = await obtenerPosicion();
-    const { data, error } = await sb.rpc('ent_marcar_llegada', { p_guia: id, p_patente: S.jornada.patente, p_lat: pos.lat, p_lng: pos.lng, p_precision: Math.round(pos.acc) });
-    if (error) throw error;
-    if (data.distancia_destino_m != null && data.distancia_destino_m > RADIO_ALERTA_M) toast(`Llegada registrada. Ojo: estás a ${fmtM(data.distancia_destino_m)} del destino informado.`);
-    else toast('Llegada registrada');
-    g.estado = 'en_destino';
-    go('ruta');
-    formEntrega(g);
+    const pos = await obtenerPosicion();   // el GPS funciona sin señal
+    btn.innerHTML = `${I.pin}Guardando…`;
+    idFila = await TXOffline.encolar(EO.T_LLEGADA, { guia: id, patente: S.jornada?.patente ?? null, lat: pos.lat, lng: pos.lng, precision: Math.round(pos.acc), at: new Date().toISOString() });
   } catch (e) {
     toast(errMsg(e)); btn.disabled = false; btn.innerHTML = `${I.pin}Llegué al destino`;
+    return;
   }
+  const r = await resultadoEnvio(idFila, 6000);
+  if (r.estado === 'enviado') {
+    const d = r.data?.distancia_destino_m;
+    toast(d != null && d > RADIO_ALERTA_M ? `Llegada registrada. Ojo: estás a ${fmtM(d)} del destino informado.` : 'Llegada registrada');
+  } else if (r.estado === 'problema') {
+    toast('No se pudo registrar la llegada: ' + (r.error || '') + '. Revísala en Mi ruta.');
+    go('ruta');
+    return;
+  } else {
+    toast('Llegada guardada en el teléfono. Se enviará al volver la señal.');
+  }
+  g.estado = 'en_destino';
+  go('ruta');
+  formEntrega(g);
 }
 
 /* --- formulario de entrega (hoja lateral, igual que los formularios de Silos TX) --- */
@@ -594,7 +782,7 @@ function formEntrega(g) {
   const optsMot = '<option value="">Motivo…</option>' + S.motivos.filter(m => m.activo).map(m => `<option>${esc(m.motivo)}</option>`).join('');
   const salir = () => { if (confirm('¿Salir sin guardar? La llegada ya quedó registrada; puedes completar la entrega después.')) { F.fotos.forEach(f => URL.revokeObjectURL(f.url)); closeSheet(); } };
   const sh = openSheet(`Guía ${esc(g.folio)}`, `
-    <div class="ctx" style="margin-bottom:16px"><b>${esc(g.cliente)}</b>${g.obra ? ' · ' + esc(g.obra) : ''}<span class="sub" style="width:100%">${esc(g.direccion)}${g.comuna ? ', ' + esc(g.comuna) : ''}</span><span class="chip dark plain">Chofer: ${esc(S.perfil.nombre)}</span><span class="chip dark plain mono">${esc(S.jornada.patente)}</span></div>
+    <div class="ctx" style="margin-bottom:16px"><b>${esc(g.cliente)}</b>${g.obra ? ' · ' + esc(g.obra) : ''}<span class="sub" style="width:100%">${esc(g.direccion)}${g.comuna ? ', ' + esc(g.comuna) : ''}</span><span class="chip dark plain">Chofer: ${esc(S.perfil.nombre)}</span>${S.jornada ? `<span class="chip dark plain mono">${esc(S.jornada.patente)}</span>` : ''}</div>
     <div class="form" id="fEntrega">
       <fieldset><legend>1 · Fotos de la mercadería</legend>
         <div class="photos" id="fotos"></div>
@@ -677,38 +865,39 @@ function formEntrega(g) {
     }
     if (!confirm('¿Confirmar y enviar la entrega?')) return;
     const btn = $('#bConfirmar', sh); btn.disabled = true;
+    let idFila;
     try {
-      const ts = Date.now(), paths = [];
-      for (let i = 0; i < F.fotos.length; i++) {
-        btn.textContent = `Subiendo foto ${i + 1} de ${F.fotos.length}…`;
-        const p = `${g.id}/foto_${ts}_${i + 1}.jpg`;
-        const { error } = await sb.storage.from('entregas').upload(p, F.fotos[i].blob, { contentType: 'image/jpeg', upsert: true });
-        if (error) throw error;
-        paths.push(p);
-      }
-      btn.textContent = 'Subiendo firma…';
-      const firmaPath = `${g.id}/firma_${ts}.png`;
-      const { error: ef } = await sb.storage.from('entregas').upload(firmaPath, await pad.blob(), { contentType: 'image/png', upsert: true });
-      if (ef) throw ef;
+      // Hora y rutas se fijan al confirmar y viajan en la fila: cada reintento reusa la misma firma_path.
+      const at = new Date().toISOString();
+      const { fotos, firma } = EO.rutasCierre(g.id, Date.now(), F.fotos.length);
+      const archivos = {};
+      fotos.forEach((p, i) => { archivos[p] = F.fotos[i].blob; });
+      archivos[firma] = await pad.blob();
       btn.textContent = 'Guardando…';
       let pos = S.posActual;
       if (!pos || Date.now() - pos.t > 120000) { try { pos = await obtenerPosicion(8000); } catch { pos = null; } }
-      const { error } = await sb.rpc('ent_cerrar_entrega', {
-        p_guia: g.id, p_resultado: F.resultado, p_fotos: paths, p_receptor_nombre: nom,
-        p_receptor_rut: $('#rRut', sh).value.trim() || null, p_receptor_cargo: $('#rCargo', sh).value.trim() || null,
-        p_receptor_telefono: $('#rTel', sh).value.trim() || null, p_firma_path: firmaPath, p_observacion: $('#rObs', sh).value.trim() || null,
-        p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null,
-        p_devoluciones: devs.map(d => ({ codigo: d.codigo, cantidad: +d.cantidad, motivo: d.motivo, comentario: d.comentario || null })),
-      });
-      if (error) throw error;
-      F.fotos.forEach(f => URL.revokeObjectURL(f.url));
-      closeSheet();
-      toast('Entrega registrada');
-      go('ruta');
+      const dependeDe = EO.llegadaEnFila(await TXOffline.entradas(), g.id);
+      idFila = await TXOffline.encolar(EO.T_CIERRE, {
+        guia: g.id, resultado: F.resultado, fotos, firma, receptor_nombre: nom,
+        receptor_rut: $('#rRut', sh).value.trim() || null, receptor_cargo: $('#rCargo', sh).value.trim() || null,
+        receptor_telefono: $('#rTel', sh).value.trim() || null, observacion: $('#rObs', sh).value.trim() || null,
+        lat: pos?.lat ?? null, lng: pos?.lng ?? null,
+        devoluciones: devs.map(d => ({ codigo: d.codigo, cantidad: +d.cantidad, motivo: d.motivo, comentario: d.comentario || null })),
+        at,
+      }, { archivos, dependeDe });
     } catch (e) {
-      toast('No se pudo guardar: ' + errMsg(e) + '. Revisa tu señal y reintenta.');
+      toast('No se pudo guardar en el teléfono: ' + errMsg(e));
       btn.disabled = false; btn.innerHTML = `${I.check}Confirmar entrega`;
+      return;
     }
+    btn.textContent = 'Enviando…';
+    const r = await resultadoEnvio(idFila, 15000);
+    F.fotos.forEach(f => URL.revokeObjectURL(f.url));
+    closeSheet();
+    if (r.estado === 'enviado') toast('Entrega registrada');
+    else if (r.estado === 'problema') toast('No se pudo registrar la entrega: ' + (r.error || '') + '. Revísala en Mi ruta.');
+    else toast('Entrega guardada en el teléfono. Se enviará al volver la señal.');
+    go('ruta');
   };
 }
 

@@ -1,9 +1,9 @@
 // Service worker: abre la app sin señal.
 // Mismo origen: red primero, caché de respaldo. CDN con versión fija: caché primero.
 // Otros orígenes (Supabase, mapas, OSM): no se interceptan.
-const C = 'entregas-tx-v4';
+const C = 'entregas-tx-v5';
 const BASE = ['./', 'index.html', 'styles.css', 'app.js', 'planificacion.js', 'cliente.js', 'logistica.js', 'manifest.webmanifest', 'icon-512.png',
-  '../offline-core.js', '../offline.js', '../foto-archivada.js'];
+  'entregas-offline.js', '../offline-core.js', '../offline.js', '../foto-archivada.js'];
 const CDN = [
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
