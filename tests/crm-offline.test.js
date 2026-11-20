@@ -506,3 +506,72 @@ test('dependientes: ids de entradas que dependen (en cadena) de una entrada', ()
   assert.deepEqual(C.dependientes(es, 'd'), []);
   assert.deepEqual(C.dependientes([], 'a'), []);
 });
+
+// ── Task 7: edición sin señal de cotizaciones propias ──
+test('quitarEntrada: edición con problema (sin _base) nunca saca la cotización del servidor', () => {
+  const S = S0(); S.quotes.push(qServ());
+  C.aplicarFilaCRM(S, [edicion('problema', {}, 'CONFLICTO: x')]);
+  C.quitarEntrada(S, 'e1', 'crm.cotizacion.editar');
+  assert.deepEqual(S.quotes.map((q) => q.id), ['q1']);
+});
+
+test('cambiosEdicion: copia solo los campos editables (profunda)', () => {
+  const q = { id: 'q1', num: 'C-1', status: 'enviada', items: [{ code: 'A', qty: 1 }], payment: 'Contado', conditions: 'c', notes: 'n', contact: 'Ana', nextAction: 'llamar', nextDate: '2026-11-25', listId: 'L-RM', entrega: { dir: 'x' }, validDays: 30, history: [], clientId: 'c1' };
+  const c = C.cambiosEdicion(q);
+  assert.deepEqual(Object.keys(c).sort(), ['conditions', 'contact', 'entrega', 'items', 'listId', 'nextAction', 'nextDate', 'notes', 'payment', 'validDays']);
+  q.items[0].qty = 9;
+  assert.equal(c.items[0].qty, 1);
+});
+
+test('cambiosRPC: claves en snake_case, solo las presentes', () => {
+  assert.deepEqual(C.cambiosRPC({ items: [1], nextAction: 'a', nextDate: '2026-11-25', listId: 'L', validDays: 15, entrega: {}, notes: 'n', payment: 'p', conditions: 'c', contact: 'k' }),
+    { items: [1], next_action: 'a', next_date: '2026-11-25', list_id: 'L', valid_days: 15, entrega: {}, notes: 'n', payment: 'p', conditions: 'c', contact: 'k' });
+  assert.deepEqual(C.cambiosRPC({ notes: 'x' }), { notes: 'x' });
+  assert.deepEqual(C.cambiosRPC(null), {});
+});
+
+test('baseEdicion: updated_at crudo tal cual (sin pasar por Date)', () => {
+  assert.equal(C.baseEdicion({ updatedAt: '2026-11-20T10:11:12.345678' }), '2026-11-20T10:11:12.345678');
+  assert.equal(C.baseEdicion({ updatedAt: '' }), null);
+  assert.equal(C.baseEdicion({}), null);
+  assert.equal(C.baseEdicion(null), null);
+});
+
+const qPropia = (extra = {}) => ({ id: 'q1', userId: 'u1', status: 'enviada', clientId: 'c1', date: '2026-11-20', updatedAt: '2026-11-20T10:00:00.123456', ...extra });
+test('edicionPorFila: propia en borrador/enviada/negociación sí', () => {
+  for (const status of ['borrador', 'enviada', 'negociacion']) {
+    const a = qPropia({ status });
+    assert.deepEqual(C.edicionPorFila(a, { ...a, notes: 'x' }, 'u1'), { ok: true, msg: null });
+  }
+});
+test('edicionPorFila: pendiente/rechazada/ganada/perdida requieren señal', () => {
+  for (const status of ['pendiente', 'rechazada', 'ganada', 'perdida']) {
+    const a = qPropia({ status });
+    const r = C.edicionPorFila(a, a, 'u1');
+    assert.equal(r.ok, false);
+    assert.match(r.msg, /con señal/);
+  }
+});
+test('edicionPorFila: ajena, sin versión, solo en el teléfono, o cambio de cliente/vendedor/fecha requieren señal', () => {
+  const a = qPropia();
+  assert.match(C.edicionPorFila(a, a, 'u2').msg, /otro vendedor/);
+  assert.equal(C.edicionPorFila(qPropia({ updatedAt: null }), qPropia({ updatedAt: null }), 'u1').ok, false);
+  const f = qPropia({ _fila: { id: 'e', estado: 'pendiente' } });
+  assert.equal(C.edicionPorFila(f, f, 'u1').ok, false);
+  assert.match(C.edicionPorFila(a, { ...a, clientId: 'c2' }, 'u1').msg, /cliente, vendedor o fecha/);
+  assert.match(C.edicionPorFila(a, { ...a, userId: 'u2' }, 'u1').msg, /cliente, vendedor o fecha/);
+  assert.match(C.edicionPorFila(a, { ...a, date: '2026-11-21' }, 'u1').msg, /cliente, vendedor o fecha/);
+});
+
+test('yaAplicada: el servidor ya tiene exactamente los cambios (orden de claves jsonb y null/"" no importan)', () => {
+  const cambios = { items: [{ code: 'A', qty: 2, price: 10 }], notes: '', next_date: '2026-11-25', valid_days: 30, entrega: { dir: 'x', obra: 'o' } };
+  const row = { id: 'q1', items: [{ price: 10, qty: 2, code: 'A' }], notes: null, next_date: '2026-11-25', valid_days: 30, entrega: { obra: 'o', dir: 'x' }, status: 'enviada' };
+  assert.equal(C.yaAplicada(row, cambios), true);
+  assert.equal(C.yaAplicada({ ...row, valid_days: 15 }, cambios), false);
+  assert.equal(C.yaAplicada({ ...row, items: [{ code: 'A', qty: 3, price: 10 }] }, cambios), false);
+  assert.equal(C.yaAplicada(null, cambios), false);
+});
+
+test('MSG_CONFLICTO en español', () => {
+  assert.equal(C.MSG_CONFLICTO, 'Otra persona cambió esta cotización. Revisa tu versión.');
+});

@@ -132,7 +132,10 @@
   }
 
   // Entrada descartada: lo que solo existía por ella (marcado con su id) sale de S.
-  function quitarEntrada(S, id) {
+  // Una edición (tipo 'crm.cotizacion.editar') no agregó nada: la cotización es del servidor y se queda
+  // (en 'problema' no tiene _base; su marca la quita aplicarFilaCRM).
+  function quitarEntrada(S, id, tipo) {
+    if (tipo === 'crm.cotizacion.editar') return;
     for (const k of ['visits', 'clients', 'tasks', 'opps']) {
       const l = S[k] || [];
       for (let i = l.length - 1; i >= 0; i--) if (l[i]._fila && l[i]._fila.id === id) l.splice(i, 1);
@@ -180,6 +183,49 @@
     return typeof m === 'string' && m.includes('CLIENTE_EXISTE') ? MSG_CLIENTE_EXISTE : null;
   }
   const textoProspectoExistia = (nombre, que = 'la visita') => 'El prospecto «' + nombre + '» ya existía; ' + que + ' quedó en ese cliente.';
+
+  // ── Edición de cotizaciones propias por la fila (crm_editar_cotizacion) ──
+  const MSG_CONFLICTO = 'Otra persona cambió esta cotización. Revisa tu versión.';
+  // Campos editables de la cotización (copia profunda), en camelCase como en S.
+  function cambiosEdicion(q) {
+    const c = {};
+    for (const k of CAMPOS_EDITABLES) if (q && k in q) c[k] = clonar(q[k]);
+    return c;
+  }
+  // p_cambios de crm_editar_cotizacion: nombres de columna (snake_case), solo las claves presentes.
+  const SNAKE = { nextAction: 'next_action', nextDate: 'next_date', listId: 'list_id', validDays: 'valid_days' };
+  function cambiosRPC(cambios) {
+    const r = {};
+    for (const k of Object.keys(cambios || {})) if (CAMPOS_EDITABLES.includes(k)) r[SNAKE[k] || k] = cambios[k];
+    return r;
+  }
+  // Versión leída: updated_at CRUDO, tal como llegó del servidor (nunca por Date: trunca a ms y cambia la zona).
+  const baseEdicion = (q) => (q && typeof q.updatedAt === 'string' && q.updatedAt ? q.updatedAt : null);
+  const EDITABLE_SIN_RED = ['borrador', 'enviada', 'negociacion'];
+  // ¿La edición puede ir por la fila (y así funcionar sin señal)? antes: la cotización como estaba; despues: editada.
+  // → {ok:true,msg:null} o {ok:false,msg}: por qué esta edición necesita señal (va por el camino directo de siempre).
+  function edicionPorFila(antes, despues, yo) {
+    const no = (msg) => ({ ok: false, msg });
+    if (!antes || antes.userId !== yo) return no('Editar la cotización de otro vendedor requiere señal.');
+    if (!EDITABLE_SIN_RED.includes(antes.status)) return no('Las cotizaciones pendientes de aprobación, rechazadas, ganadas o perdidas solo se pueden editar con señal.');
+    if (antes._fila) return no('Esta cotización aún no llega al servidor; edítala cuando se haya enviado.');
+    if (!baseEdicion(antes)) return no('Esta cotización solo se puede editar con señal.');
+    if (despues && (despues.clientId !== antes.clientId || despues.userId !== antes.userId || despues.date !== antes.date)) return no('Cambiar cliente, vendedor o fecha de emisión requiere señal.');
+    return { ok: true, msg: null };
+  }
+  // JSON con claves ordenadas (jsonb no conserva el orden); null, undefined y '' cuentan igual.
+  function canonico(x) {
+    if (x === '' || x === undefined) x = null;
+    if (Array.isArray(x)) return '[' + x.map(canonico).join(',') + ']';
+    if (x && typeof x === 'object') return '{' + Object.keys(x).sort().map((k) => JSON.stringify(k) + ':' + canonico(x[k])).join(',') + '}';
+    return JSON.stringify(x);
+  }
+  // El servidor ya tiene exactamente estos cambios (snake_case): el reintento de un envío que sí llegó
+  // (respuesta perdida) da CONFLICTO, pero no es de otra persona.
+  function yaAplicada(row, cambiosSnake) {
+    if (!row) return false;
+    return Object.keys(cambiosSnake || {}).every((k) => canonico(row[k]) === canonico(cambiosSnake[k]));
+  }
 
   const esConflicto = (error) => {
     const m = typeof error === 'string' ? error : error && error.message;
@@ -241,7 +287,7 @@
   // Una carga sigue vigente solo si no hubo escrituras desde que empezó (contador de escrituras).
   const snapshotVigente = (inicio, actual) => actual === inicio;
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, superponerEntrada, reasignarCliente, reasignarEnS, quitarEntrada, dependientes, soltarEntrada, prospectoParaFila, errorClienteExiste, textoProspectoExistia, esConflicto, MSG_CONFLICTO, cambiosEdicion, cambiosRPC, baseEdicion, edicionPorFila, yaAplicada, estadoPdf, marcaAguaPdf, pdfEntregado, alertaRechazo, textoCopia, firmaFila, filaRedundante, snapshotVigente };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -948,11 +948,12 @@ function filaAcc(x){const f=x&&x._fila;return f&&f.estado==='problema'?`<span cl
 // Textos por tipo de entrada: [qué se descarta, descartada, enviada]
 const TXT_FILA={'crm.visita':['la visita sin enviar? Se borrará del teléfono (foto incluida)','Visita descartada.','Visita enviada.'],
  'crm.cotizacion':['la cotización sin enviar? Se borrará del teléfono (su número queda sin usar)','Cotización descartada.','Cotización enviada.'],
- 'crm.cotizacion.entrega':['el registro de entrega del PDF? Se borrará del teléfono','Registro descartado.','Registro enviado.']};
+ 'crm.cotizacion.entrega':['el registro de entrega del PDF? Se borrará del teléfono','Registro descartado.','Registro enviado.'],
+ 'crm.cotizacion.editar':['tus cambios sin enviar de esta cotización? Se borrarán del teléfono','Cambios descartados.','Cambios enviados.']};
 async function accionFilaCRM(b){const eid=b.dataset.eid,acc=b.dataset.filaAcc;
  let tipo='crm.visita';try{const e0=(await TXOffline.entradas()).find(x=>x.id===eid);if(e0)tipo=e0.tipo}catch(_){}
  const tx=TXT_FILA[tipo]||['el registro sin enviar? Se borrará del teléfono','Registro descartado.','Registro enviado.'];
- if(acc==='descartar'){if(!confirm('¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid);
+ if(acc==='descartar'){if(!confirm('¿Descartar '+tx[0]+' y no se enviará.'))return;CO.quitarEntrada(S,eid,tipo);
   // lo que depende de una cotización descartada (entregas del PDF) ya no podría enviarse: se descarta con ella
   try{if(tipo==='crm.cotizacion'){const ents=await TXOffline.entradas();for(const d of CO.dependientes(ents,eid)){CO.quitarEntrada(S,d);await TXOffline.descartar(d,{aunPendiente:true})}}await TXOffline.descartar(eid)}catch(e){console.error(e)}toast(tx[1])}
  else{b.disabled=true;esperandoEnvio.add(eid);try{await Promise.race([TXOffline.reintentar(eid),esperar(10000)])}catch(e){console.error(e)}finally{esperandoEnvio.delete(eid)}
@@ -1151,7 +1152,10 @@ TIPOS_FILA['crm.cotizacion']=async(d0,archivos,meta)=>{
  // sin número lo asigna el servidor y se lee de vuelta.
  okR(await sb.from('crm_quotes').upsert(toRow(q,COLS.quotes),{onConflict:'id',ignoreDuplicates:true}));
  let num=q.num;
- if(!num){num=okR(await sb.from('crm_quotes').select('num').eq('id',q.id).single()).num;numeroAsignado(d,num)}
+ // versión del servidor (updated_at crudo): una edición posterior sin recargar la usa como base
+ const sv=okR(await sb.from('crm_quotes').select('num,updated_at').eq('id',q.id).maybeSingle());
+ if(!num){if(!sv||!sv.num)throw new Error('La cotización no está en el servidor.');num=sv.num;numeroAsignado(d,num)}
+ if(sv&&sv.updated_at){const sq=S.quotes.find(x=>x.id===q.id);if(sq)sq.updatedAt=sv.updated_at}
  const put=s=>q.num||s==null?s:String(s).split(NUM_PEND).join(num);
  if(d.opp)await secundario(async()=>okR(await sb.from('crm_opps').update(toRow(d.opp.obj,['stage','amount','quoteIds','nextAction','nextDate'])).eq('id',d.opp.obj.id)));
  if(d.tarea)await secundario(async()=>okR(await sb.from('crm_tasks').upsert(toRow({...d.tarea,title:put(d.tarea.title)},COLS.tasks),{onConflict:'id',ignoreDuplicates:true})));
@@ -1182,6 +1186,97 @@ TIPOS_FILA['crm.cotizacion.entrega']=async d=>{
  if(d.aviso)await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(d.aviso,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
  if(d.auditoria){const a=sinNum&&num?{...d.auditoria,ref:String(d.auditoria.ref).split(NUM_PEND).join(num)}:d.auditoria;await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(a,['ts',...COLS.audit]))))}
 };
+// Fila de crm_quotes devuelta por el servidor (versión nueva, updated_at crudo): reemplaza la cotización en pantalla
+// (o su respaldo si está abierta en el editor) y en la copia local, para que la próxima edición use esta versión.
+function cotizacionDelServidor(row){
+ if(!row||!row.id)return;
+ const o=fromRow(row);o.items=(o.items||[]).map(normItem);
+ const q=S.quotes.find(x=>x.id===o.id);
+ if(q){if(q._edit&&q._bak)Object.assign(q._bak,JSON.parse(JSON.stringify(o)));else{Object.assign(q,o);if(q._base)delete q._base}}
+ if(TXOffline.ajustarConsulta)TXOffline.ajustarConsulta('crm.datos',d=>{if(d&&Array.isArray(d.quotes)){const i=d.quotes.findIndex(x=>x.id===row.id);if(i>=0)d.quotes[i]=fromRow(row)}return d}).catch(e=>console.warn('[CRM] copia local sin actualizar:',e));
+}
+// Edición de una cotización propia (borrador/enviada/negociación) por la fila: crm_editar_cotizacion aplica los
+// cambios solo si la cotización sigue en la versión leída (p_base = updated_at crudo); si no, CONFLICTO y la entrada
+// queda 'problema' con la versión del teléfono guardada (nada del servidor se pisa). Aviso y auditoría: secundarios.
+TIPOS_FILA['crm.cotizacion.editar']=async d=>{
+ const cambios=CO.cambiosRPC(d.cambios);
+ const res=await sb.rpc('crm_editar_cotizacion',{p_id:d.id,p_base:d.base,p_cambios:cambios,p_requiere_aprobacion:!!d.requiereAprobacion,p_nota:d.nota||null});
+ let row=null;
+ if(res&&res.error&&CO.esConflicto(res.error)){
+  // reintento de un envío que sí llegó (se perdió la respuesta): el servidor ya tiene exactamente estos cambios
+  const r=okR(await sb.from('crm_quotes').select('*').eq('id',d.id).maybeSingle());
+  if(!r||!CO.yaAplicada(r,cambios)||(d.requiereAprobacion&&r.status!=='pendiente'))throw new Error(CO.MSG_CONFLICTO);
+  row=r;
+ }else{
+  const data=okR(res);row=Array.isArray(data)?data[0]:data;
+  if(!row||!row.updated_at)row=okR(await sb.from('crm_quotes').select('*').eq('id',d.id).maybeSingle());
+ }
+ cotizacionDelServidor(row);
+ for(const a of d.avisos||[])await secundario(async()=>okR(await sb.from('crm_outbox').upsert(toRow(a,COLS.outbox),{onConflict:'id',ignoreDuplicates:true})));
+ if(d.auditoria)await secundario(async()=>okR(await sb.from('crm_audit').insert(toRow(d.auditoria,['ts',...COLS.audit]))));
+};
+// Guarda la edición por la fila (con o sin señal). reemplaza: id de una edición en CONFLICTO que el vendedor vuelve a
+// guardar («Ver mi versión»): requiere señal y la base se relee del servidor; si la jefatura ya decidió, eso se mantiene.
+// → true si quedó guardada (en el servidor o en el teléfono).
+async function editarPorFila(q,over,reemplaza){
+ let base=CO.baseEdicion(q._bak);
+ if(reemplaza){
+  if(navigator.onLine===false){toast('Para volver a guardar tu versión necesitas señal.');return false}
+  let row;try{row=okR(await sb.from('crm_quotes').select('*').eq('id',q.id).maybeSingle())}
+  catch(e){console.error(e);toast(esRed(e)?MSG_REQUIERE_RED:'No se pudo leer la cotización: '+esc((e&&e.message)||e));return false}
+  if(!row){toast('La cotización ya no está en el servidor.');return false}
+  cotizacionDelServidor(row);
+  if(!['borrador','enviada','negociacion'].includes(row.status)){toast(`La jefatura ya la dejó en «${esc(STATUS[row.status]||row.status)}»: esa decisión se mantiene y tu versión no se aplica. Si hace falta, duplícala o descarta tu versión.`);return false}
+  base=row.updated_at;
+ }
+ const qEd=JSON.parse(JSON.stringify(q));['_edit','_bak','_reemplaza','_listChanged','_fila','_filaEntrega'].forEach(k=>delete qEd[k]);
+ const t=qTotals(qEd).total;
+ const nota='Cotización editada · total '+clp(t)+(over?` · Solicitud de aprobación a ${(approverOf(qEd)||{nombre:'jefatura comercial'}).nombre} (dcto. máx ${maxDisc(qEd)}%)`:'');
+ const datos={id:q.id,base,cambios:CO.cambiosEdicion(qEd),requiereAprobacion:!!over,nota,version_telefono:qEd,
+  avisos:over?[aprobacionAviso({...qEd,status:'pendiente'},'req')]:[],
+  auditoria:{ts:nowIso(),entity:'Cotización',ref:q.num,action:'Modificada',detail:'Total '+clp(t)}};
+ const b1=$('#qSave'),b2=$('#qSaveDraft');if(b1){b1.disabled=b2.disabled=true;b1.textContent='Guardando…'}
+ const listo=()=>{const b=q._bak;Object.keys(q).forEach(k=>delete q[k]);Object.assign(q,b);delete q._edit;delete q._bak;delete q._reemplaza};
+ let id=null,r=null;
+ try{id=await TXOffline.encolar('crm.cotizacion.editar',datos)}
+ catch(e){
+  // Sin almacenamiento local (fila no disponible): con señal se envía directo, como antes.
+  console.error(e);
+  try{escrituras++;await TIPOS_FILA['crm.cotizacion.editar'](datos,{},{id:uid(),intentos:0})}
+  catch(e2){console.error(e2);if(b1){b1.disabled=b2.disabled=false;b1.textContent='Guardar cambios'}toast(esRed(e2)?'Sin conexión y sin espacio en el teléfono: los cambios no se guardaron.':'No se pudieron guardar los cambios: '+esc((e2&&e2.message)||e2));return false}
+  finally{escrituras++}
+  r={estado:'enviado'};
+ }
+ // la versión del teléfono que estaba en CONFLICTO queda reemplazada por esta
+ if(reemplaza&&id)try{await TXOffline.descartar(reemplaza)}catch(e){console.error(e)}
+ // En pantalla: la cotización del servidor con la edición superpuesta (marcada "Pendiente de enviar" hasta que llegue).
+ listo();
+ if(id)CO.superponerEntrada(S,{id,tipo:'crm.cotizacion.editar',datos,estado:'pendiente',error:null});
+ for(const a of datos.avisos)S.outbox.unshift(a);
+ S.audit.unshift({user:S.me,...datos.auditoria});
+ rerender();
+ if(!r)r=await esperarEnvio(id);
+ await aplicarFila();rerender();
+ const sq=S.quotes.find(x=>x.id===q.id)||q;
+ if(r.estado==='enviado'){if(!over)toast('Cambios guardados.')}
+ else if(r.estado==='problema')toast('Los cambios quedaron en el teléfono, pero no se pudieron enviar: '+esc(r.error||'')+' Revisa la cotización.');
+ else toast('Cambios guardados en el teléfono. Se enviarán al volver la señal.');
+ if(over&&r.estado!=='problema')setTimeout(()=>notifyModal(sq,'req',true),400);
+ return true;
+}
+// «Ver mi versión»: abre el editor con la versión del teléfono de una edición en CONFLICTO (sobre la cotización actual).
+async function verMiVersion(eid){
+ let e=null;try{e=(await TXOffline.entradas()).find(x=>x.id===eid)}catch(_){}
+ if(!e||!e.datos){toast('Ese cambio ya no está en el teléfono.');await aplicarFila();rerender();return}
+ const q=S.quotes.find(x=>x.id===e.datos.id);if(!q)return;
+ q._bak=JSON.parse(JSON.stringify(q));Object.assign(q,CO.cambiosEdicion(e.datos.version_telefono||e.datos.cambios||{}));
+ q._reemplaza=eid;q._edit=true;rerender();
+}
+async function descartarMiVersion(eid){
+ if(!confirm('¿Descartar tu versión? Los cambios que hiciste en el teléfono se pierden y queda la versión actual de la cotización.'))return;
+ try{await TXOffline.descartar(eid)}catch(e){console.error(e)}
+ await aplicarFila();rerender();toast('Tu versión se descartó.');
+}
 // Registra la entrega del PDF: en pantalla al tiro y por la fila (depende del envío de la cotización si aún no se envía).
 async function registrarEntrega(q,o){
  const linea=o.texto?{ts:nowIso(),user:S.me,text:o.texto}:null;
@@ -1293,14 +1388,17 @@ function vQuote(id){
  const c=C(q.clientId);const t=qTotals(q);const st=qStatus(q);const closed=['ganada','perdida'].includes(st);
  const mine=q.userId===S.me||can('ver_todo');const canAct=can('cotizar')||can('aprobar_desc');
  // rechazada: solo se puede cerrar como perdida o duplicar (otro número); sin enviar (en la fila): sin cambios de estado ni edición
+ // edición sin señal en CONFLICTO: se ve la versión del servidor (la decisión de jefatura prevalece); la del teléfono, a pedido
+ const conf=!!(q._fila&&q._fila.estado==='problema'&&q._fila.error===CO.MSG_CONFLICTO);
  const rech=q.status==='rechazada',enFila=!!q._fila,hRech=rech?((q.history||[]).slice().reverse().find(x=>/^Rechazada por/.test(x.text))||{text:'Rechazada'}).text:'';
- M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${esc(qn(q))}</div><h1>${esc(qn(q))} · ${esc(c.name)}</h1><p class="row">${stPill(q)}${filaChip(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${esc(q.dupFrom)}</span>`:''}</p>${filaAcc(q)}${q._filaEntrega?`<p class="row small"><span>Entrega del PDF:</span>${filaChip({_fila:q._filaEntrega})}</p>${filaAcc({_fila:q._filaEntrega})}`:''}</div>
+ M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${esc(qn(q))}</div><h1>${esc(qn(q))} · ${esc(c.name)}</h1><p class="row">${stPill(q)}${conf?'':filaChip(q)}<span class="small muted">Emitida ${fd(q.date)} · vence ${fd(qExpiry(q))} · ${esc(U(q.userId).name)}</span>${q.dupFrom?`<span class="chip">Duplicada desde ${esc(q.dupFrom)}</span>`:''}</p>${conf?'':filaAcc(q)}${q._filaEntrega?`<p class="row small"><span>Entrega del PDF:</span>${filaChip({_fila:q._filaEntrega})}</p>${filaAcc({_fila:q._filaEntrega})}`:''}</div>
   <div class="stat-actions">
    ${!closed&&canAct&&mine&&!enFila&&q.status!=='pendiente'?`${rech?'':`<button class="btn good" data-act="win" data-id="${q.id}">${ico('check')}Marcar como ganada</button>`}<button class="btn bad" data-act="lose" data-id="${q.id}">${ico('x')}Marcar como perdida</button>`:''}
    <button class="btn" data-act="pdf" data-id="${q.id}">${ico('dl')}Descargar PDF</button>
    ${can('cotizar')&&!rech?`<button class="btn" data-act="mailQ" data-id="${q.id}">${ico('send')}${navigator.onLine===false?'Compartir PDF':'Enviar por correo'}</button>`:''}${can('cotizar')&&q.status!=='pendiente'?`<button class="btn" data-act="dupQ" data-id="${q.id}">${ico('copy')}Duplicar cotización</button>`:''}
    ${!closed&&!rech&&!enFila&&can('cotizar')&&mine?`<button class="btn ghost" data-act="editQ" data-id="${q.id}">${ico('edit')}Editar</button>`:''}
   </div></div>
+ ${conf?`<div class="note" style="background:var(--bad-bg);margin-bottom:12px">${ico('alert')}<span><b>${esc(CO.MSG_CONFLICTO)}</b> Tus cambios hechos sin señal no se aplicaron porque la cotización cambió mientras tanto. Abajo está la versión actual${q.userId!==S.me?'':' (si la jefatura ya decidió, esa decisión se mantiene)'}. <span class="row" style="margin-top:6px"><button type="button" class="btn sm" data-conf="ver" data-eid="${q._fila.id}">${ico('edit')}Ver mi versión</button><button type="button" class="btn sm ghost" data-conf="descartar" data-eid="${q._fila.id}">${ico('x')}Descartar mi versión</button></span></span></div>`:''}
  ${rech?`<div class="note" style="background:var(--bad-bg);margin-bottom:12px">${ico('x')}<span><b>${esc(hRech)}.</b> ${CO.alertaRechazo(q,S.quotes)?'<b>El cliente ya tiene el PDF: contáctalo.</b> ':''}Si hay que rehacerla, usa «Duplicar cotización»: la nueva lleva otro número.</span></div>`:''}
  ${q.status==='pendiente'?`<div class="note warn" style="margin-bottom:12px">${ico('alert')}<span><b>Pendiente de aprobación.</b> Tiene productos con descuento sobre ${S.cfg.discLimit}% (máx. ${maxDisc(q)}%). Debe aprobarla <b>${esc((approverOf(q)||{nombre:'la jefatura comercial'}).nombre)}</b>. El PDF se puede entregar: dice «Sujeta a aprobación». ${canApprove(q)?`<button class="btn sm good" data-act="approve" data-id="${q.id}">${ico('check')}Aprobar</button> <button class="btn sm bad" data-act="reject" data-id="${q.id}">Rechazar</button>`:`<button class="btn sm" data-act="askApproval" data-id="${q.id}">${ico('send')}Avisar por correo</button>`}</span></div>`:isApproved(q)&&overLimit(q)?`<div class="note" style="background:var(--good-bg);margin-bottom:12px">${ico('check')}<span>${esc((q.history.slice().reverse().find(x=>/^Aprobada por/.test(x.text))||{}).text||'')}</span></div>`:''}
  ${q.won?`<div class="note" style="background:var(--good-bg);margin-bottom:12px">${ico('check')}<span><b>Ganada.</b> Pedido ${esc(q.won.order)} · compra estimada ${fd(q.won.date)} · monto final ${clp(q.won.amount)}${q.won.notes?' · '+esc(q.won.notes):''}</span></div>`:''}
@@ -1316,7 +1414,7 @@ function vQuote(id){
    <div class="card"><h2>Historial</h2>${q.history.slice().reverse().map(h=>`<div class="list-item small"><div class="grow">${esc(h.text)}<div class="muted">${fdt(h.ts)} · ${esc(U(h.user).name)}</div></div></div>`).join('')}</div>
   </div>
  </div>`;
- M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=e=>{const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
+ M().onchange=e=>{const s=e.target.closest('[data-act-change=status]');if(s){const old=q.status;q.status=s.value;q.history.push({ts:nowIso(),user:S.me,text:`Estado: ${STATUS[old]} → ${STATUS[q.status]}`});const o=S.opps.find(o=>o.id===q.oppId);if(o&&['negociacion','pendiente'].includes(q.status)){o.stage='negociacion';dbUpd('opps',o,['stage']).catch(ignore)}saveQ(q);audit('Cotización',q.num,'Cambio de estado',`${STATUS[old]} → ${STATUS[q.status]}`);rerender();if(q.status==='pendiente'&&old!=='pendiente')notifyModal(q,'req');else toast('Estado actualizado.')}};M().oninput=null;M().onclick=e=>{const k=e.target.closest('[data-conf]');if(k){(k.dataset.conf==='ver'?verMiVersion:descartarMiVersion)(k.dataset.eid);return}const b=e.target.closest('[data-fila-acc]');if(b)accionFilaCRM(b)};
 }
 function totalsBox(t){return `<div class="totals"><span>Subtotal bruto</span><span class="num">${clp(t.bruto)}</span><span>Descuentos</span><span class="num">− ${clp(t.desc)}</span><span>Neto</span><span class="num">${clp(t.neto)}</span><span>IVA 19%</span><span class="num">${clp(t.iva)}</span><span class="T">Total</span><span class="T num">${clp(t.total)}</span></div>`}
 function quoteEditor(q,isNew){
@@ -1324,7 +1422,7 @@ function quoteEditor(q,isNew){
  const c=q.clientId?C(q.clientId):null;if(c&&!q.listId)q.listId=listFor(c).id;const L=c?qList(q):null;if(!q.entrega)q.entrega=entregaDe(c);const E=q.entrega;
  const prods=S.products.filter(p=>p.active);
  const over=q.items.some(i=>(i.disc||0)>S.cfg.discLimit);
- M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${isNew?'nueva':q.num}</div><h1>${isNew?(q.dupFrom?'Nueva cotización (duplicada de '+esc(q.dupFrom)+')':'Nueva cotización'):'Editar '+q.num}</h1><p>${q.dupFrom?'Revisa cliente, productos, cantidades, precios y descuentos antes de guardar. La cotización original no se modifica.':'Elige la zona de precios; los precios se toman de esa lista.'}</p></div>
+ M().innerHTML=`<div class="ph"><div><div class="eyebrow"><a href="#cotizaciones">Cotizaciones</a> / ${isNew?'nueva':q.num}</div><h1>${isNew?(q.dupFrom?'Nueva cotización (duplicada de '+esc(q.dupFrom)+')':'Nueva cotización'):'Editar '+q.num}</h1><p>${q._reemplaza?'Esta es tu versión guardada en el teléfono. Al guardar (con señal) se aplica sobre la versión actual de la cotización.':q.dupFrom?'Revisa cliente, productos, cantidades, precios y descuentos antes de guardar. La cotización original no se modifica.':'Elige la zona de precios; los precios se toman de esa lista.'}</p></div>
   <div class="row"><button class="btn" id="qCancel">Cancelar</button><button class="btn" id="qSaveDraft">Guardar borrador</button><button class="btn pri" id="qSave">${isNew?'Guardar y emitir':'Guardar cambios'}</button></div></div>
  <div class="grid g-main qed">
   <div class="card"><div class="form">
@@ -1425,7 +1523,20 @@ function quoteEditor(q,isNew){
    if(r.estado==='enviado'){const tx=resolverAviso(id);if(tx)toast(esc(tx));else if(!over)toast(asDraft?'Borrador guardado.':'Cotización guardada.')}
    else if(r.estado==='problema')toast('La cotización quedó en el teléfono, pero no se pudo enviar: '+esc(r.error||'')+' Revísala en Cotizaciones.');
    else toast(sq.num?'Cotización guardada en el teléfono. Se enviará al volver la señal. Ya puedes entregar el PDF.':'Cotización guardada en el teléfono. Sin número: se asignará al volver la señal. El PDF dirá BORRADOR.');
-  }else{const before=S.quotes.find(x=>x.id===q.id);before.history.push({ts:nowIso(),user:S.me,text:'Cotización editada · total '+clp(qTotals(q).total)});let askNow=false;if(over){if(before.status!=='pendiente')askNow=true;before.status='pendiente';before.history.push({ts:nowIso(),user:S.me,text:`Solicitud de aprobación a ${(approverOf(before)||{nombre:'jefatura comercial'}).nombre} (dcto. máx ${maxDisc(before)}%)`})}else if(autoOk){before.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(before)}%)`});if(before.status==='pendiente')before.status='enviada'}delete before._edit;delete before._bak;saveQ(before);audit('Cotización',q.num,'Modificada','Total '+clp(qTotals(q).total));rerender();if(askNow)notifyModal(before,'req');else toast('Cambios guardados.')}
+  }else{
+   // Cotización propia en borrador/enviada/negociación, sin cambiar cliente/vendedor/fecha: por la fila (sirve sin señal).
+   // Lo demás (pendiente/rechazada/cerrada, de otro vendedor, autoaprobación de jefatura) sigue el camino directo: con señal.
+   const reemplaza=q._reemplaza||null;
+   // No se apilan ediciones: la segunda se haría sobre una versión que el servidor aún no tiene (y el camino
+   // directo pisaría la que espera en la fila).
+   let ents=[];try{ents=await TXOffline.entradas()}catch(_){}
+   if(ents.some(e=>e.tipo==='crm.cotizacion.editar'&&e.datos&&e.datos.id===q.id&&e.id!==reemplaza)){toast('Ya tienes un cambio pendiente de enviar para esta cotización.');return}
+   const pf=CO.edicionPorFila({...q._bak,_fila:reemplaza?undefined:(q._bak||{})._fila},q,S.me);
+   if(pf.ok&&!autoOk){await editarPorFila(q,over,reemplaza);return}
+   if(reemplaza&&q._bak&&!['borrador','enviada','negociacion'].includes(q._bak.status)){toast(`La cotización está en «${esc(STATUS[q._bak.status]||q._bak.status)}»: esa decisión se mantiene y tu versión no se aplica. Si hace falta, duplícala o descarta tu versión.`);return}
+   if(reemplaza){toast(autoOk?'Tu versión supera el descuento permitido y aprobarla tú requiere guardarla como edición normal: descarta tu versión y vuelve a editar con señal.':pf.msg);return}
+   if(navigator.onLine===false){toast(autoOk?'Aprobar el descuento de tu propia cotización requiere señal.':pf.msg);return}
+   const before=S.quotes.find(x=>x.id===q.id);before.history.push({ts:nowIso(),user:S.me,text:'Cotización editada · total '+clp(qTotals(q).total)});let askNow=false;if(over){if(before.status!=='pendiente')askNow=true;before.status='pendiente';before.history.push({ts:nowIso(),user:S.me,text:`Solicitud de aprobación a ${(approverOf(before)||{nombre:'jefatura comercial'}).nombre} (dcto. máx ${maxDisc(before)}%)`})}else if(autoOk){before.history.push({ts:nowIso(),user:S.me,text:`Aprobada por ${me().name} (dcto. máx ${maxDisc(before)}%)`});if(before.status==='pendiente')before.status='enviada'}delete before._edit;delete before._bak;saveQ(before);audit('Cotización',q.num,'Modificada','Total '+clp(qTotals(q).total));rerender();if(askNow)notifyModal(before,'req');else toast('Cambios guardados.')}
  };
  $('#qSave').onclick=()=>save(false);$('#qSaveDraft').onclick=()=>save(true);
 }
@@ -1744,8 +1855,9 @@ async function compartirPdf(q,blob,titulo,texto){
 }
 function genPass(){const a='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';const r=crypto.getRandomValues(new Uint8Array(10));return 'TX-'+[...r].map(x=>a[x%a.length]).join('')}
 function saveCfg(){return dbRun(sb.from('crm_settings').update({value:S.cfg}).eq('key','cfg')).catch(ignore)}
-const QUPD=['clientId','userId','date','validDays','status','items','payment','conditions','notes','contact','nextAction','nextDate','history','won','lost','sentAt','updatedAt','listId','entrega'];
-function saveQ(q){q.updatedAt=nowIso();return dbUpd('quotes',q,QUPD).catch(ignore)}
+const QUPD=['clientId','userId','date','validDays','status','items','payment','conditions','notes','contact','nextAction','nextDate','history','won','lost','sentAt','listId','entrega'];
+// updated_at lo pone el servidor (trigger); se lee de vuelta tal cual (crudo): es la versión que usa una edición sin señal.
+function saveQ(q){return dbRun(sb.from('crm_quotes').update(toRow(q,QUPD)).eq('id',q.id).select('updated_at')).then(d=>{const x=Array.isArray(d)?d[0]:d;if(x&&x.updated_at)q.updatedAt=x.updated_at}).catch(ignore)}
 async function callAdmin(body){escrituras++;const {data,error}=await sb.functions.invoke('crm-admin-users',{body});if(error){let msg=error.message;try{const j=await error.context.json();msg=j.error||msg}catch(_){}throw new Error(msg)}if(data&&data.error)throw new Error(data.error);return data}
 function credModal(name,email,pass,isNew){openModal(isNew?'Usuario creado':'Contraseña actualizada',`<p>${isNew?'Comparte estos datos con':'Nueva contraseña temporal de'} <b>${esc(name)}</b>. Al entrar puede cambiarla desde su menú de usuario.</p><dl class="kv"><dt>Dirección</dt><dd class="mono small">${esc(location.origin+location.pathname.replace(/crm\.html$/,''))}</dd><dt>Correo</dt><dd class="mono">${esc(email)}</dd><dt>Contraseña</dt><dd class="mono">${esc(pass)}</dd></dl>`,`<button class="btn pri" id="cpyCred">${ico('copy')}Copiar datos</button>`,'narrow');$('#cpyCred').onclick=()=>copyText(`Apps Grupo TX (elige CRM Comercial)\n${location.origin+location.pathname.replace(/crm\.html$/,'')}\nCorreo: ${email}\nContraseña: ${pass}`)}
 function passModal(force){openModal(force?'Crea tu contraseña':'Cambiar mi contraseña',`<form class="form" style="grid-template-columns:1fr" onsubmit="return false">${force?'<p class="small" style="margin:0">Tu cuenta se creó con una contraseña temporal. Elige una contraseña personal para continuar.</p>':''}<div class="fld"><label>Nueva contraseña</label><input type="password" id="np1" autocomplete="new-password"><span class="hint">Mínimo 8 caracteres.</span></div><div class="fld"><label>Repetir contraseña</label><input type="password" id="np2" autocomplete="new-password"></div></form>`,`${force?'':'<button class="btn" data-close>Cancelar</button>'}<button class="btn pri" id="npOk">Guardar</button>`,'narrow');if(force){const x=document.querySelector('.modal [data-close]');if(x)x.remove()}

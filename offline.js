@@ -222,6 +222,29 @@
     }
   }
 
+  // Corrige en el sitio la copia guardada de una consulta (p. ej. una fila que ya se envió y volvió del
+  // servidor), en una sola transacción. fn(datos) la modifica (o devuelve otra). Sin copia, no hace nada.
+  function ajustarConsulta(clave, fn) {
+    return new Promise((ok, mal) => {
+      if (!db) return mal(new Error('TXOffline no está iniciado'));
+      const t = db.transaction('consultas', 'readwrite');
+      const s = t.objectStore('consultas');
+      let hubo = false;
+      const r = s.get(clave);
+      r.onsuccess = () => {
+        const c = r.result;
+        if (!c || c.datos === undefined) return;
+        let d;
+        try { d = fn(c.datos); } catch (e) { t.abort(); return; }
+        s.put({ datos: d === undefined ? c.datos : d, guardadoEn: c.guardadoEn }, clave);
+        hubo = true;
+      };
+      t.oncomplete = () => ok(hubo);
+      t.onerror = () => mal(t.error);
+      t.onabort = () => mal(t.error || new Error('Transacción abortada'));
+    });
+  }
+
   // Almacenamiento local simple (borradores, preferencias): mismo almacén 'consultas', prefijo propio.
   async function guardarLocal(clave, valor) { await poner('consultas', valor, 'local:' + clave); }
   async function leerLocal(clave) {
@@ -294,5 +317,5 @@
     });
   }
 
-  g.TXOffline = { iniciar, registrarTipo, encolar, sincronizar, consultar, guardarLocal, leerLocal, entradas, reintentar, descartar, montarIndicador, puedeCerrarSesion, alCerrarSesion };
+  g.TXOffline = { iniciar, registrarTipo, encolar, sincronizar, consultar, ajustarConsulta, guardarLocal, leerLocal, entradas, reintentar, descartar, montarIndicador, puedeCerrarSesion, alCerrarSesion };
 })(window);
