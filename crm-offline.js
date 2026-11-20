@@ -85,22 +85,30 @@
     return 'oficial';
   }
 
-  // Aviso de la barra cuando los datos vienen de la copia local: "Sin conexión · datos de las HH:MM"
-  // (hora local del equipo; si la copia es de otro día se agrega " del D mmm").
+  // Aviso de la barra cuando se muestra la copia local (hora local del equipo; si la copia es de otro
+  // día se agrega " del D mmm"). modo 'sin-red': "Sin conexión · datos de las HH:MM";
+  // modo 'cargando' (hay red pero la carga tarda): "Datos de las HH:MM · cargando datos actualizados…".
   const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  function textoCopia(guardadoEn, ahora = new Date()) {
+  function textoCopia(guardadoEn, ahora = new Date(), modo = 'sin-red') {
     const d = new Date(guardadoEn);
-    if (isNaN(d)) return 'Sin conexión · datos guardados';
     const p2 = (n) => String(n).padStart(2, '0');
-    let t = 'Sin conexión · datos de las ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
-    if (d.toDateString() !== ahora.toDateString()) t += ' del ' + d.getDate() + ' ' + MESES[d.getMonth()];
-    return t;
+    let cuando = 'datos guardados';
+    if (!isNaN(d)) {
+      cuando = 'datos de las ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+      if (d.toDateString() !== ahora.toDateString()) cuando += ' del ' + d.getDate() + ' ' + MESES[d.getMonth()];
+    }
+    if (modo === 'cargando') return cuando.charAt(0).toUpperCase() + cuando.slice(1) + ' · cargando datos actualizados…';
+    return 'Sin conexión · ' + cuando;
   }
 
   // Firma de la fila visible (id:estado, en orden): si no cambia, no hace falta repintar.
   const firmaFila = (entradas) => (entradas || []).map((e) => e.id + ':' + e.estado).join('|');
 
-  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila };
+  // El indicador de la fila sobra solo si el aviso de la copia ya dice "Sin conexión" y la fila no
+  // tiene nada que contar (nunca se oculta con pendientes o problemas).
+  const filaRedundante = (copiaSinRed, resumen) => !!copiaSinRed && !(resumen && (resumen.pendientes || resumen.problemas));
+
+  const API = { necesitaReponer, tomarNumero, cantidadAReservar, aplicarFilaCRM, esConflicto, estadoPdf, textoCopia, firmaFila, filaRedundante };
   if (typeof window !== 'undefined') g.CO = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

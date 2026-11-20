@@ -348,7 +348,6 @@ tr.over td{background:color-mix(in srgb,var(--amber-bg) 60%,transparent)}.neg{co
 .leaflet-container{font-family:var(--f-body)}
 @media (max-width:520px){.userbtn .un{display:none}.userbtn{padding:4px}}
 .offchip{font-size:.72rem;font-weight:600;padding:4px 9px;border-radius:999px;background:var(--amber-bg);color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
-#copiaInd:not([hidden])+#filaInd[data-estado="sin-conexion"]{display:none}
 .offbar{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
 .offbar+.who{margin-left:0}
 /* teléfono: los avisos bajan a una segunda línea de la barra (y no ocupan espacio si no hay ninguno) */
@@ -520,7 +519,11 @@ window.addEventListener('online',avisoConexionLogin);
 window.addEventListener('offline',avisoConexionLogin);
 // Consulta con copia local; sin red conocida (navigator.onLine) va directo a la copia.
 function consultarCRM(clave,fn){return TXOffline.consultar(clave,()=>{if(navigator.onLine===false)throw new TypeError('Failed to fetch');return fn()})}
-function mostrarCopia(r){const el=$('#copiaInd');if(!el)return;const c=r&&r.desdeCache;el.textContent=c?CO.textoCopia(r.guardadoEn):'';el.title=c?'Se muestran los datos guardados en este equipo. Se actualizan solos al volver la señal.':'';el.hidden=!c}
+// modo 'sin-red' (por defecto) o 'cargando' (hay red pero la carga pasó el tope de espera y sigue en curso)
+let copiaSinRed=false,resumenFila=null;
+function mostrarCopia(r,modo){const el=$('#copiaInd');if(!el)return;const c=!!(r&&r.desdeCache);modo=modo||'sin-red';el.textContent=c?CO.textoCopia(r.guardadoEn,new Date(),modo):'';el.title=!c?'':modo==='cargando'?'Se muestran los datos guardados en este equipo mientras termina la carga.':'Se muestran los datos guardados en este equipo. Se actualizan solos al volver la señal.';el.hidden=!c;copiaSinRed=c&&modo==='sin-red';ajustarFilaInd()}
+// El indicador de la fila solo se oculta si repetiría "Sin conexión" sin nada pendiente ni con problema.
+function ajustarFilaInd(){const el=$('#filaInd');if(el)el.hidden=CO.filaRedundante(copiaSinRed,resumenFila)||!el.textContent}
 // Hace visibles en S los envíos pendientes/con problema de la fila (idempotente).
 let firmaVista='';
 async function aplicarFila(){let ents;try{ents=await TXOffline.entradas()}catch(_){return false}CO.aplicarFilaCRM(S,ents);const f=CO.firmaFila(ents),cambio=f!==firmaVista;firmaVista=f;return cambio}
@@ -529,6 +532,10 @@ window.addEventListener('txoffline:cambio',async()=>{if(!lastLoad)return;const c
 // Al volver la señal, si se estaba mostrando la copia, se recarga (sin pisar un formulario abierto).
 window.addEventListener('online',()=>{if(lastLoad&&!$('#copiaInd').hidden&&puedeRepintar())reloadData()});
 TXOffline.montarIndicador($('#filaInd'));
+// después de los de montarIndicador (mismo evento, se ejecutan en orden de registro)
+window.addEventListener('txoffline:cambio',ev=>{resumenFila=ev.detail||null;ajustarFilaInd()});
+window.addEventListener('online',ajustarFilaInd);
+window.addEventListener('offline',ajustarFilaInd);
 let saliendo=false;
 // Único camino para cerrar sesión: no se sale con registros sin enviar (se perderían).
 async function cerrarSesion(){
@@ -594,20 +601,44 @@ function aplicarDatos(d){
 }
 // Carga todo con copia local. Sin señal: la primera carga usa la copia; en una recarga (conservar)
 // se mantiene lo que ya está en pantalla, que es igual o más nuevo que la copia.
+function guardarCopia(d){return TXOffline.consultar('crm.datos',()=>d).catch(()=>{})}
+let genCarga=0;
 async function loadAll(opts){
- let r;
+ const gen=++genCarga;
+ let r,p=null,pFallo=false;
  const sinRed=()=>{throw new TypeError('Failed to fetch')};
- try{r=await consultarCRM('crm.datos',opts&&opts.soloCopia?sinRed:traerDatos)}
+ // se guarda la carga en curso: si consultar corta por su tope de espera, la misma carga se sigue usando
+ const traer=()=>{p=traerDatos();p.catch(()=>{pFallo=true});return p};
+ try{r=await consultarCRM('crm.datos',opts&&opts.soloCopia?sinRed:traer)}
  catch(e){
-  // pasó el tope de espera de consultar y no hay copia (primera apertura con señal lenta): se espera la carga completa
-  if(!(e&&e.name==='AbortError')||navigator.onLine===false)throw e;
-  r={datos:await traerDatos(),desdeCache:false,guardadoEn:new Date().toISOString()};
+  // pasó el tope de espera y no hay copia (primera apertura con señal lenta): se espera la carga en curso
+  if(!(e&&e.name==='AbortError')||!p)throw e;
+  r={datos:await p,desdeCache:false,guardadoEn:new Date().toISOString()};
+  guardarCopia(r.datos);
  }
- mostrarCopia(r);
+ // copia servida por el tope de espera con la carga aún en curso (no por falta de red)
+ const tardia=!!(r.desdeCache&&p&&!pFallo);r.tardia=tardia;
+ mostrarCopia(r,tardia&&navigator.onLine!==false?'cargando':'sin-red');
+ if(tardia)terminarCarga(p,r,gen);
  if(r.desdeCache&&opts&&opts.conservar&&lastLoad)return r;
  aplicarDatos(r.datos);
  await aplicarFila();
  return r;
+}
+// Termina una carga lenta: guarda la copia y aplica los datos frescos en cuanto se pueda repintar
+// (sin pisar un formulario abierto); una carga posterior la deja obsoleta.
+function terminarCarga(p,r,gen){
+ p.then(d=>{
+  if(gen!==genCarga)return;
+  guardarCopia(d);
+  const aplicar=async()=>{
+   if(gen!==genCarga)return;
+   if(!puedeRepintar()){setTimeout(aplicar,2000);return}
+   aplicarDatos(d);await aplicarFila();mostrarCopia(null);
+   if($('#gate').hidden){renderShell();rerender()}
+  };
+  aplicar();
+ },()=>{if(gen===genCarga&&!$('#copiaInd').hidden)mostrarCopia(r,'sin-red')}).catch(e=>console.error(e));
 }
 async function reloadData(){try{const r=await loadAll({conservar:true});if(!r.desdeCache){renderShell();rerender()}return r}catch(e){console.error(e);return null}}
 
@@ -1432,7 +1463,7 @@ function saveQ(q){q.updatedAt=nowIso();return dbUpd('quotes',q,QUPD).catch(ignor
 async function callAdmin(body){const {data,error}=await sb.functions.invoke('crm-admin-users',{body});if(error){let msg=error.message;try{const j=await error.context.json();msg=j.error||msg}catch(_){}throw new Error(msg)}if(data&&data.error)throw new Error(data.error);return data}
 function credModal(name,email,pass,isNew){openModal(isNew?'Usuario creado':'Contraseña actualizada',`<p>${isNew?'Comparte estos datos con':'Nueva contraseña temporal de'} <b>${esc(name)}</b>. Al entrar puede cambiarla desde su menú de usuario.</p><dl class="kv"><dt>Dirección</dt><dd class="mono small">${esc(location.origin+location.pathname.replace(/crm\.html$/,''))}</dd><dt>Correo</dt><dd class="mono">${esc(email)}</dd><dt>Contraseña</dt><dd class="mono">${esc(pass)}</dd></dl>`,`<button class="btn pri" id="cpyCred">${ico('copy')}Copiar datos</button>`,'narrow');$('#cpyCred').onclick=()=>copyText(`Apps Grupo TX (elige CRM Comercial)\n${location.origin+location.pathname.replace(/crm\.html$/,'')}\nCorreo: ${email}\nContraseña: ${pass}`)}
 function passModal(force){openModal(force?'Crea tu contraseña':'Cambiar mi contraseña',`<form class="form" style="grid-template-columns:1fr" onsubmit="return false">${force?'<p class="small" style="margin:0">Tu cuenta se creó con una contraseña temporal. Elige una contraseña personal para continuar.</p>':''}<div class="fld"><label>Nueva contraseña</label><input type="password" id="np1" autocomplete="new-password"><span class="hint">Mínimo 8 caracteres.</span></div><div class="fld"><label>Repetir contraseña</label><input type="password" id="np2" autocomplete="new-password"></div></form>`,`${force?'':'<button class="btn" data-close>Cancelar</button>'}<button class="btn pri" id="npOk">Guardar</button>`,'narrow');if(force){const x=document.querySelector('.modal [data-close]');if(x)x.remove()}
- $('#npOk').onclick=async()=>{const a=$('#np1').value,b=$('#np2').value;if(a.length<8){toast('Usa al menos 8 caracteres.');return}if(a!==b){toast('Las contraseñas no coinciden.');return}const {error}=await sb.auth.updateUser({password:a,data:{must_change:false}});if(error){toast('No se pudo cambiar: '+error.message);return}closeModal();toast('Contraseña actualizada.')}}
+ $('#npOk').onclick=async()=>{const a=$('#np1').value,b=$('#np2').value;if(a.length<8){toast('Usa al menos 8 caracteres.');return}if(a!==b){toast('Las contraseñas no coinciden.');return}const {error}=await sb.auth.updateUser({password:a,data:{must_change:false}});if(error){toast(esRed(error)?MSG_REQUIERE_RED:'No se pudo cambiar: '+esc(error.message));return}closeModal();toast('Contraseña actualizada.')}}
 
 /* ============ auth + boot ============ */
 function showGate(html){$('#gate').innerHTML=html;$('#gate').hidden=false;$('.app').hidden=true;$('#bnav').hidden=true;$('#fab').hidden=true}
@@ -1446,9 +1477,10 @@ async function boot(){
  // se abre con el usuario guardado en el equipo (la fila renueva la sesión al volver la señal).
  const r=await Promise.race([sb.auth.getSession().catch(error=>({data:{session:null},error})),esperar(5000).then(()=>null)]);
  let user=(r&&r.data&&r.data.session&&r.data.session.user)||null;
- // sin sesión viva por falta de red: las consultas a la base también esperarían la renovación del token,
- // así que la primera carga va directo a la copia (se actualiza sola al renovarse la sesión o volver la señal)
- const soloCopia=!user;
+ // sin sesión viva por falta de red (error de red o equipo sin conexión): las consultas a la base también
+ // esperarían la renovación del token, así que la primera carga va directo a la copia (se actualiza sola al
+ // renovarse la sesión o volver la señal). Si solo se pasó el tope con red, la carga se intenta igual.
+ const soloCopia=!user&&((r&&r.error&&esRed(r.error))||navigator.onLine===false);
  if(!user&&(!r||(r.error&&esRed(r.error))))user=usuarioGuardado();
  if(!user){showLogin();return}
  S.me=user.id;
@@ -1501,7 +1533,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('.search'))$('#sres')
 });
 document.addEventListener('change',e=>{const t=e.target.dataset.taskDone;if(t){const k=S.tasks.find(x=>x.id===t);k.done=e.target.checked;dbUpd('tasks',k,['done']).catch(ignore);toast(k.done?'Actividad completada.':'Actividad reabierta.');setTimeout(rerender,250)}});
 $('#userBtn').addEventListener('click',()=>{const m=$('#umenu');if(!m.hidden){m.hidden=true;return}m.innerHTML=`<div class="hd"><b>${esc(me().name)}</b><div class="muted small">${esc(me().email)} · ${ROLES[me().role]}</div></div><button data-um="pass">${ico('edit')}Cambiar mi contraseña</button><button data-um="reload">${ico('hist')}Actualizar datos</button><button data-um="portal">${ico('home')}Ir al portal de apps</button><button data-um="out">${ico('x')}Cerrar sesión</button>`;m.hidden=false});
-$('#umenu').addEventListener('click',async e=>{const b=e.target.closest('[data-um]');if(!b)return;$('#umenu').hidden=true;const a=b.dataset.um;if(a==='pass')passModal();if(a==='reload'){const r=await reloadData();toast(r&&!r.desdeCache?'Datos actualizados.':'Sin conexión: se mantienen los datos guardados en este equipo.')}if(a==='portal')location.href='./';if(a==='out')cerrarSesion()});
+$('#umenu').addEventListener('click',async e=>{const b=e.target.closest('[data-um]');if(!b)return;$('#umenu').hidden=true;const a=b.dataset.um;if(a==='pass')passModal();if(a==='reload'){const r=await reloadData();toast(r&&!r.desdeCache?'Datos actualizados.':r&&r.tardia?'La carga está tardando: se muestran los datos guardados mientras termina.':'Sin conexión: se mantienen los datos guardados en este equipo.')}if(a==='portal')location.href='./';if(a==='out')cerrarSesion()});
 document.addEventListener('click',e=>{if(!e.target.closest('#umenu')&&!e.target.closest('#userBtn'))$('#umenu').hidden=true});
 $('#bellBtn').addEventListener('click',()=>{const n=$('#notif');if(!n.hidden){n.hidden=true;return}const al=alertsFor();n.innerHTML=`<h3>Alertas (${al.length})</h3>`+(al.map(a=>`<div class="it" data-ngo="${a.go}"><div class="ic ${a.k==='q'?'q':a.k==='t'?'t':'l'}">${ico(a.k==='q'?'doc':a.k==='t'?'clock':'alert')}</div><div><b class="small">${esc(a.text)}</b><div class="small muted">${esc(a.sub)}</div></div></div>`).join('')||'<div class="empty">Sin alertas.</div>');n.hidden=false});
 $('#notif').addEventListener('click',e=>{const i=e.target.closest('[data-ngo]');if(i){location.hash=i.dataset.ngo;$('#notif').hidden=true}});

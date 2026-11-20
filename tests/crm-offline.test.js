@@ -227,3 +227,19 @@ test('firmaFila: cambia con el estado, igual si no cambia nada', () => {
   assert.equal(C.firmaFila(undefined), '');
   assert.notEqual(C.firmaFila(a), C.firmaFila([a[0], { ...a[1], estado: 'pendiente' }]));
 });
+
+test('textoCopia modo cargando: no dice "Sin conexión"', () => {
+  const g = new Date(2026, 10, 20, 9, 5);
+  const t = C.textoCopia(g.toISOString(), new Date(2026, 10, 20, 18, 0), 'cargando');
+  assert.equal(t, 'Datos de las 09:05 · cargando datos actualizados…');
+  assert.equal(C.textoCopia(new Date(2026, 10, 18, 7, 0).toISOString(), new Date(2026, 10, 20), 'cargando'), 'Datos de las 07:00 del 18 nov · cargando datos actualizados…');
+  assert.equal(C.textoCopia('x', new Date(), 'cargando'), 'Datos guardados · cargando datos actualizados…');
+});
+
+test('filaRedundante: solo sin pendientes ni problemas y con aviso sin red', () => {
+  assert.equal(C.filaRedundante(true, { pendientes: 0, problemas: 0 }), true);
+  assert.equal(C.filaRedundante(true, null), true);
+  assert.equal(C.filaRedundante(true, { pendientes: 2, problemas: 0 }), false);
+  assert.equal(C.filaRedundante(true, { pendientes: 0, problemas: 1 }), false);
+  assert.equal(C.filaRedundante(false, { pendientes: 0, problemas: 0 }), false);
+});
