@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Prueba manual TXOffline</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="../offline-core.js"></script>
+<script src="../offline.js"></script>
+</head>
+<body style="font-family:sans-serif">
+<h3>Prueba manual TXOffline</h3>
+<div id="ind" style="font-weight:bold"></div>
+<pre id="lista"></pre>
+<script>
+  // ?sinred simula falta de red desde el arranque (fetch lanza TypeError).
+  if (/sinred/.test(location.search)) { window.__fetch = window.fetch; window.fetch = () => { throw new TypeError('Failed to fetch'); }; }
+  // Cliente falso de sesión: esta página no usa Supabase real.
+  const sb = { auth: {
+    getSession: async () => ({ data: { session: { expires_at: Math.floor(Date.now() / 1000) + 3600 } }, error: null }),
+    refreshSession: async () => ({ data: { session: {} }, error: null }),
+  } };
+  async function pintarLista() { document.getElementById('lista').textContent = JSON.stringify(await TXOffline.entradas(), null, 2); }
+  window.addEventListener('txoffline:cambio', pintarLista);
+  TXOffline.registrarTipo('eco', async () => { await fetch(location.href); });
+  TXOffline.montarIndicador(document.getElementById('ind'));
+  TXOffline.iniciar({ app: 'prueba', sb, usuarioId: 'prueba' }).then(pintarLista);
+</script>
+</body>
+</html>
