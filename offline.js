@@ -12,7 +12,7 @@
 
   let db = null, nombreDb = null, sb = null;
   let temporizador = null, escuchas = null;
-  let enCurso = null, repetir = false;
+  let enCurso = null, repetir = false, persistPedido = false;
   const handlers = {};
 
   // ---------- IndexedDB (envoltorio mínimo) ----------
@@ -175,6 +175,8 @@
     sb = cliente;
     nombreDb = 'tx-offline-' + app + '-' + usuarioId;
     db = await abrir(nombreDb);
+    // pide almacenamiento persistente: sin esto Android puede borrar la fila con poco espacio
+    if (!persistPedido) try { persistPedido = true; const p = g.navigator && g.navigator.storage && g.navigator.storage.persist && g.navigator.storage.persist(); if (p && p.catch) p.catch(() => {}); } catch (_) { /* sin soporte */ }
     const disparar = () => { sincronizar(); };
     if (escuchas) g.removeEventListener('online', escuchas);
     escuchas = disparar;
