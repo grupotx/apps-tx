@@ -153,3 +153,34 @@ test('aplicarFilaRutas: no retrocede una ruta ya en_ruta; con problema deja esta
   assert.equal(r[0].estado, 'asignada');
   assert.deepEqual(r[0].fila, { estado: 'problema', error: 'Ruta no asignada a este chofer', ids: ['A'] });
 });
+
+// ---------- fix ronda 2 ----------
+test('aplicarFilaRutas: tras una acción con problema no se aplican las pendientes siguientes de esa ruta', () => {
+  const r = E.aplicarFilaRutas([{ id: 'r1', estado: 'asignada' }, { id: 'r2', estado: 'asignada' }], [
+    entR('A', 'r1', 'aceptar', 'problema', 1, 'Ruta no asignada a este chofer'),
+    entR('B', 'r1', 'salir', 'pendiente', 2),
+    entR('C', 'r2', 'aceptar', 'pendiente', 3),
+    entR('D', 'r2', 'salir', 'problema', 4, 'x'),
+  ]);
+  assert.equal(r[0].estado, 'asignada');            // salir pendiente ignorado: no desbloquea guías
+  assert.equal(r[0].fila.estado, 'problema');
+  assert.deepEqual(r[0].fila.ids, ['A']);
+  assert.equal(r[1].estado, 'aceptada');            // la pendiente anterior al problema sí se aplica
+  assert.equal(r[1].fila.estado, 'problema');
+});
+
+test('jornadasConProblema: solo jornadas con problema, con patente y motivo, en orden', () => {
+  const ej = (id, estado, seg, patente, error = null) => ({ id, tipo: 'ent.jornada', estado, error, datos: { patente },
+    creada: new Date(Date.UTC(2026, 10, 19, 10, 0, seg)).toISOString() });
+  const lista = [
+    ej('J2', 'problema', 2, 'RUTA77'),
+    ej('J1', 'problema', 1, 'ABCD12', 'new row violates row-level security policy'),
+    ej('J3', 'pendiente', 3, 'ZZZZ99'),
+    entR('A', 'r1', 'aceptar', 'problema', 4, 'x'),
+  ];
+  assert.deepEqual(E.jornadasConProblema(lista), [
+    { id: 'J1', patente: 'ABCD12', error: 'new row violates row-level security policy' },
+    { id: 'J2', patente: 'RUTA77', error: 'No se pudo enviar' },
+  ]);
+  assert.deepEqual(E.jornadasConProblema([]), []);
+});

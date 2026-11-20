@@ -109,8 +109,10 @@
       if (!es) return r0;
       const r1 = Object.assign({}, r0);
       const problemas = es.filter(e => e.estado === 'problema');
+      let trasProblema = false;   // tras una acción con problema, las siguientes de esa ruta no se aplican (el servidor las rechazará)
       for (const e of es) {
-        if (e.estado !== 'pendiente') continue;
+        if (e.estado === 'problema') { trasProblema = true; continue; }
+        if (e.estado !== 'pendiente' || trasProblema) continue;
         if (e.datos.accion === 'aceptar' && r1.estado === 'asignada') r1.estado = 'aceptada';
         if (e.datos.accion === 'salir' && (r1.estado === 'asignada' || r1.estado === 'aceptada')) r1.estado = 'en_ruta';
       }
@@ -121,8 +123,14 @@
     });
   }
 
+  // Jornadas de la fila que quedaron con problema (para mostrarlas con Reintentar / Descartar), en orden de creación.
+  function jornadasConProblema(entradas) {
+    return (entradas || []).filter(e => e.tipo === T_JORNADA && e.estado === 'problema').sort(porCreada)
+      .map(e => ({ id: e.id, patente: (e.datos && e.datos.patente) || '', error: e.error || 'No se pudo enviar' }));
+  }
+
   const api = { T_LLEGADA, T_CIERRE, T_JORNADA, T_RUTA, argsLlegada, argsCierre, rutasCierre, llegadaEnFila, aplicarFila,
-    patenteParaLlegada, filaJornada, argsRuta, rutaYaHecha, aplicarFilaRutas };
+    patenteParaLlegada, filaJornada, argsRuta, rutaYaHecha, aplicarFilaRutas, jornadasConProblema };
   g.EntregasOffline = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

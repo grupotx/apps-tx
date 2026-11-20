@@ -697,7 +697,12 @@ async function vistaRuta(el) {
   const hechas = data.filter(g => !['asignada', 'en_destino'].includes(g.estado));
   const tot = data.length || 1;
   const n = (e) => data.filter(g => g.estado === e).length;
-  el.innerHTML = avisoCache(rRutas, rGuias) + cargasHtml + `
+  // inicios de jornada que el servidor rechazó: se muestran para reintentar o descartar
+  const jornadasHtml = EO.jornadasConProblema(fila).map(j => `<div class="card gcard" data-jfila="${esc(j.id)}" style="margin-bottom:14px">
+    <div class="top"><div><span class="eyebrow">Inicio de jornada · Patente</span><div class="folio">${esc(j.patente)}</div></div></div>
+    <div><span class="chip bad" style="white-space:normal">No se pudo enviar: ${esc(j.error)}</span></div>
+    <div class="act"><button class="btn sm" data-jacc="reintentar">${I.refresh}Reintentar</button><button class="btn sm danger" data-jacc="descartar">${I.x}Descartar</button></div></div>`).join('');
+  el.innerHTML = avisoCache(rRutas, rGuias) + jornadasHtml + cargasHtml + `
     <div class="hero" style="grid-template-columns:minmax(0,1fr)">
       <div>
         <span class="eyebrow" style="color:color-mix(in srgb,var(--bg) 70%,transparent)">${esc(S.perfil.nombre)} · ${fechaLarga(hoy())}</span>
@@ -734,6 +739,10 @@ async function vistaRuta(el) {
   $$('[data-rfila]', el).forEach(b => b.onclick = () => {
     const r = S.rutasChofer.find(x => x.id === b.closest('[data-ruta]').dataset.ruta);
     accionFila(b, r?.fila?.ids || [], b.dataset.rfila, '¿Descartar la acción de la carga sin enviar? Se borrará del teléfono y no se enviará.');
+  });
+  $$('[data-jacc]', el).forEach(b => b.onclick = () => {
+    const c = b.closest('[data-jfila]');
+    accionFila(b, [c.dataset.jfila], b.dataset.jacc, `¿Descartar el inicio de jornada con patente ${c.querySelector('.folio').textContent} sin enviar? Se borrará del teléfono y no se enviará.`);
   });
   $$('[data-racc]', el).forEach(b => b.onclick = async () => {
     const r = S.rutasChofer.find(x => x.id === b.closest('[data-ruta]').dataset.ruta), acc = b.dataset.racc;
