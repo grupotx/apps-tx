@@ -108,7 +108,16 @@ begin
   end;
   if not ok then raise exception 'se aceptó un nombre repetido sin RUT'; end if;
   -- mismo nombre pero con RUT distinto: es otra persona
-  if public.rt_asistencia_agregar(tok, 'Luis Soto', '9.876.543-2', '', '', '', '') is not true then raise exception 'homónimo con otro RUT rechazado'; end if;
+  -- campos opcionales demasiado largos: se recortan, no se rechazan (el cliente no los valida)
+  if public.rt_asistencia_agregar(tok, 'Luis Soto', '9.876.543-2' || repeat('x', 30), repeat('c', 200), repeat('e', 200), repeat('9', 50), '') is not true then
+    raise exception 'homónimo con otro RUT (y campos largos) rechazado';
+  end if;
+  reset role;
+  select * into fila from public.rt_asistencias where registro_id = reg and cargo like 'cccc%';
+  if length(fila.rut) <> 20 or length(fila.cargo) <> 120 or length(fila.email) <> 120 or length(fila.fono) <> 30 then
+    raise exception 'campos opcionales no recortados: rut %, cargo %, email %, fono %', length(fila.rut), length(fila.cargo), length(fila.email), length(fila.fono);
+  end if;
+  set local role anon;
 
   -- ===== Entradas inválidas: todas con el mensaje genérico =====
   foreach v in array array['', '   ', repeat('x', 121)] loop
@@ -311,7 +320,9 @@ begin
   insert into public.rt_asistencias (registro_id, nombre, origen) values (reg, 'Manual admin', 'manual');
   reset role;
   select count(*) into n from public.rt_asistencias where registro_id = reg;
-  if n <> 81 then raise exception 'conteo final de participantes: %', n; end if;
+  -- A propósito: el tope de 80 es solo del formulario público del QR; el alta manual del PM lo supera
+  -- (79 tras borrar uno + 2 manuales = 81) para no bloquear capacitaciones de más de 80 personas.
+  if n <> 81 then raise exception 'el alta manual del PM debe poder superar el tope de 80 del QR (hay %)', n; end if;
 
   -- borrar el registro borra en cascada sus participantes
   delete from public.registros where id = reg;
