@@ -7,6 +7,7 @@
 <title>Grupo TX · Registro de Terreno</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="foto-archivada.js"></script>
+<script src="terreno-core.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:#fde7eb;--red:var(--brand);--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;--line:#dfdfdb;--gray:#8d939a;--ok:#18864a;--ok-soft:#ddf2e5;--warn:#b86e00;--warn-soft:#fbeed6;
@@ -57,11 +58,28 @@ textarea{min-height:84px;resize:vertical}
 .checks{display:flex;flex-direction:column;gap:8px;margin-top:4px}
 .check{display:flex;gap:10px;align-items:flex-start;color:var(--ink);font-size:14px;margin:0;text-transform:none;letter-spacing:0;font-weight:500}
 .check input{width:auto;margin-top:4px;accent-color:var(--brand)}
-.part{display:grid;grid-template-columns:1fr 1.6fr 1fr auto auto;gap:6px;align-items:center;margin-bottom:6px}
-.part .pf{margin:0;display:flex;align-items:center;gap:4px;color:var(--ink);font-size:13px;white-space:nowrap;text-transform:none;letter-spacing:0;font-weight:500}
-.part .pf input{width:auto;accent-color:var(--brand)}
+.part{display:grid;grid-template-columns:1fr 1.6fr 1fr;gap:6px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.part:last-child{border-bottom:0}
+.part .pi-fila2{grid-column:1/-1;display:grid;grid-template-columns:1.4fr 1fr auto auto;gap:6px;align-items:center}
 .part .x{background:transparent;border:1px solid var(--line);border-radius:10px;color:var(--mute);padding:9px 11px;cursor:pointer}
-@media (max-width:560px){.part{grid-template-columns:1fr 1fr}.part .pi-nombre{grid-column:1/-1}}
+.part .pi-firma-box{display:flex;align-items:center;gap:6px}
+.part .btn.firmar{padding:8px 12px;font-size:13px}
+.firma-mini{height:34px;max-width:96px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:8px;padding:2px}
+.firmo-ok{font-size:12.5px;font-weight:600;color:var(--ok)}
+@media (max-width:560px){.part{grid-template-columns:1fr 1fr}.part .pi-nombre{grid-column:1/-1}.part .pi-fila2{grid-template-columns:1fr 1fr auto}.part .pi-email{grid-column:1/-1}.part .pi-fono{grid-column:1/-1}.part .pi-firma-box{grid-column:1/3;grid-row:3}.part .x{grid-column:3;grid-row:3}}
+.kind-sel{margin:0 0 4px}
+.kind-sel .chip{font-size:14px;padding:9px 16px;margin:0;text-transform:none;letter-spacing:0;font-weight:600}
+/* Ventana de firma manuscrita (reutilizable: abrirFirma) */
+html.firma-abierta,html.firma-abierta body{overflow:hidden;overscroll-behavior:none}
+.firma-ov{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.firma-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(680px,100%);max-height:100%;box-shadow:0 24px 60px -20px rgba(0,0,0,.6)}
+.firma-dlg h2{margin:0 0 4px;font-size:17px}
+.firma-dlg p{margin:0 0 10px;font-size:12.5px}
+.firma-lienzo{position:relative;width:min(100%,calc((100vh - 190px) * 2));width:min(100%,calc((100dvh - 190px) * 2));min-width:200px;aspect-ratio:2/1;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.firma-lienzo::after{content:"";position:absolute;left:6%;right:6%;top:72%;border-top:1px dashed #b9bcc2;pointer-events:none}
+.firma-lienzo img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.22;pointer-events:none}
+.firma-lienzo canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.firma-dlg .acciones{margin-top:12px;justify-content:flex-end}
 .ac{position:relative}
 .sug{position:absolute;left:0;right:0;top:100%;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;max-height:280px;overflow:auto;box-shadow:0 18px 40px -16px rgba(0,0,0,.45)}
 .sug button{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--ink);padding:10px 12px;cursor:pointer;font-weight:600}
@@ -127,8 +145,7 @@ details.mas p{margin:6px 0}
   </div>
   <nav id="nav" hidden>
     <button data-a="nav" data-v="panel">Panel</button>
-    <button data-a="nav" data-v="charla">Charla técnica</button>
-    <button data-a="nav" data-v="capacitacion">Capacitación</button>
+    <button data-a="nav" data-v="charla" data-vistas="charla capacitacion">Charla / Capacitación</button>
     <button data-a="nav" data-v="visita">Visita por reclamo</button>
     <button data-a="nav" data-v="registros">Registros</button>
     <button data-a="nav" data-v="accesos" id="nav-accesos" hidden>Accesos</button>
@@ -149,8 +166,7 @@ const TEMAS = [
   'Preparación de la mezcla, dosificación de componentes, mezclado y tiempo de aplicación',
   'Aplicación del producto, formas de aplicación',
   'Cuidados en la aplicación y posterior puesta en marcha del producto',
-  'Riesgos y medidas de seguridad en la aplicación',
-  'Revisión del procedimiento de aplicación para adhesivos cementosos'
+  'Riesgos y medidas de seguridad en la aplicación'
 ];
 const TIPOS_CAP = ['Curso','Taller','Capacitación','Instrucción','Auditoría','Inspección','Charla de seguridad','Otros'];
 const PRODUCTOS = ['Autonivelante PrimerPro','Autonivelante','Adhesivo cementoso','Mortero','Otro'];
@@ -255,14 +271,149 @@ async function cargar(){
 const nombreAutor = r => r.autor_nombre || 'PM';
 
 /* ===================== Formularios ===================== */
+/* ===================== Firma manuscrita ===================== */
+const FIRMA_ANCHO_PNG = 400;   // ancho del PNG guardado (recortado al trazo)
+const esPngFirma = f => typeof f === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(f);
+
+/* Abre una ventana para firmar con el dedo, lápiz o mouse (eventos pointer).
+   Devuelve una promesa: el PNG en base64 (data URL) al aplicar, '' si se aplicó dejando la firma en blanco,
+   o null al cancelar. `firma` (opcional) es la firma actual: se muestra tenue como guía.
+   Los trazos se guardan como puntos normalizados (unidad = ancho del lienzo) y se redibujan al girar o
+   cambiar de tamaño la pantalla; el PNG sale de TC.trazoAPng. */
+function abrirFirma({ titulo = 'Firma', firma = '' } = {}){
+  return new Promise(resolve => {
+    const previo = document.activeElement;
+    const trazos = [];
+    let actual = null, pid = null, limpiada = false;
+    const ov = document.createElement('div');
+    ov.className = 'firma-ov';
+    ov.innerHTML = `<div class="firma-dlg" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
+      <h2>${esc(titulo)}</h2>
+      <p class="mute">Firma con el dedo o el lápiz dentro del recuadro.</p>
+      <div class="firma-lienzo">${esPngFirma(firma) ? `<img alt="" src="${esc(firma)}">` : ''}<canvas></canvas></div>
+      <div class="acciones">
+        <button type="button" class="btn ghost" data-f="limpiar">Limpiar</button>
+        <button type="button" class="btn ghost" data-f="cancelar">Cancelar</button>
+        <button type="button" class="btn" data-f="aplicar" disabled>Aplicar</button>
+      </div></div>`;
+    document.documentElement.classList.add('firma-abierta');
+    document.body.appendChild(ov);
+    const caja = ov.querySelector('.firma-lienzo'), cv = ov.querySelector('canvas'), ctx = cv.getContext('2d');
+    const bAplicar = ov.querySelector('[data-f="aplicar"]');
+    const refresca = () => { bAplicar.disabled = !(trazos.length || (limpiada && esPngFirma(firma))); };
+
+    const grosor = () => Math.max(2, cv.width / 150);
+    const px = p => [p.x * cv.width, p.y * cv.width];
+    function estilo(){ ctx.lineWidth = grosor(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; }
+    function redibuja(){
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      estilo();
+      for (const t of trazos) {
+        if (!t.length) continue;
+        ctx.beginPath();
+        ctx.moveTo(...px(t[0]));
+        if (t.length === 1) ctx.lineTo(px(t[0])[0] + 0.01, px(t[0])[1]);
+        for (let i = 1; i < t.length; i++) ctx.lineTo(...px(t[i]));
+        ctx.stroke();
+      }
+    }
+    function ajusta(){
+      const r = caja.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.round(r.width * k)), h = Math.max(1, Math.round(r.height * k));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      redibuja();
+    }
+    const punto = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.width }; };
+    function segmento(t, desde){
+      estilo(); ctx.beginPath();
+      ctx.moveTo(...px(t[desde - 1] || t[desde]));
+      for (let i = desde; i < t.length; i++) ctx.lineTo(...px(t[i]));
+      if (t.length === 1) ctx.lineTo(px(t[0])[0] + 0.01, px(t[0])[1]);
+      ctx.stroke();
+    }
+
+    cv.addEventListener('pointerdown', e => {
+      if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      e.preventDefault();
+      try { cv.setPointerCapture(e.pointerId); } catch(_){}
+      pid = e.pointerId; actual = [punto(e)]; trazos.push(actual);
+      segmento(actual, 0); refresca();
+    });
+    cv.addEventListener('pointermove', e => {
+      if (!actual || e.pointerId !== pid) return;
+      e.preventDefault();
+      const desde = actual.length;
+      const lote = e.getCoalescedEvents ? e.getCoalescedEvents() : [];   // a veces viene vacío
+      for (const ev of lote.length ? lote : [e]) actual.push(punto(ev));
+      segmento(actual, desde);
+    });
+    const fin = e => { if (actual && e.pointerId === pid) { actual = null; pid = null; } };
+    cv.addEventListener('pointerup', fin);
+    cv.addEventListener('pointercancel', fin);
+    // El navegador no debe arrastrar, seleccionar ni desplazar la página mientras se firma.
+    ov.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    ov.addEventListener('contextmenu', e => e.preventDefault());
+    ov.addEventListener('dragstart', e => e.preventDefault());
+
+    const ro = window.ResizeObserver ? new ResizeObserver(ajusta) : null;
+    const alGirar = () => setTimeout(ajusta, 150);
+    if (ro) ro.observe(caja);
+    window.addEventListener('resize', ajusta);
+    window.addEventListener('orientationchange', alGirar);
+
+    function cerrar(valor){
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', ajusta);
+      window.removeEventListener('orientationchange', alGirar);
+      document.removeEventListener('keydown', tecla, true);
+      ov.remove();
+      document.documentElement.classList.remove('firma-abierta');
+      if (previo && previo.focus) try { previo.focus(); } catch(_){}
+      resolve(valor);
+    }
+    function tecla(e){ if (e.key === 'Escape') { e.stopPropagation(); cerrar(null); } }
+    document.addEventListener('keydown', tecla, true);
+    ov.addEventListener('click', e => {
+      const f = e.target.closest('[data-f]'); if (!f) return;
+      if (f.dataset.f === 'limpiar') { trazos.length = 0; actual = null; limpiada = true; const im = caja.querySelector('img'); if (im) im.remove(); redibuja(); refresca(); }
+      else if (f.dataset.f === 'cancelar') cerrar(null);
+      else if (f.dataset.f === 'aplicar' && !f.disabled) cerrar(trazos.length ? TC.trazoAPng(trazos, FIRMA_ANCHO_PNG) : '');
+    });
+    ajusta();
+    ov.querySelector('[data-f="cancelar"]').focus();
+  });
+}
+
+/* ===================== Participantes ===================== */
+// `p` viene de TC.participantesVista: { rut, nombre, cargo, email, fono, firma (PNG o ''), firmo }
+function firmaHtml(p){
+  if (esPngFirma(p.firma)) return `<img class="firma-mini" alt="Firma" src="${esc(p.firma)}">`;
+  return p.firmo ? '<span class="firmo-ok">Firmó</span>' : '';   // registro viejo: firmó sin imagen
+}
 function filaPart(p = {}){
-  return `<div class="part">
+  const firmada = esPngFirma(p.firma);
+  return `<div class="part" data-firmo="${p.firmo ? 1 : ''}">
     <input class="pi-rut" placeholder="RUT" value="${esc(p.rut)}">
     <input class="pi-nombre" placeholder="Nombre" value="${esc(p.nombre)}">
     <input class="pi-cargo" placeholder="Cargo" value="${esc(p.cargo)}">
-    <label class="pf"><input type="checkbox" class="pi-firma" ${p.firma ? 'checked' : ''}> Firmó</label>
-    <button type="button" class="x" data-a="delPart" title="Quitar">✕</button>
+    <div class="pi-fila2">
+      <input class="pi-email" type="email" inputmode="email" placeholder="Correo" value="${esc(p.email)}">
+      <input class="pi-fono" type="tel" inputmode="tel" placeholder="Teléfono" value="${esc(p.fono)}">
+      <span class="pi-firma-box"><input type="hidden" class="pi-firma" value="${firmada ? esc(p.firma) : ''}"><span class="pi-firma-vista">${firmaHtml(p)}</span><button type="button" class="btn ghost firmar" data-a="firmar">${firmada ? 'Cambiar' : 'Firmar'}</button></span>
+      <button type="button" class="x" data-a="delPart" title="Quitar">✕</button>
+    </div>
   </div>`;
+}
+function ponerFirma(row, png){
+  row.querySelector('.pi-firma').value = png;
+  row.dataset.firmo = png ? '1' : '';
+  row.querySelector('.pi-firma-vista').innerHTML = firmaHtml({ firma: png, firmo: !!png });
+  row.querySelector('.firmar').textContent = png ? 'Cambiar' : 'Firmar';
+}
+async function firmarFila(b){
+  const row = b.closest('.part'), nombre = row.querySelector('.pi-nombre').value.trim();
+  const png = await abrirFirma({ titulo: nombre ? `Firma de ${nombre}` : 'Firma del participante', firma: row.querySelector('.pi-firma').value });
+  if (png !== null) ponerFirma(row, png);
 }
 
 function campoCliente(){
@@ -281,14 +432,20 @@ function campoCliente(){
 }
 const campoObra = () => `<label>Obra</label><input name="obra" list="obras-dl" autocomplete="off"><datalist id="obras-dl"></datalist>`;
 
+const PLACEHOLDER_ACT = { charla: 'Ej: Charla técnica aplicación de autonivelante', capacitacion: 'Ej: Capacitación aplicación de autonivelante' };
+
 function formActividad(kind){
   const esCap = kind === 'capacitacion';
   return `<div id="form" class="card" data-kind="${kind}">
-    <h2>${KIND_LABEL[kind]}</h2>
+    <h2 id="act-titulo">${KIND_LABEL[kind]}</h2>
+    <div class="chips kind-sel" role="radiogroup" aria-label="Tipo de registro">
+      <label class="chip"><input type="radio" name="kind_sel" value="charla" ${esCap ? '' : 'checked'}> Charla técnica</label>
+      <label class="chip"><input type="radio" name="kind_sel" value="capacitacion" ${esCap ? 'checked' : ''}> Capacitación</label>
+    </div>
     <label>Nombre de la actividad</label>
-    <input name="nombre" placeholder="${esCap ? 'Ej: Capacitación aplicación de autonivelante' : 'Ej: Charla técnica adhesivos cementosos'}">
-    ${esCap ? `<label>Tipo de actividad</label>
-    <select name="tipo_act">${TIPOS_CAP.map(t => `<option>${esc(t)}</option>`).join('')}</select>` : ''}
+    <input name="nombre" placeholder="${PLACEHOLDER_ACT[kind]}">
+    <div id="tipo-act" ${esCap ? '' : 'hidden'}><label>Tipo de actividad</label>
+    <select name="tipo_act">${TIPOS_CAP.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
     ${campoCliente()}
     <div class="row">
       <div>${campoObra()}</div>
@@ -308,7 +465,7 @@ function formActividad(kind){
     <label>Observaciones</label>
     <textarea name="observaciones"></textarea>
     <div class="acciones">
-      <button type="button" class="btn" data-a="guardar" data-t="${kind}">Guardar</button>
+      <button type="button" class="btn" data-a="guardar" data-t="actividad">Guardar</button>
       <button type="button" class="btn ghost" data-a="nav" data-v="panel">Cancelar</button>
     </div>
   </div>`;
@@ -397,6 +554,7 @@ function leerCampos(){
   document.querySelectorAll('#form [name]').forEach(el => {
     const n = el.name;
     if (el.type === 'checkbox') { d[n] = d[n] || []; if (el.checked) d[n].push(el.value); }
+    else if (el.type === 'radio') { if (el.checked) d[n] = el.value; }
     else if (el.type === 'file') d[n] = [...el.files];
     else d[n] = el.value.trim();
   });
@@ -408,7 +566,10 @@ function leerParticipantes(){
     rut: row.querySelector('.pi-rut').value.trim(),
     nombre: row.querySelector('.pi-nombre').value.trim(),
     cargo: row.querySelector('.pi-cargo').value.trim(),
-    firma: row.querySelector('.pi-firma').checked
+    email: row.querySelector('.pi-email').value.trim(),
+    fono: row.querySelector('.pi-fono').value.trim(),
+    firma: row.querySelector('.pi-firma').value,
+    firmo: !!row.dataset.firmo
   })).filter(p => p.rut || p.nombre);
 }
 
@@ -431,6 +592,7 @@ function comprimir(file){
 
 async function guardar(kind, btn){
   const d = leerCampos();
+  if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
   if (!d.fecha) return toast('Falta la fecha');
   if (!d.cliente) return toast('Indica el cliente');
   if (kind === 'visita') { if (!d.motivo) return toast('Describe el motivo del reclamo'); }
@@ -634,13 +796,13 @@ function tarjeta(r){
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
-  const parts = r.participantes || [];
+  const parts = TC.participantesVista(null, r.participantes);
   return `<div class="card">${del}
     <span class="tag">${esc(r.kind === 'charla' ? 'Charla técnica' : r.tipo_act || 'Capacitación')}</span><b>${esc(r.nombre || 'Sin nombre')}</b>${autor}
     <p class="mute">${esc(r.cliente)} · ${esc(r.obra || '')} · ${fmtFecha(r.fecha)}</p>
     <p>${parts.length} participantes · ${esc(r.duracion)} min · ${esc(r.relator || '—')}</p>
     ${r.observaciones ? `<p class="mute">${esc(r.observaciones)}</p>` : ''}
-    ${parts.length ? `<details class="mas"><summary>Ver participantes</summary>${parts.map(p => `<p>${esc(p.nombre)} <span class="mute">${esc([p.rut, p.cargo].filter(Boolean).join(' · '))}${p.firma ? ' · firmó' : ''}</span></p>`).join('')}</details>` : ''}
+    ${parts.length ? `<details class="mas"><summary>Ver participantes</summary>${parts.map(p => `<p>${esc(p.nombre)} <span class="mute">${esc([p.rut, p.cargo, p.email, p.fono].filter(Boolean).join(' · '))}${esPngFirma(p.firma) ? '' : p.firmo ? ' · firmó' : ''}</span>${esPngFirma(p.firma) ? ` <img class="firma-mini" alt="Firma de ${esc(p.nombre)}" src="${esc(p.firma)}">` : ''}</p>`).join('')}</details>` : ''}
   </div>`;
 }
 
@@ -690,6 +852,7 @@ const acciones = {
   nav: b => { vista = b.dataset.v; cliSel = null; cliNuevo = false; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
   addPart: () => $('#partics').insertAdjacentHTML('beforeend', filaPart()),
   delPart: b => b.closest('.part').remove(),
+  firmar: b => firmarFila(b),
   guardar: b => guardar(b.dataset.t, b),
   filtro: b => { filtro = b.dataset.f; render(); },
   estado: b => cambiarEstado(b.dataset.id, b.dataset.e),
@@ -717,6 +880,15 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.matches('[name="kind_sel"]')) {   // charla técnica | capacitación: una sola actividad con una elección
+    const k = t.value, f = $('#form');
+    vista = k; f.dataset.kind = k;
+    $('#act-titulo').textContent = KIND_LABEL[k];
+    $('#tipo-act').hidden = k !== 'capacitacion';
+    f.querySelector('[name="nombre"]').placeholder = PLACEHOLDER_ACT[k];
+    const vt = $('#view-title'); if (vt) vt.textContent = TITULOS[k];
+    return;
+  }
   if (t.matches('[data-acc]')) {
     t.disabled = true;
     const { error } = await sb.rpc('rt_set_acceso', { p_id: t.dataset.acc, p_activo: t.checked });
@@ -738,7 +910,7 @@ sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); })
 
 /* ===================== Render ===================== */
 function render(){
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === vista));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)));
   const vistas = {
     panel: vistaPanel,
     charla: () => formActividad('charla'),

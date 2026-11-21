@@ -100,3 +100,54 @@ test('validarAsistencia: enlace, firma pesada, nombre largo y duplicado por nomb
   assert.equal(TC.validarAsistencia({ nombre: 'Ana', firma: 'A'.repeat(60 * 1024) }, est).ok, true);
   assert.equal(TC.validarAsistencia({ nombre: ' ANA  Pérez ' }, est).motivo, 'duplicado');
 });
+
+// Lienzo falso: registra el tamaño y los trazos dibujados, y devuelve un PNG simulado.
+function lienzoFalso() {
+  const reg = { lienzos: [] };
+  TC._canvas = (w, h) => {
+    const c = { width: w, height: h, lineas: [], puntos: 0 };
+    c.getContext = () => ({
+      fillRect() {}, beginPath() {}, stroke() {}, arc() { c.puntos++; },
+      moveTo() { c.puntos++; }, lineTo(x, y) { c.lineas.push([x, y]); },
+      set lineWidth(v) { c.grosor = v; }, set strokeStyle(v) {}, set fillStyle(v) {}, set lineCap(v) {}, set lineJoin(v) {},
+    });
+    c.toDataURL = (tipo) => { c.tipo = tipo; return 'data:image/png;base64,' + 'A'.repeat(200); };
+    reg.lienzos.push(c);
+    return c;
+  };
+  return reg;
+}
+
+test('trazoAPng: el trazo sobrevive a un cambio de tamaño del lienzo', () => {
+  const reg = lienzoFalso();
+  const trazos = [[{ x: 10, y: 10 }, { x: 90, y: 50 }]];
+  const a = TC.trazoAPng(trazos, 600);
+  const b = TC.trazoAPng(trazos, 300);
+  assert.ok(a.startsWith('data:image/png;base64,'));
+  assert.ok(b.length > 100);
+  // Recorta al contenido y el tamaño de salida sigue al ancho pedido.
+  const [ca, cb] = reg.lienzos;
+  assert.equal(ca.tipo, 'image/png');
+  assert.ok(ca.width > cb.width && cb.width <= 300 && ca.width <= 600);
+  // Todo el trazo cae dentro del lienzo recortado, en ambos tamaños.
+  for (const c of [ca, cb]) for (const [x, y] of c.lineas) assert.ok(x >= 0 && x <= c.width && y >= 0 && y <= c.height);
+});
+
+test('trazoAPng: sin trazos devuelve vacío y un punto suelto también deja marca', () => {
+  const reg = lienzoFalso();
+  assert.equal(TC.trazoAPng([], 400), '');
+  assert.equal(TC.trazoAPng([[]], 400), '');
+  assert.equal(reg.lienzos.length, 0);
+  assert.ok(TC.trazoAPng([[{ x: 5, y: 5 }]], 400).startsWith('data:image/png'));
+  assert.ok(reg.lienzos[0].puntos > 0);
+});
+
+test('trazoAPng: el tamaño de salida no depende de las unidades de los puntos', () => {
+  const reg = lienzoFalso();
+  TC.trazoAPng([[{ x: 0.2, y: 0.1 }, { x: 0.6, y: 0.2 }]], 400);   // puntos normalizados (ventana de firma)
+  TC.trazoAPng([[{ x: 200, y: 100 }, { x: 600, y: 200 }]], 400);   // los mismos puntos en pixeles
+  const [a, b] = reg.lienzos;
+  assert.ok(a.width > 300, 'la firma pequeña en unidades normalizadas se escala al ancho pedido');
+  assert.equal(a.width, b.width);
+  assert.ok(Math.abs(a.height - b.height) <= 1);   // el redondeo de coma flotante puede mover 1 px
+});

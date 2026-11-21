@@ -131,7 +131,47 @@
     return repetido ? no('duplicado') : { ok: true };
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, validarAsistencia };
+  // ── Firma manuscrita ──
+  // Los trazos son listas de puntos [[{x,y},…],…] en cualquier espacio de coordenadas (la ventana de firma
+  // los guarda sin pixeles fijos para poder redibujarlos al girar la pantalla). Se recorta al contenido,
+  // se escala para que quepa en `ancho` px de ancho (y a lo más la mitad de alto) y se devuelve un PNG en data URL.
+  // Sin trazos devuelve ''. En Node el lienzo es inyectable con TC._canvas = (ancho, alto) => lienzo.
+  const MARGEN_FIRMA = 6;
+  function lienzoNuevo(w, h) {
+    if (typeof API._canvas === 'function') return API._canvas(w, h);
+    if (typeof document !== 'undefined') { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    throw new Error('trazoAPng necesita un lienzo (document o TC._canvas)');
+  }
+
+  function trazoAPng(trazos, ancho) {
+    const puntos = [];
+    for (const t of trazos || []) for (const p of t || []) puntos.push(p);
+    if (!puntos.length) return '';
+    const W = Math.max(40, Math.round(Number(ancho) || 0));
+    const xs = puntos.map((p) => p.x), ys = puntos.map((p) => p.y);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    const bw = (Math.max(...xs) - x0) || 1, bh = (Math.max(...ys) - y0) || 1; // sin extensión (punto, línea recta) no se divide por 0
+    const m = MARGEN_FIRMA;
+    const k = Math.min((W - 2 * m) / bw, (W / 2 - 2 * m) / bh);
+    const w = Math.max(2 * m + 1, Math.ceil(bw * k + 2 * m)), h = Math.max(2 * m + 1, Math.ceil(bh * k + 2 * m));
+    const c = lienzoNuevo(w, h);
+    const ctx = c.getContext('2d');
+    const gx = (p) => (p.x - x0) * k + m, gy = (p) => (p.y - y0) * k + m;
+    ctx.lineWidth = Math.max(2, W / 150);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111';
+    for (const t of trazos) {
+      if (!t || !t.length) continue;
+      ctx.beginPath();
+      ctx.moveTo(gx(t[0]), gy(t[0]));
+      if (t.length === 1) ctx.lineTo(gx(t[0]) + 0.01, gy(t[0])); // punto suelto: con trazo redondo deja una marca
+      for (let i = 1; i < t.length; i++) ctx.lineTo(gx(t[i]), gy(t[i]));
+      ctx.stroke();
+    }
+    return c.toDataURL('image/png');
+  }
+
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, validarAsistencia, trazoAPng };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
