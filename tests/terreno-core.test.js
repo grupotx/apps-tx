@@ -1,0 +1,102 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const TC = require('../terreno-core.js');
+
+test('mpa: 2,772 kN sobre 50x50 mm son 1,11 MPa', () => {
+  assert.equal(TC.mpa(2.772, 50, 50), 1.11);
+  assert.equal(TC.mpa(0, 50, 50), null);
+  assert.equal(TC.mpa(2.772, 0, 50), null);
+});
+
+test('resumenEnsayo: mínimo, máximo, promedio y filas bajo 0,20 MPa', () => {
+  const r = TC.resumenEnsayo([
+    { n: 1, cargaKn: 2.772, anchoMm: 50, altoMm: 50, falla: 'Cohesión Nivelador' },
+    { n: 2, cargaKn: 0.4,   anchoMm: 50, altoMm: 50, falla: 'Cohesión Sustrato' },
+  ]);
+  assert.deepEqual(r.bajoUmbral, [2]);
+  assert.equal(r.max, 1.11);
+  assert.equal(r.min, 0.16);
+});
+
+test('resumenEnsayo: respeta el MPa escrito a mano', () => {
+  const r = TC.resumenEnsayo([{ n: 1, cargaKn: 2.772, anchoMm: 50, altoMm: 50, mpa: 1.12, falla: 'Cohesión Nivelador' }]);
+  assert.equal(r.max, 1.12);
+});
+
+test('resumenEnsayo: promedio, y lista vacía deja todo en null', () => {
+  const r = TC.resumenEnsayo([{ n: 1, mpa: 1 }, { n: 2, mpa: 0.5 }]);
+  assert.equal(r.prom, 0.75);
+  assert.deepEqual(TC.resumenEnsayo([]), { min: null, max: null, prom: null, bajoUmbral: [] });
+});
+
+test('conclusionBase: nombra los tipos de falla sin repetir y no dictamina', () => {
+  const t = TC.conclusionBase([{ falla: 'Cohesión Nivelador' }, { falla: 'Cohesión Nivelador' }, { falla: 'Cohesión Sustrato' }]);
+  assert.match(t, /NCh 2471/);
+  assert.match(t, /0,20 MPa/);
+  assert.match(t, /Cohesión Nivelador, Cohesión Sustrato\.$/);
+  assert.doesNotMatch(t, /cumple/i);
+});
+
+test('conclusionBase: sin filas queda el texto base sin la frase de fallas', () => {
+  assert.equal(TC.conclusionBase([]), TC.CONCLUSION_BASE);
+  assert.doesNotMatch(TC.CONCLUSION_BASE, /fallas identificadas/);
+});
+
+test('textos fijos: no se pierden ni se alteran', () => {
+  assert.match(TC.NOTA_LEGAL, /^Nota: Grupo TX respalda/);
+  assert.match(TC.NOTA_LEGAL, /www\.grupotx\.cl$/);
+  assert.match(TC.DESARROLLO_DEFECTO, /cortes de 50\*50 mm/);
+  assert.equal(TC.DOC_META.codigo, 'DOC-PM-LAB-05');
+  assert.equal(TC.PIE.length, 3);
+});
+
+test('correoVisita: asunto con obra y fecha dd-mm-aaaa, cuerpo en texto plano', () => {
+  const c = TC.correoVisita({ kind: 'visita', fecha: '2026-11-20', cliente: 'Ingevec', obra: 'Edificio Sur', datos: { producto: 'TX-100', motivo: 'Revisión', verificacion: 'Se midió', causa: 'Humedad', solucion: 'Secar', lab: 'Sí', contacto: 'Ana' } });
+  assert.equal(c.asunto, 'Visita técnica Edificio Sur – 20-11-2026');
+  assert.match(c.cuerpo, /Ingevec/);
+  assert.doesNotMatch(c.cuerpo, /<[a-z]/i);
+  assert.doesNotMatch(c.cuerpo, /cumpl/i);
+});
+
+test('correoEnsayo: asunto con obra y fecha dd-mm-aaaa', () => {
+  const c = TC.correoEnsayo({ kind: 'ensayo', fecha: '2026-01-05', cliente: 'Ingevec', obra: 'Torre Norte', datos: { filas: [], motivo_visita: 'Control' } });
+  assert.equal(c.asunto, 'Informe prueba de adherencia Torre Norte – 05-01-2026');
+  assert.doesNotMatch(c.cuerpo, /cumpl/i);
+});
+
+test('participantesVista: registro viejo con firma booleana', () => {
+  const v = TC.participantesVista([], [{ nombre: 'Juan', rut: '1-9', firma: true }]);
+  assert.equal(v[0].firma, '');
+  assert.equal(v[0].firmo, true);
+});
+
+test('participantesVista: si hay filas de asistencia, mandan sobre los datos viejos', () => {
+  const v = TC.participantesVista([{ id: 'x', nombre: 'Ana', firma: 'data:image/png;base64,AA' }], [{ nombre: 'Juan' }]);
+  assert.equal(v.length, 1);
+  assert.equal(v[0].nombre, 'Ana');
+  assert.equal(v[0].firmo, true);
+});
+
+test('mezclarParticipantes: no pisa la fila que el PM está editando', () => {
+  const act = [{ id: 'a', nombre: 'Juan', _sucia: true }];
+  const r = TC.mezclarParticipantes(act, [{ id: 'a', nombre: 'Juan Pérez' }, { id: 'b', nombre: 'Ana' }]);
+  assert.equal(r[0].nombre, 'Juan');
+  assert.equal(r[1].id, 'b');
+});
+
+test('validarAsistencia: nombre obligatorio, correo opcional, cupo y duplicado', () => {
+  const est = { total: 0, rutsUsados: [], nombresUsados: [] };
+  assert.deepEqual(TC.validarAsistencia({ nombre: 'Ana' }, est), { ok: true });
+  assert.equal(TC.validarAsistencia({ nombre: '' }, est).motivo, 'nombre');
+  assert.equal(TC.validarAsistencia({ nombre: 'Ana' }, { ...est, total: 80 }).motivo, 'cupo');
+  assert.equal(TC.validarAsistencia({ nombre: 'Ana', rut: '1-9' }, { ...est, rutsUsados: ['1-9'] }).motivo, 'duplicado');
+});
+
+test('validarAsistencia: enlace, firma pesada, nombre largo y duplicado por nombre', () => {
+  const est = { total: 0, rutsUsados: [], nombresUsados: ['ana perez'] };
+  assert.equal(TC.validarAsistencia({ nombre: 'Ana' }, { ...est, enlaceValido: false }).motivo, 'enlace');
+  assert.equal(TC.validarAsistencia({ nombre: 'x'.repeat(121) }, est).motivo, 'nombre');
+  assert.equal(TC.validarAsistencia({ nombre: 'Ana', firma: 'A'.repeat(60 * 1024 + 1) }, est).motivo, 'firma');
+  assert.equal(TC.validarAsistencia({ nombre: 'Ana', firma: 'A'.repeat(60 * 1024) }, est).ok, true);
+  assert.equal(TC.validarAsistencia({ nombre: ' ANA  Pérez ' }, est).motivo, 'duplicado');
+});
