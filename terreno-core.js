@@ -418,6 +418,17 @@
   }
 
 
+  // Dibuja el encabezado del documento controlado en la hoja `i` de `n` (pdf: jsPDF; margen: [arriba, derecha, abajo, izquierda]).
+  function dibujarEncabezado(pdf, i, n, margen) {
+    const W = pdf.internal.pageSize.getWidth(), h = encabezadoInforme(i, n);
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(27);
+    pdf.text(h.titulo, margen[3], 36);
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(90);
+    pdf.text(h.detalle, W - margen[1], 30, { align: 'right' });
+    pdf.text(h.pagina, W - margen[1], 42, { align: 'right' });
+    pdf.setDrawColor(228, 3, 46); pdf.setLineWidth(1.2); pdf.line(margen[3], 50, W - margen[1], 50);
+  }
+
   // ── Informe de adherencia (DOC-PM-LAB-05) ──
   // Las secciones del documento original: I. Descripción, Desarrollo, Resultados, Imágenes, Conclusión, firma del asesor y
   // nota legal. El encabezado con el código y "Página X de Y" y el pie los dibuja el PDF en cada hoja (encabezadoInforme).
@@ -450,7 +461,7 @@
       + seccion('Desarrollo', d.desarrollo)
       + (filas.length ? '<div class="inf-bloque"><h2>Resultados</h2><table class="inf-resultados"><thead><tr><th class="inf-n">N°</th><th>Sustrato o ubicación</th><th>Carga (kN)</th><th>Área del corte (mm)</th><th>Adherencia (MPa)</th><th>Tipo de falla</th></tr></thead><tbody>'
         + filas.map(filaRes).join('') + '</tbody></table>'
-        + (hayManual ? '<p class="inf-nota">* Valor de adherencia informado por el laboratorio.</p>' : '') + '</div>' : '')
+        + (hayManual ? '<p class="inf-nota">* Valor de adherencia informado, no calculado a partir de la carga y el área del corte.</p>' : '') + '</div>' : '')
       + (fotos.length ? '<h2>Imágenes</h2>' + filasDeFotos(fotos).map((fi) => '<div class="inf-fila">' + fi.map((x) => {
         const pie = (d.pies || [])[x.n - 1];
         return '<figure class="inf-foto"><img alt="Imagen ' + x.n + '" src="' + x.src + '">' + (pie && String(pie).trim() ? '<figcaption>' + esc(String(pie).trim()) + '</figcaption>' : '') + '</figure>';
@@ -571,7 +582,7 @@
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

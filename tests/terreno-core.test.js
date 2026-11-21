@@ -737,7 +737,7 @@ test('informeAdherenciaHtml: aunque haya una fila bajo 0,20 MPa, el documento no
   assert.doesNotMatch(h, /cumple|insuficiente|deficiente|no alcanza|bajo el umbral|bajo 0,20|bajo el mínimo/i);
 });
 
-test('informeAdherenciaHtml: un MPa escrito a mano lleva asterisco y la nota de que lo informó el laboratorio; los calculados no', () => {
+test('informeAdherenciaHtml: un MPa escrito a mano lleva asterisco y una nota neutral (no atribuye el dato a nadie); los calculados no', () => {
   const filas = TC.normalizarFilas([
     { sustrato: 'A', carga: '2,772', ancho: '50', alto: '50', mpa: '1,2', falla: '' },
     { sustrato: 'B', carga: '2,491', ancho: '50', alto: '50', mpa: '', falla: '' },
@@ -745,8 +745,9 @@ test('informeAdherenciaHtml: un MPa escrito a mano lleva asterisco y la nota de 
   const h = TC.informeAdherenciaHtml(regEnsayo({}, { filas }), {});
   assert.match(h, /<td class="inf-mpa">1,20 \*<\/td>/);
   assert.match(h, /<td class="inf-mpa">1,00<\/td>/);
-  assert.match(h, /informado por el laboratorio/i);
-  assert.doesNotMatch(TC.informeAdherenciaHtml(regEnsayo(), {}), /informado por el laboratorio/i);
+  assert.match(h, /Valor de adherencia informado, no calculado a partir de la carga y el área del corte/);
+  assert.doesNotMatch(h, /laboratorio.</);
+  assert.doesNotMatch(TC.informeAdherenciaHtml(regEnsayo(), {}), /no calculado/);
 });
 
 test('informeAdherenciaHtml: firma del asesor con "Atentamente", nombre, cargo, Móvil, Mail y Web; la nota legal va después', () => {
@@ -786,10 +787,14 @@ test('informeAdherenciaHtml: escapa el texto del usuario', () => {
   assert.match(h, /a &lt;b&gt;b&lt;\/b&gt; &amp; c/);
 });
 
-test('informeAdherenciaHtml: no lleva el código de otro documento ni inventa datos; el código del documento va en el encabezado de cada hoja', () => {
-  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
-  assert.doesNotMatch(h, /DOC-PM-(?!LAB-05)/);
-  assert.doesNotMatch(h, /Versión 1|Revisión/);
+test('dibujarEncabezado: cada hoja lleva título, código, creación, versión y "Página i de n" en el pdf', () => {
+  const textos = [];
+  const pdf = { internal: { pageSize: { getWidth: () => 595 } }, setFont() {}, setFontSize() {}, setTextColor() {}, setDrawColor() {}, setLineWidth() {}, line() {}, text: (s, x, y, o) => textos.push({ s, x, y, o }) };
+  TC.dibujarEncabezado(pdf, 2, 3, [66, 28, 64, 28]);
+  assert.deepEqual(textos.map((t) => t.s), ['Informe Prueba Adherencia', 'Código DOC-PM-LAB-05 · Creación 02-01-2025 · Versión 0.0', 'Página 2 de 3']);
+  assert.equal(textos[0].x, 28);
+  assert.equal(textos[1].x, 595 - 28);
+  assert.equal(textos[2].o.align, 'right');
 });
 
 test('informeAdherenciaHtml: sin desarrollo ni conclusión escritos, esas secciones se omiten (no se rellenan con texto inventado)', () => {

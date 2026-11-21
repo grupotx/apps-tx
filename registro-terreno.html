@@ -933,15 +933,7 @@ const margenPdf = reg => reg.kind === 'adherencia' ? MARGEN_PDF_ADHERENCIA : MAR
 const ANCHO_PDF_PX = Math.floor((595.28 - MARGEN_PDF[1] - MARGEN_PDF[3]) * 96 / 72);   // ancho útil de la hoja A4 en px: el informe se maqueta a este ancho
 
 // Encabezado del documento controlado (informe de adherencia), en cada hoja: título, código, creación, versión y "Página X de Y".
-function encabezadoDePagina(pdf, i, n){
-  const W = pdf.internal.pageSize.getWidth(), h = TC.encabezadoInforme(i, n);
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(27);
-  pdf.text(h.titulo, MARGEN_PDF_ADHERENCIA[3], 36);
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(90);
-  pdf.text(h.detalle, W - MARGEN_PDF_ADHERENCIA[1], 30, { align: 'right' });
-  pdf.text(h.pagina, W - MARGEN_PDF_ADHERENCIA[1], 42, { align: 'right' });
-  pdf.setDrawColor(228, 3, 46); pdf.setLineWidth(1.2); pdf.line(MARGEN_PDF_ADHERENCIA[3], 50, W - MARGEN_PDF_ADHERENCIA[1], 50);
-}
+function encabezadoDePagina(pdf, i, n){ TC.dibujarEncabezado(pdf, i, n, MARGEN_PDF_ADHERENCIA); }
 
 // Pie institucional en cada hoja y, en la visita, "Página X de Y" (en el informe de adherencia va en el encabezado). html2pdf no los trae.
 function pieDePagina(pdf, adherencia){
@@ -1603,7 +1595,7 @@ const acciones = {
   guardar: b => guardar(b.dataset.t, b, editandoId),
   guardarEnviar: b => {
     const kind = $('#form').dataset.kind, d = leerCampos();
-    if (!TC.correoValido(String(kind === 'adherencia' ? d.correo_cliente : d.cierre_email || '').trim())) return toast(kind === 'adherencia' ? 'Para enviar la copia escribe un correo válido del cliente.' : 'Para enviar la copia escribe un correo válido de quien recibe, en «Cierre con el cliente».');
+    if (!TC.correoValido(String((kind === 'adherencia' ? d.correo_cliente : d.cierre_email) || '').trim())) return toast(kind === 'adherencia' ? 'Para enviar la copia escribe un correo válido del cliente.' : 'Para enviar la copia escribe un correo válido de quien recibe, en «Cierre con el cliente».');
     return guardar(kind, b, editandoId, true);
   },
   enviarReg: b => enviarRegistro(b.dataset.id),
