@@ -339,7 +339,72 @@
       + '<div class="inf-legal inf-bloque">' + esc(NOTA_LEGAL) + '</div></div>';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml };
+  // ── Envío de la copia al cliente ──
+  // Misma regla que valida el Apps Script: una sola dirección, sin espacios, comas, saltos de línea ni segundo @.
+  const correoValido = (s) => typeof s === 'string' && s.length <= 254 && /^[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[^\s@,;<>()"']{2,}$/.test(s);
+
+  // ¿Este informe puede salir hacia esta visita? Exige la identidad (registroId) Y la huella del contenido: "Ver informe"
+  // de la lista deja en memoria el informe de OTRA visita, y el de una visita editada después queda desactualizado.
+  // ref: { id, huella } de la visita que se va a enviar. Un id nulo (visita sin guardar) nunca vale como identidad.
+  function puedeEnviar(informe, ref) {
+    const i = informe || {}, r = ref || {};
+    if (!i.base64 || typeof i.base64 !== 'string' || !/\.pdf$/i.test(i.nombre || '')) return { ok: false, motivo: 'sin_informe' };
+    if (!r.id || i.registroId == null) return { ok: false, motivo: 'sin_guardar' };
+    if (i.registroId !== r.id) return { ok: false, motivo: 'otra_visita' };
+    if (i.huella !== r.huella) return { ok: false, motivo: 'desactualizado' };
+    return { ok: true };
+  }
+
+  const TEXTOS_ENVIO = {
+    pendiente_publicar: 'el envío de correos todavía no está publicado',
+    sin_informe: 'no hay un informe PDF válido para adjuntar',
+    sin_guardar: 'la visita aún no está guardada',
+    otra_visita: 'el informe generado corresponde a otra visita',
+    desactualizado: 'el informe no corresponde a lo que hay ahora en la visita',
+    demasiado_grande: 'el informe supera los 8 MB que admite el envío por correo: reduce las fotos',
+    solicitud_invalida: 'el pedido de envío está incompleto',
+    archivo_invalido: 'el adjunto no es un PDF válido',
+    correo_invalido: 'el correo del cliente no es válido',
+    correo_no_coincide: 'el correo del cliente guardado en la visita es otro: guarda la visita de nuevo',
+    sin_acceso: 'tu cuenta no tiene acceso a Registro de Terreno',
+    no_es_autor: 'solo el autor de la visita o un administrador puede enviarla',
+    registro_no_existe: 'la visita no está guardada',
+    no_autorizado: 'tu sesión expiró: vuelve a ingresar',
+    red: 'no hubo conexión con el servicio de correo (si no estás seguro, revisa tu bandeja: recibirás una copia si salió)',
+  };
+  function textoErrorEnvio(codigo, detalle) {
+    if (codigo === 'apps_script') return 'el servicio de correo respondió un error' + (detalle ? ': ' + detalle : '');
+    return TEXTOS_ENVIO[codigo] || 'error inesperado' + (codigo ? ' (' + codigo + ')' : '');
+  }
+
+  // Historial de envíos en datos.envios: [{ ts, para, asunto, por }]. Devuelve datos nuevos; no toca el original.
+  const registrarEnvio = (datos, envio) => ({ ...(datos || {}), envios: [...((datos && datos.envios) || []), { ts: envio.ts, para: envio.para, asunto: envio.asunto, por: envio.por }] });
+
+  // "20-11-2026 12:30" en hora de Chile (no la del equipo).
+  function fechaHoraCL(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const p = Object.fromEntries(new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).map((x) => [x.type, x.value]));
+    return p.day + '-' + p.month + '-' + p.year + ' ' + p.hour + ':' + p.minute;
+  }
+
+  // Línea visible en la ficha: a quién y cuándo salió el último envío. Si la visita se corrigió después, lo dice.
+  function lineaEnvio(datos) {
+    const envios = (datos && datos.envios) || [];
+    if (!envios.length) return '';
+    const e = envios[envios.length - 1];
+    const corregida = datos.editado && datos.editado.ts && new Date(datos.editado.ts) > new Date(e.ts);
+    return 'Copia enviada a ' + e.para + ' el ' + fechaHoraCL(e.ts) + (corregida ? ' · la visita se corrigió después del envío' : '');
+  }
+
+  // Texto del botón de envío en la ficha, o null si la visita no tiene un correo de cliente válido.
+  function botonEnvio(datos) {
+    const d = datos || {};
+    if (!correoValido(d.cierre && d.cierre.email)) return null;
+    return (d.envios || []).length ? 'Reenviar copia' : 'Reintentar envío';
+  }
+
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

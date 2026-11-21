@@ -386,3 +386,63 @@ test('tipoImagen: reconoce JPEG, PNG y WebP por sus bytes y rechaza HTML, texto 
   const wav = [0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45];
   for (const mal of [html, json, wav, [0xFF, 0xD8], [], null, undefined]) assert.equal(TC.tipoImagen(mal), null);
 });
+
+// ---- Envío de la copia al cliente ----
+test('correoValido: una sola dirección; rechaza listas, espacios, saltos de línea y vacíos', () => {
+  for (const ok of ['ana@obra.cl', 'a.b+c@sub.empresa.com']) assert.equal(TC.correoValido(ok), true, ok);
+  for (const mal of ['', null, undefined, 'ana', 'ana@obra', 'a@b.cl, c@d.cl', 'a@b.cl;c@d.cl', 'a@b.cl\nBcc: x@y.cl', 'a b@c.cl', 'a@@b.cl', '<a@b.cl>']) assert.equal(TC.correoValido(mal), false, String(mal));
+});
+
+const informe = (extra) => ({ blob: { size: 1000 }, base64: 'JVBERi0=', nombre: 'Informe.pdf', huella: 'abc-10', registroId: 'v1', ...extra });
+
+test('puedeEnviar: solo si el informe es de ESTA visita y de este contenido', () => {
+  assert.deepEqual(TC.puedeEnviar(informe(), { id: 'v1', huella: 'abc-10' }), { ok: true });
+  assert.equal(TC.puedeEnviar(informe({ registroId: 'v2' }), { id: 'v1', huella: 'abc-10' }).motivo, 'otra_visita');   // el informe del cliente A no sale al B
+  assert.equal(TC.puedeEnviar(informe({ huella: 'zzz-10' }), { id: 'v1', huella: 'abc-10' }).motivo, 'desactualizado');
+  assert.equal(TC.puedeEnviar(informe({ registroId: null }), { id: 'v1', huella: 'abc-10' }).motivo, 'sin_guardar');
+  assert.equal(TC.puedeEnviar(informe(), { id: null, huella: 'abc-10' }).motivo, 'sin_guardar');
+  assert.equal(TC.puedeEnviar(informe({ registroId: null }), { id: null, huella: 'abc-10' }).ok, false);   // null === null no vale como identidad
+  assert.equal(TC.puedeEnviar(null, { id: 'v1', huella: 'abc-10' }).motivo, 'sin_informe');
+  assert.equal(TC.puedeEnviar(informe({ base64: '' }), { id: 'v1', huella: 'abc-10' }).motivo, 'sin_informe');
+  assert.equal(TC.puedeEnviar(informe({ nombre: 'informe.html' }), { id: 'v1', huella: 'abc-10' }).motivo, 'sin_informe');
+});
+
+test('textoErrorEnvio: pendiente_publicar y el resto, en lenguaje del PM', () => {
+  assert.match(TC.textoErrorEnvio('pendiente_publicar'), /el envío de correos todavía no está publicado/);
+  assert.match(TC.textoErrorEnvio('otra_visita'), /otra visita/);
+  assert.match(TC.textoErrorEnvio('apps_script', 'Límite de correos excedido'), /Límite de correos excedido/);
+  assert.match(TC.textoErrorEnvio('algo_raro'), /inesperado/);
+});
+
+test('registrarEnvio: agrega al historial sin tocar el original ni borrar envíos anteriores', () => {
+  const antes = { motivo: 'x', envios: [{ ts: '2026-11-19T10:00:00Z', para: 'a@b.cl', asunto: 'A', por: 'Ana' }] };
+  const nuevo = TC.registrarEnvio(antes, { ts: '2026-11-20T15:30:00Z', para: 'c@d.cl', asunto: 'B', por: 'Luis' });
+  assert.equal(nuevo.envios.length, 2);
+  assert.deepEqual(nuevo.envios[1], { ts: '2026-11-20T15:30:00Z', para: 'c@d.cl', asunto: 'B', por: 'Luis' });
+  assert.equal(antes.envios.length, 1);
+  assert.equal(nuevo.motivo, 'x');
+  assert.equal(TC.registrarEnvio({}, { ts: 't', para: 'p', asunto: 'a', por: 'q' }).envios.length, 1);
+});
+
+test('lineaEnvio: "Copia enviada a … el …" en hora de Chile; avisa si la visita se corrigió después', () => {
+  assert.equal(TC.lineaEnvio({}), '');
+  assert.equal(TC.lineaEnvio({ envios: [] }), '');
+  const e = { ts: '2026-11-20T15:30:00Z', para: 'ana@obra.cl', asunto: 'A', por: 'Luis' };
+  assert.equal(TC.lineaEnvio({ envios: [e] }), 'Copia enviada a ana@obra.cl el 20-11-2026 12:30');
+  const dos = TC.lineaEnvio({ envios: [{ ...e, ts: '2026-11-19T15:30:00Z', para: 'viejo@obra.cl' }, e] });
+  assert.match(dos, /ana@obra\.cl/); assert.doesNotMatch(dos, /viejo/);
+  assert.match(TC.lineaEnvio({ envios: [e], editado: { ts: '2026-11-21T10:00:00Z', por: 'Luis' } }), /se corrigió después del envío/);
+  assert.doesNotMatch(TC.lineaEnvio({ envios: [e], editado: { ts: '2026-11-20T10:00:00Z', por: 'Luis' } }), /corrigió/);
+});
+
+test('botonEnvio: solo con un correo de cliente válido; "Reintentar" si no hay envío, "Reenviar" si ya salió uno', () => {
+  assert.equal(TC.botonEnvio({}), null);
+  assert.equal(TC.botonEnvio({ cierre: { email: 'mal' } }), null);
+  assert.equal(TC.botonEnvio({ cierre: { email: 'ana@obra.cl' } }), 'Reintentar envío');
+  assert.equal(TC.botonEnvio({ cierre: { email: 'ana@obra.cl' }, envios: [{ ts: 't', para: 'ana@obra.cl' }] }), 'Reenviar copia');
+});
+
+test('correoVisita repite los datos clave en el cuerpo (el PDF es imagen: no se puede copiar texto de él)', () => {
+  const c = TC.correoVisita({ fecha: '2026-11-20', cliente: 'Ingevec', obra: 'Edificio Sur', datos: { producto: 'TX-100', motivo: 'Grieta en piso', verificacion: 'Se midió humedad', causa: 'Humedad del sustrato', solucion: 'Secar y reaplicar' } });
+  for (const t of ['Ingevec', 'Edificio Sur', '20-11-2026', 'TX-100', 'Grieta en piso', 'Se midió humedad', 'Humedad del sustrato', 'Secar y reaplicar']) assert.ok(c.cuerpo.includes(t), t);
+});

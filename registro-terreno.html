@@ -86,6 +86,10 @@ textarea{min-height:84px;resize:vertical}
 .informe-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px}
 .informe-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;overflow:auto}
 .informe-dlg h2{margin:0 0 2px}
+.envio-dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0;font-size:14px}
+.envio-dl dt{color:var(--mute);font-weight:600}.envio-dl dd{margin:0;word-break:break-word}
+.envio-para{font-size:18px;margin:2px 0 0;word-break:break-all}
+.envio-msg{white-space:pre-wrap;font:13px/1.45 inherit;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:240px;overflow:auto}
 .informe-vista{flex:1;min-height:55vh;width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:8px}
 .part-barra .mute{margin-left:auto}
 .ac{position:relative}
@@ -439,7 +443,8 @@ function formVisita(){
     </div>
     <div class="acciones">
       <button type="button" class="btn ghost" data-a="verInforme">Ver informe</button>
-      <button type="button" class="btn" data-a="guardar" data-t="visita">Guardar visita</button>
+      <button type="button" class="btn" data-a="guardarEnviar">Guardar y enviar copia al cliente</button>
+      <button type="button" class="btn ghost" data-a="guardar" data-t="visita">Guardar sin enviar</button>
       <button type="button" class="btn ghost" data-a="nav" data-v="panel">Cancelar</button>
     </div>
   </div>`;
@@ -658,7 +663,8 @@ async function persistir(kind, d, registroId, btn){
 }
 
 // `registroId`: si viene, corrige ese registro (update); si no, crea uno nuevo (insert).
-async function guardar(kind, btn, registroId){
+// `enviar`: tras guardar, ofrece enviar la copia al cliente (con confirmación; nada sale sin que el PM la acepte).
+async function guardar(kind, btn, registroId, enviar){
   const d = leerCampos();
   if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
   const falta = validarCampos(kind, d, kind === 'visita' && registroId ? (registros.find(x => x.id === registroId)?.fotos || []).length : 0);
@@ -681,7 +687,7 @@ async function guardar(kind, btn, registroId){
     cliSel = null; cliNuevo = false; editandoId = null;
     vista = registroId || kind === 'visita' ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
-    cargar();
+    if (enviar) { await cargar(); await enviarRegistro(id); } else cargar();
   } catch(e){
     btn.disabled = false; btn.textContent = txt;
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
@@ -839,6 +845,109 @@ const cierreDeCampos = d => TC.cierreVisita({ nombre: d.cierre_nombre, cargo: d.
 async function verInformeRegistro(b){
   const r = registros.find(x => x.id === b.dataset.id); if (!r) return;
   await verInforme(() => ({ reg: regParaInforme(r, []), rutas: r.fotos || [], archivos: [] }), b);
+}
+
+/* ===================== Copia del informe al cliente ===================== */
+// El correo sale de controldegestion@grupotx.cl por el Apps Script, a través de la función terreno-correo (la clave del
+// Apps Script nunca llega al navegador). Nada se envía sin la confirmación del PM, y un fallo nunca es silencioso:
+// la visita queda guardada y la ficha ofrece "Reintentar envío".
+const URL_CORREO = SB_URL + '/functions/v1/terreno-correo';
+let enviando = false;
+
+// \`envio\`: { id, huella, para, asunto, cuerpo } de la visita que se envía; \`pdf\`: el informe. Devuelve { ok, error, detalle }.
+// Valida de nuevo identidad (registroId) y huella: el informe en memoria puede ser de otra visita (p. ej. "Ver informe" de la lista).
+async function enviarCopia(envio, pdf){
+  const v = TC.puedeEnviar(pdf, envio);
+  if (!v.ok) return { ok: false, error: v.motivo };
+  if (TC.tamanoInforme(pdf.blob.size).excede) return { ok: false, error: 'demasiado_grande' };
+  const { data } = await sb.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) return { ok: false, error: 'no_autorizado' };
+  let r;
+  try {
+    r = await fetch(URL_CORREO, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ registro_id: envio.id, para: envio.para, asunto: envio.asunto, cuerpo: envio.cuerpo, nombre: pdf.nombre, base64: pdf.base64 })
+    });
+  } catch(e){ return { ok: false, error: 'red' }; }
+  const j = await r.json().catch(() => null);
+  if (!j) return { ok: false, error: r.status === 401 ? 'no_autorizado' : 'apps_script', detalle: 'respuesta ' + r.status };
+  return { ok: j.ok === true, error: j.error, detalle: j.detalle };
+}
+
+// Mensaje de espera sobre la pantalla; devuelve la función que lo cierra.
+function mostrarOcupado(msg){
+  const ov = document.createElement('div');
+  ov.className = 'informe-ov'; ov.innerHTML = '<div class="informe-dlg" role="status" style="width:min(360px,100%)"><h2>' + esc(msg) + '</h2><p class="mute">Un momento…</p></div>';
+  document.body.appendChild(ov);
+  return () => ov.remove();
+}
+
+// Confirmación previa: dirección exacta, asunto y peso del adjunto. Resuelve true solo si el PM pulsa "Enviar".
+// El foco inicial queda en "Cancelar" para que un Enter distraído no envíe.
+function confirmarEnvio(envio, pdf){
+  return new Promise(resolve => {
+    const t = TC.tamanoInforme(pdf.blob.size);
+    const ov = document.createElement('div');
+    ov.id = 'envio-ov'; ov.className = 'informe-ov';
+    ov.innerHTML = '<div class="informe-dlg" role="dialog" aria-label="Confirmar envío" style="width:min(560px,100%)">'
+      + '<h2>Enviar copia al cliente</h2><p class="mute">Se enviará un correo a:</p>'
+      + '<p class="envio-para"><b data-e="para">' + esc(envio.para) + '</b></p>'
+      + '<dl class="envio-dl"><dt>Asunto</dt><dd data-e="asunto">' + esc(envio.asunto) + '</dd>'
+      + '<dt>Adjunto</dt><dd data-e="adjunto">' + esc(pdf.nombre) + ' · ' + esc(t.texto) + '</dd>'
+      + '<dt>Copia a</dt><dd>' + esc(me.email) + ' (tú)</dd></dl>'
+      + (t.excede ? '<div class="aviso">El informe pesa ' + esc(t.texto) + ' y supera los ' + TC.LIMITE_ENVIO_BYTES / 1048576 + ' MB que admite el envío. Reduce las fotos y vuelve a intentarlo.</div>' : '')
+      + '<details class="mas"><summary>Ver el mensaje</summary><pre class="envio-msg">' + esc(envio.cuerpo) + '</pre></details>'
+      + '<div class="acciones"><button type="button" class="btn ghost" data-e="cancelar">Cancelar</button>'
+      + '<button type="button" class="btn" data-e="enviar"' + (t.excede ? ' disabled' : '') + '>Enviar a ' + esc(envio.para) + '</button></div></div>';
+    const cerrar = ok => { ov.remove(); resolve(ok); };
+    ov.querySelector('[data-e="cancelar"]').onclick = () => cerrar(false);
+    ov.querySelector('[data-e="enviar"]').onclick = () => cerrar(true);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-e="cancelar"]').focus();
+  });
+}
+
+// Prepara el informe de una visita ya guardada, pide confirmación, lo envía y anota el envío en datos.envios.
+// Sirve para "Guardar y enviar" y para "Reintentar envío". El informe en memoria solo se reutiliza si es de esta visita
+// y de este mismo contenido (identidad + huella); si no, se genera de nuevo.
+async function enviarRegistro(id){
+  if (enviando) return;
+  const r = registros.find(x => x.id === id);
+  if (!r || r.kind !== 'visita' || !TC.puedeEditar(r, me)) return toast('No se puede enviar esta visita.');
+  const para = String((r.cierre && r.cierre.email) || '').trim();
+  if (!TC.correoValido(para)) return toast('La visita no tiene un correo de cliente válido: edítala y escríbelo en «Cierre con el cliente».');
+  enviando = true;
+  try {
+    let informe, envio;
+    const fin = mostrarOcupado('Preparando el informe');
+    try {
+      const reg = regParaInforme(r, await fotosComoDataUrl(r.fotos, []));
+      const huella = huellaTexto(informeHtml(reg));
+      informe = TC.puedeEnviar(ultimoInforme, { id: r.id, huella }).ok ? ultimoInforme : (ultimoInforme = await generarPdf(reg));
+      const { asunto, cuerpo } = TC.correoVisita({ fecha: r.fecha, cliente: r.cliente, obra: r.obra, datos: r._datos });
+      envio = { id: r.id, huella, para, asunto, cuerpo };
+      const v = TC.puedeEnviar(informe, envio);
+      if (!v.ok) throw new Error(TC.textoErrorEnvio(v.motivo));
+    } catch(e){
+      console.error(e);
+      return toast('No se pudo preparar el informe: ' + (e.message || 'error') + ' La visita quedó guardada; usa «Reintentar envío».');
+    } finally { fin(); }
+
+    if (!(await confirmarEnvio(envio, informe))) return toast('No se envió la copia. La visita quedó guardada; puedes enviarla con «Reintentar envío».');
+    const fin2 = mostrarOcupado('Enviando la copia');
+    let res;
+    try { res = await enviarCopia(envio, informe); } finally { fin2(); }
+    if (!res.ok) return toast('No se envió la copia: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; puedes usar «Reintentar envío».');
+
+    // Salió: se anota quién, a quién y cuándo. Si no se pudiera anotar, se dice claro para que no se reenvíe por error.
+    const datos = TC.registrarEnvio(r._datos, { ts: new Date().toISOString(), para, asunto: envio.asunto, por: me.nombre });
+    const { data, error } = await sb.from('registros').update({ datos }).eq('id', r.id).select('id');
+    if (error || !data || !data.length) return toast('La copia SÍ se envió a ' + para + ', pero no se pudo anotar en el registro. No la envíes de nuevo.');
+    actualizarLocal(r.id, { kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id, obra: r.obra, estado: r.estado }, datos, r.fotos);
+    toast('Copia enviada a ' + para + '.');
+    if (vista === 'registros') render();
+  } finally { enviando = false; }
 }
 
 /* ===================== QR de asistencia ===================== */
@@ -1118,7 +1227,8 @@ function tarjeta(r){
         ${r.observaciones ? `<p><b>Observaciones:</b> ${esc(r.observaciones)}</p>` : ''}
       </details>` : ''}
       ${r.fotos && r.fotos.length ? `<div class="fotos" data-fotos="${esc(r.id)}">${r.fotos.map(p => `<a target="_blank" rel="noopener" data-path="${esc(p)}"><img alt="Foto de la visita"></a>`).join('')}</div>` : ''}
-      <div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button></div>
+      <div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button>${(TC.puedeEditar(r, me) && TC.botonEnvio(r._datos)) ? `<button class="btn ghost" data-a="enviarReg" data-id="${esc(r.id)}">${TC.botonEnvio(r._datos)}</button>` : ''}</div>
+      ${TC.lineaEnvio(r._datos) ? `<p class="mute" data-envio="${esc(r.id)}">${esc(TC.lineaEnvio(r._datos))}</p>` : ''}
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
@@ -1220,6 +1330,11 @@ const acciones = {
   verInformeReg: b => verInformeRegistro(b),
   cerrarInforme: () => cerrarInforme(),
   guardar: b => guardar(b.dataset.t, b, editandoId),
+  guardarEnviar: b => {
+    if (!TC.correoValido(String(leerCampos().cierre_email || '').trim())) return toast('Para enviar la copia escribe un correo válido de quien recibe, en «Cierre con el cliente».');
+    return guardar('visita', b, editandoId, true);
+  },
+  enviarReg: b => enviarRegistro(b.dataset.id),
   editar: b => editarRegistro(b.dataset.id),
   filtro: b => { filtro = b.dataset.f; render(); },
   estado: b => cambiarEstado(b.dataset.id, b.dataset.e),

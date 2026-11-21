@@ -12,6 +12,8 @@ function doPost(e) {
     var body = JSON.parse(e.postData.contents);
     var props = PropertiesService.getScriptProperties();
     if (!claveValida(body.clave, props.getProperty('RESPALDO_CLAVE'))) return json_({ ok: false, error: 'no autorizado' });
+    // Correo al cliente: no usa Drive ni el candado (no escribe en la carpeta de respaldos).
+    if (body.accion === 'correo') return json_(enviarCorreo_(body));
     var raiz = DriveApp.getFolderById(props.getProperty('ROOT_FOLDER_ID'));
     if (body.accion === 'archivo') return json_(leerArchivo_(raiz, body.fileId));
     var lock = LockService.getScriptLock();
@@ -141,6 +143,22 @@ function marcarEliminado_(raiz, app, numero) {
   var carpetaApp = subcarpeta_(raiz, nombreApp);
   var tz = Session.getScriptTimeZone();
   escribirFila_(hoja_(carpetaApp, nombreApp), numero, { 'Estado': 'Eliminado ' + Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm') });
+  return { ok: true };
+}
+
+// Correo al cliente con el informe PDF adjunto; sale de la casilla de este script y deja copia (cc) al PM que lo envía.
+// Requiere el permiso script.send_mail (appsscript.json): al publicar la versión nueva Google pide autorizarlo.
+function enviarCorreo_(c) {
+  var motivo = validarCorreo(c);
+  if (motivo) return { ok: false, error: motivo };
+  var bytes = Utilities.base64Decode(c.base64);
+  if (!esPdfBytes(bytes)) return { ok: false, error: 'el adjunto debe ser un pdf (contenido)' };
+  var opciones = {
+    to: c.para, cc: c.copia, subject: c.asunto, body: c.cuerpo, name: 'Grupo TX',
+    attachments: [Utilities.newBlob(bytes, 'application/pdf', c.nombre)]
+  };
+  if (c.responderA) opciones.replyTo = c.responderA;
+  MailApp.sendEmail(opciones);
   return { ok: true };
 }
 
