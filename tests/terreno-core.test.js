@@ -269,3 +269,11 @@ test('llegadasNuevas: descarta las que ya están en pantalla y las que el PM qui
   assert.deepEqual(r, ['b', 'd']);
   assert.deepEqual(TC.llegadasNuevas(null, null, null), []);
 });
+
+test('conteoAsistencias: tolera array con objeto, objeto suelto, número o texto, y da 0 si no viene', () => {
+  assert.equal(TC.conteoAsistencias([{ count: 3 }]), 3);
+  assert.equal(TC.conteoAsistencias({ count: 4 }), 4);
+  assert.equal(TC.conteoAsistencias(5), 5);
+  assert.equal(TC.conteoAsistencias([{ count: '7' }]), 7);
+  for (const raro of [undefined, null, [], {}, [{}], 'x', [{ count: -1 }], [{ count: 'abc' }]]) assert.equal(TC.conteoAsistencias(raro), 0);
+});

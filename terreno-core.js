@@ -155,6 +155,14 @@
   // Las filas de la tabla mandan; sin ellas, los participantes que traía el registro viejo.
   const totalParticipantes = (r) => (r && r.nAsistencias > 0 ? r.nAsistencias : ((r && r.participantes) || []).length);
 
+  // Conteo embebido de PostgREST (rt_asistencias(count)): se lee de forma tolerante; si no viene, 0. Un conteo en 0 o
+  // desconocido nunca debe ocultar la lista de participantes (la fuente de verdad son las filas).
+  function conteoAsistencias(x) {
+    const v = Array.isArray(x) ? (x[0] && typeof x[0] === 'object' ? x[0].count : x[0]) : (x && typeof x === 'object' ? x.count : x);
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
   // Qué hacer en la base con la lista que el PM tiene en pantalla.
   // filas: { id, origenFila: 'tabla' | 'viejo' | 'nuevo', sucia, rut, nombre, cargo, email, fono, firma }
   // 'viejo' = viene de datos.participantes de un registro anterior. Si el PM no toca esa lista se deja como está (así
@@ -230,7 +238,7 @@
     return c.toDataURL('image/png');
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

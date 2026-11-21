@@ -270,7 +270,7 @@ async function iniciar(){
 // cuando se necesitan (abrir la actividad, "Ver participantes").
 const mapRegistro = r => ({ ...(r.datos || {}), id: r.id, kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id,
   obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {},
-  asistencia_abierta: !!r.asistencia_abierta, nAsistencias: (r.rt_asistencias && r.rt_asistencias[0] && r.rt_asistencias[0].count) || 0 });
+  asistencia_abierta: !!r.asistencia_abierta, nAsistencias: TC.conteoAsistencias(r.rt_asistencias) });
 
 async function cargar(){
   const { data, error } = await sb.from('registros').select('*, rt_asistencias(count)').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
@@ -711,10 +711,16 @@ async function refrescarParticipantes(registroId){
   } finally { refrescando = false; }
 }
 
+// Un sondeo que falla no puede ser silencioso: el PM vigila esta lista para detectar registros indebidos.
+async function sondear(registroId){
+  try { await refrescarParticipantes(registroId); botonesAsistencia(); }
+  catch(e){ const el = $('#part-estado'); if (el) el.textContent = 'No pudimos actualizar la lista; toca "Actualizar lista".'; const b = $('#btn-act'); if (b) b.hidden = false; }
+}
+
 function iniciarRefresco(registroId){
   detenerRefresco();
-  refrescarParticipantes(registroId).catch(() => {});
-  refrescoQR = setInterval(() => { if (document.visibilityState === 'visible') refrescarParticipantes(registroId).catch(() => {}); }, 5000);
+  sondear(registroId);
+  refrescoQR = setInterval(() => { if (document.visibilityState === 'visible') sondear(registroId); }, 5000);
 }
 
 async function generarQR(btn){
@@ -930,7 +936,7 @@ function tarjeta(r){
     <p class="mute">${esc(r.cliente)} · ${esc(r.obra || '')} · ${fmtFecha(r.fecha)}</p>
     <p>${n} participantes · ${esc(r.duracion)} min · ${esc(r.relator || '—')}</p>
     ${r.observaciones ? `<p class="mute">${esc(r.observaciones)}</p>` : ''}
-    ${n ? `<details class="mas" data-part="${esc(r.id)}"><summary>Ver participantes</summary><div class="part-lista"></div></details>` : ''}
+    <details class="mas" data-part="${esc(r.id)}"><summary>Ver participantes</summary><div class="part-lista"></div></details>
     ${enCurso ? `<p class="mute">La asistencia por QR sigue abierta.</p>${TC.puedeEditar(r, me) ? `<div class="acciones" style="margin-top:8px"><button class="btn ghost" data-a="cerrarBorrador" data-id="${esc(r.id)}">Cerrar asistencia</button></div>` : ''}` : ''}
   </div>`;
 }
@@ -942,14 +948,13 @@ function itemParticipante(p){
 async function cargarParticipantes(det){
   const r = registros.find(x => x.id === det.dataset.part), cont = det.querySelector('.part-lista');
   if (!r || !cont) return;
-  let filas = [];
-  if (r.nAsistencias > 0) {
-    cont.innerHTML = '<p class="mute">Cargando…</p>';
-    const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', r.id).order('created_at');
-    if (error) { cont.innerHTML = '<p class="mute">No se pudieron cargar los participantes.</p>'; return; }
-    filas = data || [];
-  }
-  cont.innerHTML = TC.participantesVista(filas, r.participantes).map(itemParticipante).join('');
+  // Siempre se piden las filas: el conteo del listado puede venir en 0 o desconocido y no es la fuente de verdad.
+  cont.innerHTML = '<p class="mute">Cargando…</p>';
+  const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', r.id).order('created_at');
+  if (error) { cont.innerHTML = '<p class="mute">No se pudieron cargar los participantes.</p>'; return; }
+  const filas = data || [];
+  const lista = TC.participantesVista(filas, r.participantes);
+  cont.innerHTML = lista.length ? lista.map(itemParticipante).join('') : '<p class="mute">Sin participantes.</p>';
 }
 
 function vistaRegistros(){
