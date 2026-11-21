@@ -390,7 +390,8 @@
   const NO_SALIO = ['pendiente_publicar', 'sin_informe', 'sin_guardar', 'otra_visita', 'desactualizado', 'demasiado_grande', 'solicitud_invalida', 'archivo_invalido', 'correo_invalido', 'correo_no_coincide', 'mensaje_no_corresponde', 'asunto_largo', 'sin_acceso', 'no_es_autor', 'registro_no_existe', 'no_autorizado'];
   const envioNoSalio = (codigo) => NO_SALIO.includes(codigo);
 
-  const ultimoEnvio = (datos) => { const e = (datos && datos.envios) || []; return e.length ? e[e.length - 1] : null; };
+  // Último intento vigente: los marcados 'no_salio' quedan en el historial pero ya no cuentan para el estado actual.
+  const ultimoEnvio = (datos) => { const e = ((datos && datos.envios) || []).filter((x) => x.estado !== 'no_salio'); return e.length ? e[e.length - 1] : null; };
   // ¿El último intento quedó sin confirmar (en curso o dudoso)? Entonces el cliente PUEDE tener ya la copia.
   const envioDudoso = (datos) => { const e = ultimoEnvio(datos); return !!e && (e.estado === 'enviando' || e.estado === 'dudoso'); };
 
@@ -404,9 +405,8 @@
 
   // Línea visible en la ficha: a quién y cuándo salió el último envío. Si la visita se corrigió después, lo dice.
   function lineaEnvio(datos) {
-    const envios = (datos && datos.envios) || [];
-    if (!envios.length) return '';
-    const e = envios[envios.length - 1];
+    const e = ultimoEnvio(datos);
+    if (!e) return '';
     if (envioDudoso(datos)) return 'Envío a ' + e.para + ' el ' + fechaHoraCL(e.ts) + ' sin confirmar: puede haber salido (revisa tu bandeja: recibirías una copia)';
     const conf = e.resueltoPor ? ' · confirmado por ' + e.resueltoPor : '';
     const corregida = datos.editado && datos.editado.ts && new Date(datos.editado.ts) > new Date(e.ts);
@@ -414,24 +414,28 @@
   }
 
   // El PM comprueba su bandeja (recibe copia de cada correo) y resuelve el último intento sin confirmar:
-  // 'llego' lo deja enviado (conserva su fecha; anota quién y cuándo lo confirmó); 'no_salio' lo retira. Solo actúa si el último
+  // 'llego' lo deja enviado (conserva su fecha) y 'no_salio' lo marca como no salido; los dos anotan quién y cuándo. Nunca se borra el intento. Solo actúa si el último
   // intento está dudoso o en curso: un envío ya confirmado no se puede "des-enviar".
   function resolverDudoso(datos, resultado, por, ts) {
     if (resultado !== 'llego' && resultado !== 'no_salio') throw new Error('resultado inválido: ' + resultado);
     if (!envioDudoso(datos)) return datos;
     const e = ultimoEnvio(datos);
-    return resolverEnvio(datos, e.ts, resultado === 'llego' ? 'enviada' : null, resultado === 'llego' ? { resueltoPor: por, resueltoEn: ts } : null);
+    return resolverEnvio(datos, e.ts, resultado === 'llego' ? 'enviada' : 'no_salio', { resueltoPor: por, resueltoEn: ts });
   }
+
+  // Intentos marcados como "no salió" por el PM: quedan a la vista en la ficha (el registro de envíos es evidencia).
+  const historialNoSalio = (datos) => ((datos && datos.envios) || []).filter((e) => e.estado === 'no_salio')
+    .map((e) => 'Intento del ' + fechaHoraCL(e.ts) + ' a ' + e.para + ' marcado como no salido por ' + (e.resueltoPor || '—') + (e.resueltoEn ? ' el ' + fechaHoraCL(e.resueltoEn) : ''));
 
   // Texto del botón de envío en la ficha, o null si la visita no tiene un correo de cliente válido.
   function botonEnvio(datos) {
     const d = datos || {};
     if (!correoValido(d.cierre && d.cierre.email)) return null;
     if (envioDudoso(d)) return 'Reenviar (puede duplicar el correo)';
-    return (d.envios || []).length ? 'Reenviar copia' : 'Reintentar envío';
+    return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

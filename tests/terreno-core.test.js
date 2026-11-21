@@ -496,21 +496,36 @@ test('resolverDudoso "llego": deja el último intento como enviado conservando s
   assert.match(TC.lineaEnvio(r), /^Copia enviada a ana@obra\.cl el 20-11-2026 12:30 · confirmado por Luis/);
 });
 
-test('resolverDudoso "no_salio": retira el intento y el botón vuelve a ser el normal', () => {
+test('resolverDudoso "no_salio": CONSERVA el intento con quién y cuándo lo marcó, y lo excluye del estado actual (el botón vuelve a lo normal)', () => {
   const d = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'enviando' }] };
   const r = TC.resolverDudoso(d, 'no_salio', 'Luis', '2026-11-21T09:00:00Z');
-  assert.equal(r.envios.length, 0);
+  assert.equal(r.envios.length, 1);
+  assert.deepEqual(r.envios[0], { ...ENV, estado: 'no_salio', resueltoPor: 'Luis', resueltoEn: '2026-11-21T09:00:00Z' });
+  assert.equal(TC.envioDudoso(r), false);
   assert.equal(TC.botonEnvio(r), 'Reintentar envío');
   assert.equal(TC.lineaEnvio(r), '');
+  assert.deepEqual(TC.historialNoSalio(r), ['Intento del 20-11-2026 12:30 a ana@obra.cl marcado como no salido por Luis el 21-11-2026 06:00']);
+  assert.deepEqual(TC.historialNoSalio({ envios: [{ ...ENV, estado: 'enviada' }] }), []);
+});
+
+test('un intento "no_salio" no cuenta como último: con un envío confirmado antes, la línea y el botón siguen siendo los de ese envío', () => {
+  const d = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, ts: '2026-11-19T15:30:00Z', estado: 'enviada' }, { ...ENV, estado: 'no_salio', resueltoPor: 'Luis', resueltoEn: 't' }] };
+  assert.match(TC.lineaEnvio(d), /^Copia enviada a ana@obra\.cl el 19-11-2026 12:30/);
+  assert.equal(TC.botonEnvio(d), 'Reenviar copia');
+  assert.equal(TC.envioDudoso(d), false);
+  assert.equal(TC.envioDudoso({ envios: [...d.envios, { ...ENV, ts: '2026-11-22T10:00:00Z', estado: 'dudoso' }] }), true);   // un intento nuevo dudoso sí cuenta
 });
 
 test('resolverDudoso: solo actúa sobre el ÚLTIMO intento y solo si está dudoso o en curso; con un envío ya confirmado no hace nada', () => {
   const ok = { envios: [{ ...ENV, estado: 'enviada' }] };
   assert.deepEqual(TC.resolverDudoso(ok, 'no_salio', 'Luis', 't'), ok);   // no se puede "des-enviar" un correo confirmado
   assert.deepEqual(TC.resolverDudoso({}, 'llego', 'Luis', 't'), {});
+  const inverso = { envios: [{ ...ENV, ts: '2026-11-19T10:00:00Z', estado: 'dudoso' }, { ...ENV, estado: 'enviada' }] };   // dudoso ANTERIOR, el último ya enviado
+  assert.deepEqual(TC.resolverDudoso(inverso, 'llego', 'Luis', 't'), inverso);
+  assert.deepEqual(TC.resolverDudoso(inverso, 'no_salio', 'Luis', 't'), inverso);
   const dos = { envios: [{ ...ENV, ts: '2026-11-19T10:00:00Z', estado: 'enviada' }, { ...ENV, estado: 'dudoso' }] };
   const r = TC.resolverDudoso(dos, 'no_salio', 'Luis', 't');
-  assert.equal(r.envios.length, 1); assert.equal(r.envios[0].ts, '2026-11-19T10:00:00Z');
+  assert.equal(r.envios[0].estado, 'enviada'); assert.equal(r.envios[1].estado, 'no_salio');
   assert.throws(() => TC.resolverDudoso(dos, 'quizas', 'Luis', 't'), /resultado/);
 });
 
