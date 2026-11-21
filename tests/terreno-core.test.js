@@ -151,3 +151,27 @@ test('trazoAPng: el tamaño de salida no depende de las unidades de los puntos',
   assert.equal(a.width, b.width);
   assert.ok(Math.abs(a.height - b.height) <= 1);   // el redondeo de coma flotante puede mover 1 px
 });
+
+test('puedeEditar: el autor y el admin sí; otro PM o sin sesión no', () => {
+  const r = { autor: 'u1' };
+  assert.equal(TC.puedeEditar(r, { id: 'u1', admin: false }), true);
+  assert.equal(TC.puedeEditar(r, { id: 'u2', admin: true }), true);
+  assert.equal(TC.puedeEditar(r, { id: 'u2', admin: false }), false);
+  assert.equal(TC.puedeEditar(r, null), false);
+  assert.equal(TC.puedeEditar({ autor: null }, { id: null, admin: false }), false);
+});
+
+test('marcarEdicion: deja huella de quién y cuándo, sin perder los demás datos ni mutar el original', () => {
+  const orig = { nombre: 'Charla', observaciones: 'x', otro: 1 };
+  const d = TC.marcarEdicion(orig, 'Ana PM', '2026-11-20T10:00:00.000Z');
+  assert.deepEqual(d.editado, { ts: '2026-11-20T10:00:00.000Z', por: 'Ana PM' });
+  assert.equal(d.otro, 1);
+  assert.equal(orig.editado, undefined);
+  assert.deepEqual(TC.marcarEdicion(null, 'A', 't'), { editado: { ts: 't', por: 'A' } });
+});
+
+test('fotosEditadas: conserva las existentes, agrega las nuevas y no duplica', () => {
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/2.jpg'], ['a/3.jpg']), ['a/1.jpg', 'a/2.jpg', 'a/3.jpg']);
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/1.jpg', 'a/2.jpg']), ['a/1.jpg', 'a/2.jpg']);
+  assert.deepEqual(TC.fotosEditadas(null, undefined), []);
+});

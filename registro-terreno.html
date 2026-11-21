@@ -128,6 +128,7 @@ details.mas p{margin:6px 0}
 .gate{max-width:420px;margin:48px auto;padding:24px}
 .gate .txmark{width:110px;margin-bottom:18px}
 .del{background:transparent;border:0;color:var(--mute);font-size:12px;cursor:pointer;text-decoration:underline;float:right}
+.del + .del{margin-right:12px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;transition:transform .25s;font-size:14px;max-width:90%;z-index:20}
 #toast.on{transform:translateX(-50%) translateY(0)}
 .ttl small::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:#1fb3b5;margin-right:7px;vertical-align:1px;box-shadow:0 0 10px #1fb3b5}
@@ -186,6 +187,7 @@ let charts = {};
 let cliSel = null;        // cliente elegido de la base única { id, nombre, rut, comuna, direccion }
 let cliNuevo = false;     // el usuario eligió "crear cliente nuevo"
 let accesos = [];
+let editandoId = null;    // id del registro que se está corrigiendo (null = registro nuevo)
 let catalogo = [];
 let ultimaCarga = 0;
 const urlCache = {};
@@ -263,7 +265,7 @@ async function cargar(){
   const { data, error } = await sb.from('registros').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
   if (error) { setConexion('Error de conexión'); toast('No se pudieron cargar los registros'); return; }
   registros = data.map(r => ({ ...(r.datos || {}), id: r.id, kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id,
-    obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at }));
+    obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {} }));
   ultimaCarga = Date.now();
   if (vista === 'panel' || vista === 'registros') render();
 }
@@ -590,7 +592,8 @@ function comprimir(file){
   });
 }
 
-async function guardar(kind, btn){
+// `registroId`: si viene, corrige ese registro (update); si no, crea uno nuevo (insert).
+async function guardar(kind, btn, registroId){
   const d = leerCampos();
   if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
   if (!d.fecha) return toast('Falta la fecha');
@@ -608,7 +611,9 @@ async function guardar(kind, btn){
       clienteId = data;
     }
 
-    const id = crypto.randomUUID();
+    const previo = registroId ? registros.find(x => x.id === registroId) : null;
+    if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
+    const id = registroId || crypto.randomUUID();
     const fotos = [];
     if (kind === 'visita' && d.fotos && d.fotos.length) {
       for (let i = 0; i < d.fotos.length; i++) {
@@ -621,7 +626,7 @@ async function guardar(kind, btn){
       }
     }
 
-    const datos = { observaciones: d.observaciones || '' };
+    const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
     if (kind === 'visita') {
       Object.assign(datos, {
         direccion: d.direccion || '', contacto: d.contacto || '', producto: d.producto || '',
@@ -637,21 +642,58 @@ async function guardar(kind, btn){
       });
     }
 
-    const { error } = await sb.from('registros').insert({
-      id, kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
-      estado: kind === 'visita' ? (d.estado || 'Abierto') : null,
-      datos, fotos, autor: me.id, autor_nombre: me.nombre
-    });
-    if (error) throw error;
-    toast('Registro guardado');
-    cliSel = null; cliNuevo = false;
-    vista = kind === 'visita' ? 'registros' : 'panel';
+    const fila = {
+      kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
+      estado: kind === 'visita' ? (d.estado || 'Abierto') : null
+    };
+    if (registroId) {
+      // Corrección: huella de quién y cuándo; autor y fotos previas no se tocan (se suman las nuevas).
+      const ahora = new Date().toISOString();
+      const { data, error } = await sb.from('registros').update({
+        ...fila, datos: TC.marcarEdicion(datos, me.nombre, ahora), fotos: TC.fotosEditadas(previo.fotos, fotos), updated_at: ahora
+      }).eq('id', registroId).select('id');
+      if (error) throw error;
+      if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
+    } else {
+      const { error } = await sb.from('registros').insert({ id, ...fila, datos, fotos, autor: me.id, autor_nombre: me.nombre });
+      if (error) throw error;
+    }
+    toast(registroId ? 'Cambios guardados' : 'Registro guardado');
+    cliSel = null; cliNuevo = false; editandoId = null;
+    vista = registroId || kind === 'visita' ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
     cargar();
   } catch(e){
     btn.disabled = false; btn.textContent = txt;
-    toast('No se pudo guardar: ' + (e.message || e.code || 'error'));
+    toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
+}
+
+/* Abre el formulario del registro con sus datos para corregirlo (participantes y firmas incluidos). */
+function editarRegistro(id){
+  const r = registros.find(x => x.id === id);
+  if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor del registro o un administrador puede corregirlo');
+  editandoId = id;
+  cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null; cliNuevo = false;
+  vista = r.kind; render(); window.scrollTo(0, 0);
+  const f = $('#form');
+  const valores = { ...r, cliente: r.cliente, obra: r.obra };
+  f.querySelectorAll('[name]').forEach(el => {
+    const n = el.name, v = valores[n];
+    if (el.type === 'file' || v === undefined || v === null) return;
+    if (el.type === 'checkbox') el.checked = [].concat(v).includes(el.value);
+    else if (el.type !== 'radio') el.value = v;
+  });
+  if (r.kind !== 'visita') {
+    $('#partics').innerHTML = TC.participantesVista(null, r.participantes).map(filaPart).join('');
+    $('#act-titulo').textContent = 'Corregir ' + KIND_LABEL[r.kind].toLowerCase();
+  } else {
+    f.querySelector('h2').textContent = 'Corregir visita por reclamo';
+    if (r.fotos.length) f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan.</p>`);
+  }
+  f.querySelector('[data-a="guardar"]').textContent = 'Guardar cambios';
+  const cancelar = f.querySelector('.acciones [data-a="nav"]'); if (cancelar) cancelar.dataset.v = 'registros';
+  infoCliente();
 }
 
 async function cambiarEstado(id, estado){
@@ -778,7 +820,8 @@ const puedeBorrar = r => me && (me.admin || r.autor === me.id);
 
 function tarjeta(r){
   const autor = `<span class="mute"> · ${esc(nombreAutor(r))}</span>`;
-  const del = puedeBorrar(r) ? `<button class="del" data-a="eliminar" data-id="${esc(r.id)}">Eliminar</button>` : '';
+  const del = (puedeBorrar(r) ? `<button class="del" data-a="eliminar" data-id="${esc(r.id)}">Eliminar</button>` : '')
+    + (TC.puedeEditar(r, me) ? `<button class="del" data-a="editar" data-id="${esc(r.id)}">Editar</button>` : '');
   if (r.kind === 'visita') {
     return `<div class="card">${del}
       <span class="tag v">Visita</span><b>${esc(r.cliente)}</b>${autor}
@@ -849,11 +892,12 @@ async function cargarAccesos(){
 
 /* ===================== Eventos ===================== */
 const acciones = {
-  nav: b => { vista = b.dataset.v; cliSel = null; cliNuevo = false; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
+  nav: b => { vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
   addPart: () => $('#partics').insertAdjacentHTML('beforeend', filaPart()),
   delPart: b => b.closest('.part').remove(),
   firmar: b => firmarFila(b),
-  guardar: b => guardar(b.dataset.t, b),
+  guardar: b => guardar(b.dataset.t, b, editandoId),
+  editar: b => editarRegistro(b.dataset.id),
   filtro: b => { filtro = b.dataset.f; render(); },
   estado: b => cambiarEstado(b.dataset.id, b.dataset.e),
   eliminar: b => eliminar(b.dataset.id)
