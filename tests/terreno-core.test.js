@@ -534,3 +534,279 @@ test('textos de error: obra demasiado larga para el asunto y mensaje desfasado',
   assert.match(TC.textoErrorEnvio('mensaje_no_corresponde'), /recarga la página o vuelve a guardar la visita/);
   assert.equal(TC.envioNoSalio('asunto_largo'), true);
 });
+
+// ── Ensayos de adherencia (Task 8) ──
+// Los números son los del informe real de INGEVEC: Torre 4 (2,772 / 2,491 / 2,433 kN) y Dpto 106/104/103 (3,538 / 3,019 / 3,082 kN), cortes de 50x50 mm.
+const FILAS_INGEVEC = [
+  { sustrato: 'Torre 4', carga: '2,772', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Nivelador' },
+  { sustrato: 'Torre 4', carga: '2,491', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Nivelador' },
+  { sustrato: 'Torre 4', carga: '2,433', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Sustrato' },
+  { sustrato: 'Dpto 106', carga: '3,538', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Sustrato' },
+  { sustrato: 'Dpto 104', carga: '3,019', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Sustrato' },
+  { sustrato: 'Dpto 103', carga: '3,082', ancho: '50', alto: '50', mpa: '', falla: 'Cohesión Sustrato' },
+];
+
+test('numero: acepta coma o punto decimal escritos por el PM y rechaza lo que no es número', () => {
+  assert.equal(TC.numero('2,772'), 2.772);
+  assert.equal(TC.numero('2.772'), 2.772);
+  assert.equal(TC.numero(' 50 '), 50);
+  assert.equal(TC.numero('1.234,5'), 1234.5);
+  assert.equal(TC.numero(''), null);
+  assert.equal(TC.numero(null), null);
+  assert.equal(TC.numero('abc'), null);
+  assert.equal(TC.numero('2,7,7'), null);
+});
+
+test('fmtMpa y fmtNum: coma decimal chilena; el MPa siempre con dos decimales', () => {
+  assert.equal(TC.fmtMpa(1.11), '1,11');
+  assert.equal(TC.fmtMpa(1.1), '1,10');
+  assert.equal(TC.fmtMpa(null), '');
+  assert.equal(TC.fmtNum(2.772), '2,772');
+  assert.equal(TC.fmtNum(50), '50');
+  assert.equal(TC.fmtNum(null), '');
+});
+
+test('normalizarFilas con los números reales de INGEVEC: MPa calculado de carga y área, sin marcarlo como manual', () => {
+  const f = TC.normalizarFilas(FILAS_INGEVEC);
+  assert.equal(f.length, 6);
+  assert.deepEqual(f[0], { n: 1, sustrato: 'Torre 4', cargaKn: 2.772, anchoMm: 50, altoMm: 50, falla: 'Cohesión Nivelador' });
+  assert.deepEqual(f.map((x) => TC.mpaDeFila(x)), [1.11, 1.0, 0.97, 1.42, 1.21, 1.23]);
+  assert.ok(f.every((x) => !('mpa' in x)), 'ninguna fila calculada guarda mpa');
+  assert.ok(f.every((x) => !TC.esManual(x)));
+});
+
+test('normalizarFilas: el MPa escrito a mano manda, queda marcado como manual y se numera de corrido', () => {
+  const f = TC.normalizarFilas([
+    { sustrato: '', carga: '', ancho: '50', alto: '50', mpa: '', falla: '' },                 // fila vacía: se descarta
+    { sustrato: 'Losa 1', carga: '2,772', ancho: '50', alto: '50', mpa: '1,2', falla: '' },   // manual
+    { sustrato: 'Losa 2', carga: '', ancho: '50', alto: '50', mpa: '0,95', falla: 'Otra' },   // solo MPa del laboratorio
+  ]);
+  assert.deepEqual(f.map((x) => x.n), [1, 2]);
+  assert.equal(f[0].mpa, 1.2);
+  assert.ok(TC.esManual(f[0]));
+  assert.equal(TC.mpaDeFila(f[0]), 1.2);
+  assert.equal(TC.mpaDeFila(f[1]), 0.95);
+  assert.equal(f[1].cargaKn, null);
+});
+
+test('normalizarFilas: un texto que no es número no se convierte en 0 ni en resultado', () => {
+  const [f] = TC.normalizarFilas([{ sustrato: 'A', carga: 'abc', ancho: '50', alto: '50', mpa: '', falla: '' }]);
+  assert.equal(f.cargaKn, null);
+  assert.equal(TC.mpaDeFila(f), null);
+});
+
+test('resumenEnsayo con INGEVEC: indicadores de apoyo y ninguna fila bajo 0,20 MPa', () => {
+  const r = TC.resumenEnsayo(TC.normalizarFilas(FILAS_INGEVEC));
+  assert.equal(r.min, 0.97);
+  assert.equal(r.max, 1.42);
+  assert.equal(r.prom, 1.16);
+  assert.deepEqual(r.bajoUmbral, []);
+});
+
+test('conclusionBase con INGEVEC: nombra las dos fallas, las normas y no dictamina', () => {
+  const t = TC.conclusionBase(TC.normalizarFilas(FILAS_INGEVEC));
+  assert.match(t, /NCh 2471/);
+  assert.match(t, /NCh 2256\/1/);
+  assert.match(t, /0,20 MPa/);
+  assert.match(t, /Las fallas identificadas corresponden a: Cohesión Nivelador, Cohesión Sustrato\.$/);
+  assert.doesNotMatch(t, /cumple|no cumple|aprobad|rechazad/i);
+});
+
+test('validarEnsayo: pide cliente, fecha, al menos una extracción con resultado y firmante', () => {
+  const ok = { cliente: 'Ingevec', fecha: '2026-11-20', firm_nombre: 'Ana Pérez' };
+  const filas = TC.normalizarFilas(FILAS_INGEVEC);
+  assert.equal(TC.validarEnsayo(ok, filas), '');
+  assert.match(TC.validarEnsayo({ ...ok, cliente: '' }, filas), /cliente/i);
+  assert.match(TC.validarEnsayo({ ...ok, fecha: '' }, filas), /fecha/i);
+  assert.match(TC.validarEnsayo({ ...ok, firm_nombre: ' ' }, filas), /firmante/i);
+  assert.match(TC.validarEnsayo(ok, []), /al menos una extracción/i);
+  const sinResultado = TC.normalizarFilas([{ sustrato: 'Dpto 1', carga: '', ancho: '50', alto: '50', mpa: '', falla: '' }]);
+  assert.match(TC.validarEnsayo(ok, sinResultado), /fila 1/i);
+  const sinArea = TC.normalizarFilas([{ sustrato: 'Dpto 1', carga: '2,7', ancho: '', alto: '50', mpa: '', falla: '' }]);
+  assert.match(TC.validarEnsayo(ok, sinArea), /fila 1/i);
+});
+
+test('datosEnsayo: arma lo que se guarda, con las filas normalizadas, pies de foto y firmante', () => {
+  const d = {
+    direccion: 'Av. Siempre Viva 1', contacto: 'Juan Soto', producto: 'Autonivelante', motivo_visita: 'Tracción Directa',
+    desarrollo: 'Texto', conclusion: 'Conclusión', correo_cliente: ' obra@ingevec.cl ',
+    firm_nombre: 'Ana Pérez', firm_cargo: 'Asesor Técnico', firm_movil: '+56 9 1111 2222', firm_correo: 'ana@grupotx.cl', observaciones: 'x',
+  };
+  const datos = TC.datosEnsayo(d, FILAS_INGEVEC, ['Torre 4', '', 'Dpto 106']);
+  assert.equal(datos.filas.length, 6);
+  assert.equal(datos.correo_cliente, 'obra@ingevec.cl');
+  assert.deepEqual(datos.firmante, { nombre: 'Ana Pérez', cargo: 'Asesor Técnico', movil: '+56 9 1111 2222', correo: 'ana@grupotx.cl' });
+  assert.deepEqual(datos.pies, ['Torre 4', '', 'Dpto 106']);
+  assert.equal(datos.motivo_visita, 'Tracción Directa');
+  assert.equal(datos.conclusion, 'Conclusión');
+});
+
+test('firmanteInicial: precarga del usuario y manda lo que el equipo recuerda', () => {
+  const yo = { nombre: 'Ana Pérez', email: 'ana@grupotx.cl' };
+  assert.deepEqual(TC.firmanteInicial(yo, null), { nombre: 'Ana Pérez', cargo: 'Asesor Técnico', movil: '', correo: 'ana@grupotx.cl' });
+  assert.deepEqual(TC.firmanteInicial(yo, { cargo: 'Jefe de Laboratorio', movil: '+56 9 1111 2222', nombre: '' }),
+    { nombre: 'Ana Pérez', cargo: 'Jefe de Laboratorio', movil: '+56 9 1111 2222', correo: 'ana@grupotx.cl' });
+  assert.deepEqual(TC.firmanteInicial(null, undefined), { nombre: '', cargo: 'Asesor Técnico', movil: '', correo: '' });
+});
+
+test('encabezadoInforme: código, creación y versión del documento controlado, y página X de Y', () => {
+  const h = TC.encabezadoInforme(2, 3);
+  assert.equal(h.titulo, 'Informe Prueba Adherencia');
+  assert.equal(h.detalle, 'Código DOC-PM-LAB-05 · Creación 02-01-2025 · Versión 0.0');
+  assert.equal(h.pagina, 'Página 2 de 3');
+});
+
+test('nombreInforme: el ensayo de adherencia tiene su propio nombre de archivo', () => {
+  assert.equal(TC.nombreInforme({ kind: 'adherencia', obra: 'Torre 4', fecha: '2026-11-20' }), 'Informe prueba adherencia - Torre 4 - 20-11-2026.pdf');
+  assert.equal(TC.nombreInforme({ obra: 'Torre 4', fecha: '2026-11-20' }), 'Informe visita técnica - Torre 4 - 20-11-2026.pdf');
+});
+
+test('correoCliente y botonEnvio: el ensayo envía al correo del cliente y la visita al del cierre', () => {
+  assert.equal(TC.correoCliente('adherencia', { correo_cliente: 'obra@ingevec.cl' }), 'obra@ingevec.cl');
+  assert.equal(TC.correoCliente('visita', { cierre: { email: 'a@b.cl' }, correo_cliente: 'otro@x.cl' }), 'a@b.cl');
+  assert.equal(TC.correoCliente('adherencia', { cierre: { email: 'a@b.cl' } }), '');
+  assert.equal(TC.botonEnvio({ correo_cliente: 'obra@ingevec.cl' }, 'adherencia'), 'Reintentar envío');
+  assert.equal(TC.botonEnvio({}, 'adherencia'), null);
+  assert.equal(TC.botonEnvio({ cierre: { email: 'a@b.cl' } }), 'Reintentar envío');
+});
+
+test('correoEnsayo con INGEVEC: da el rango con dos decimales y no dictamina', () => {
+  const filas = TC.normalizarFilas(FILAS_INGEVEC);
+  const c = TC.correoEnsayo({ fecha: '2026-11-20', cliente: 'INGEVEC', obra: 'Torre 4', datos: { filas, motivo_visita: 'Tracción Directa' } });
+  assert.match(c.cuerpo, /Se ensayaron 6 probetas, con resultados entre 0,97 y 1,42 MPa/);
+  assert.doesNotMatch(c.cuerpo, /cumpl/i);
+});
+
+// ── Informe de adherencia (HTML) ──
+const regEnsayo = (extra = {}, datosExtra = {}) => {
+  const filas = TC.normalizarFilas(FILAS_INGEVEC);
+  return {
+    kind: 'adherencia', id: 'abc', cliente: 'INGEVEC', obra: 'Edificio Torre 4', fecha: '2026-11-20',
+    datos: {
+      direccion: 'Av. Siempre Viva 1', contacto: 'Juan Soto', producto: 'Autonivelante PrimerPro', motivo_visita: 'Tracción Directa',
+      desarrollo: TC.DESARROLLO_DEFECTO, filas, pies: ['Torre 4 · punto 1'], conclusion: TC.conclusionBase(filas),
+      firmante: { nombre: 'Ana Pérez', cargo: 'Asesor Técnico', movil: '+56 9 1111 2222', correo: 'ana@grupotx.cl' }, ...datosExtra,
+    }, ...extra,
+  };
+};
+const filasHtml = (h) => (h.match(/<tr class="inf-res">/g) || []).length;
+
+test('informeAdherenciaHtml: las cinco secciones del documento original, en orden, con la numeración del original', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), { fotos: [JPG('a')] });
+  const orden = ['I. Descripción', '>Desarrollo<', '>Resultados<', '>Imágenes<', '>Conclusión<', 'Atentamente', 'Nota: Grupo TX respalda'].map((s) => h.indexOf(s));
+  assert.ok(orden.every((i) => i >= 0), 'faltan secciones: ' + orden);
+  assert.deepEqual([...orden].sort((a, b) => a - b), orden, 'las secciones no están en el orden del original');
+});
+
+test('informeAdherenciaHtml: una fila de resultados por extracción, con carga, área y MPa de INGEVEC', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  assert.equal(filasHtml(h), 6);
+  assert.match(h, /2,772/);
+  assert.match(h, /50 x 50/);
+  assert.match(h, /<td class="inf-mpa">1,11<\/td>/);
+  assert.match(h, /<td class="inf-mpa">1,42<\/td>/);
+  assert.match(h, /Dpto 106/);
+  assert.match(h, /Cohesión Nivelador/);
+});
+
+test('informeAdherenciaHtml: la descripción lleva constructora, obra, dirección, contacto, producto, motivo y fecha', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  for (const t of ['INGEVEC', 'Edificio Torre 4', 'Av. Siempre Viva 1', 'Juan Soto', 'Autonivelante PrimerPro', 'Tracción Directa', '20-11-2026']) assert.ok(h.includes(t), t);
+  assert.match(h, /Constructora/);
+  assert.match(h, /Motivo de visita/);
+});
+
+test('informeAdherenciaHtml: el desarrollo y la conclusión son los textos del registro, con las normas del texto base', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  assert.ok(h.includes('Se realizan extracciones para verificar Adherencia en faena Piso Autonivelante'));
+  assert.match(h, /NCh 2471/);
+  assert.match(h, /NCh 2256\/1/);
+  assert.match(h, /Las fallas identificadas corresponden a: Cohesión Nivelador, Cohesión Sustrato\./);
+});
+
+test('informeAdherenciaHtml: NO dictamina ni muestra los indicadores de apoyo de la pantalla', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  assert.doesNotMatch(h, /cumple|no cumple|aprobad|rechazad|conforme/i);
+  assert.doesNotMatch(h, /promedio|máximo|apoyo|bajo el umbral|bajo 0,20/i);
+});
+
+test('informeAdherenciaHtml: aunque haya una fila bajo 0,20 MPa, el documento no la marca ni la comenta', () => {
+  const filas = TC.normalizarFilas([{ sustrato: 'A', carga: '0,4', ancho: '50', alto: '50', mpa: '', falla: 'Adhesión en la interfaz' }]);
+  const h = TC.informeAdherenciaHtml(regEnsayo({}, { filas, conclusion: TC.conclusionBase(filas) }), {});
+  assert.match(h, /<td class="inf-mpa">0,16<\/td>/);
+  assert.doesNotMatch(h, /cumple|insuficiente|deficiente|no alcanza|bajo el umbral|bajo 0,20|bajo el mínimo/i);
+});
+
+test('informeAdherenciaHtml: un MPa escrito a mano lleva asterisco y la nota de que lo informó el laboratorio; los calculados no', () => {
+  const filas = TC.normalizarFilas([
+    { sustrato: 'A', carga: '2,772', ancho: '50', alto: '50', mpa: '1,2', falla: '' },
+    { sustrato: 'B', carga: '2,491', ancho: '50', alto: '50', mpa: '', falla: '' },
+  ]);
+  const h = TC.informeAdherenciaHtml(regEnsayo({}, { filas }), {});
+  assert.match(h, /<td class="inf-mpa">1,20 \*<\/td>/);
+  assert.match(h, /<td class="inf-mpa">1,00<\/td>/);
+  assert.match(h, /informado por el laboratorio/i);
+  assert.doesNotMatch(TC.informeAdherenciaHtml(regEnsayo(), {}), /informado por el laboratorio/i);
+});
+
+test('informeAdherenciaHtml: firma del asesor con "Atentamente", nombre, cargo, Móvil, Mail y Web; la nota legal va después', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  assert.match(h, /Atentamente/);
+  assert.match(h, /Ana Pérez/);
+  assert.match(h, /Asesor Técnico/);
+  assert.match(h, /Móvil :[^<]*\+56 9 1111 2222/);
+  assert.match(h, /Mail :[^<]*ana@grupotx\.cl/);
+  assert.match(h, /Web :[^<]*www\.grupotx\.cl/);
+  assert.ok(h.indexOf('Atentamente') < h.indexOf(TC.NOTA_LEGAL.slice(0, 40)));
+  assert.ok(h.includes(TC.NOTA_LEGAL.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))), 'la nota legal va completa y textual');
+});
+
+test('informeAdherenciaHtml: sin móvil no queda una línea "Móvil :" vacía', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo({}, { firmante: { nombre: 'Ana Pérez', cargo: 'Asesor Técnico', movil: '', correo: 'ana@grupotx.cl' } }), {});
+  assert.doesNotMatch(h, /Móvil :/);
+  assert.match(h, /Mail :/);
+});
+
+test('informeAdherenciaHtml: las fotos salen con su pie; la que no tiene pie no inventa uno; sin fotos no hay sección Imágenes', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), { fotos: [JPG('a'), JPG('b')] });
+  assert.match(h, /<figcaption>Torre 4 · punto 1<\/figcaption>/);
+  assert.equal((h.match(/<figure/g) || []).length, 2);
+  assert.equal((h.match(/<figcaption>/g) || []).length, 1);
+  assert.doesNotMatch(TC.informeAdherenciaHtml(regEnsayo(), {}), />Imágenes</);
+});
+
+test('informeAdherenciaHtml: una foto con data URL inválido corta la generación y nombra cuál', () => {
+  assert.throws(() => TC.informeAdherenciaHtml(regEnsayo(), { fotos: [JPG('a'), 'data:text/html;base64,AAAA'] }), /fotografía 2 del informe no se pudo incluir/i);
+});
+
+test('informeAdherenciaHtml: escapa el texto del usuario', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo({ cliente: '<img src=x onerror=alert(1)>' }, { contacto: 'a <b>b</b> & c', conclusion: '<script>x</script>' }), {});
+  assert.doesNotMatch(h, /<img src=x|<script>x|<b>b<\/b>/);
+  assert.match(h, /&lt;img src=x/);
+  assert.match(h, /a &lt;b&gt;b&lt;\/b&gt; &amp; c/);
+});
+
+test('informeAdherenciaHtml: no lleva el código de otro documento ni inventa datos; el código del documento va en el encabezado de cada hoja', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo(), {});
+  assert.doesNotMatch(h, /DOC-PM-(?!LAB-05)/);
+  assert.doesNotMatch(h, /Versión 1|Revisión/);
+});
+
+test('informeAdherenciaHtml: sin desarrollo ni conclusión escritos, esas secciones se omiten (no se rellenan con texto inventado)', () => {
+  const h = TC.informeAdherenciaHtml(regEnsayo({}, { desarrollo: '', conclusion: '' }), {});
+  assert.doesNotMatch(h, />Conclusión</);
+  assert.doesNotMatch(h, /NCh 2471/);
+});
+
+test('filaEnBlanco: la fila con solo el área por defecto no cuenta; con sustrato, carga, MPa o falla sí', () => {
+  assert.equal(TC.filaEnBlanco({ sustrato: ' ', carga: '', ancho: '50', alto: '50', mpa: '', falla: '' }), true);
+  for (const campo of ['sustrato', 'carga', 'mpa', 'falla']) assert.equal(TC.filaEnBlanco({ ancho: '50', alto: '50', [campo]: 'x' }), false, campo);
+});
+
+test('textoErrorEnvio: los errores de envío de un ensayo hablan de "el ensayo", no de "la visita"', () => {
+  for (const c of ['sin_guardar', 'otra_visita', 'desactualizado', 'mensaje_no_corresponde', 'correo_no_coincide', 'no_es_autor', 'registro_no_existe']) {
+    assert.doesNotMatch(TC.textoErrorEnvio(c, undefined, 'adherencia'), /visita/i, c);
+    assert.match(TC.textoErrorEnvio(c, undefined, 'visita'), /visita/i, c);
+  }
+  assert.equal(TC.textoErrorEnvio('demasiado_grande', undefined, 'adherencia'), TC.textoErrorEnvio('demasiado_grande'));
+});

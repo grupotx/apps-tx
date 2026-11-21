@@ -54,6 +54,79 @@
     return CONCLUSION_BASE + ' Las fallas identificadas corresponden a: ' + tipos.join(', ') + '.';
   }
 
+  // El MPa de una fila: el escrito a mano si lo hay (manual), si no el calculado; null si no alcanza para ninguno.
+  const mpaDeFila = mpaFila;
+  const esManual = (f) => Number.isFinite(num(f && f.mpa));
+
+  // Número escrito por el PM: acepta coma o punto decimal ("2,772" o "2.772") y "1.234,5". Cualquier otra cosa es null
+  // (nunca 0: un texto que no es número no puede pasar por resultado).
+  function numero(s) {
+    if (s == null) return null;
+    let t = String(s).trim().replace(/\s/g, '');
+    if (!t) return null;
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(t)) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  const fmtNum = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : String(v).replace('.', ','));
+  const fmtMpa = (v) => (v == null || !Number.isFinite(Number(v)) ? '' : Number(v).toFixed(2).replace('.', ','));
+
+  // Filas del formulario (texto tal como lo escribió el PM) → filas que se guardan. Una fila sin sustrato, carga, MPa ni
+  // falla es una fila en blanco y se descarta; el resto se numera de corrido. El MPa solo se guarda si lo escribió el
+  // PM (manual): el calculado se recalcula siempre desde la carga y el área, así no queda un valor viejo.
+  const filaEnBlanco = (c) => ![c.sustrato, c.carga, c.mpa, c.falla].some((v) => String(v == null ? '' : v).trim());
+  function normalizarFilas(crudas) {
+    const t = (v) => String(v == null ? '' : v).trim();
+    const filas = [];
+    for (const c of crudas || []) {
+      if (filaEnBlanco(c)) continue;
+      const f = { n: filas.length + 1, sustrato: t(c.sustrato), cargaKn: numero(c.carga), anchoMm: numero(c.ancho), altoMm: numero(c.alto), falla: t(c.falla) };
+      const m = numero(c.mpa);
+      if (m != null) f.mpa = m;
+      filas.push(f);
+    }
+    return filas;
+  }
+
+  // Lo mínimo para poder emitir el informe. Devuelve el texto del problema o '' si está bien.
+  function validarEnsayo(d, filas) {
+    const x = d || {};
+    if (!x.fecha) return 'Falta la fecha de la visita';
+    if (!String(x.cliente || '').trim()) return 'Indica la constructora (cliente)';
+    if (!(filas || []).length) return 'Agrega al menos una extracción con su resultado';
+    const sin = filas.find((f) => mpaFila(f) == null);
+    if (sin) return 'La fila ' + sin.n + ' no tiene resultado: escribe la carga y el área del corte, o el MPa que entregó el laboratorio';
+    if (!String(x.firm_nombre || '').trim()) return 'Falta el nombre del firmante';
+    return '';
+  }
+
+  // Lo que se guarda en registros.datos de un ensayo. Se usa igual para guardar que para armar el informe: lo que se ve es lo que se guarda.
+  function datosEnsayo(d, filasCrudas, pies) {
+    const t = (v) => String(v == null ? '' : v).trim();
+    return {
+      direccion: t(d.direccion), contacto: t(d.contacto), producto: t(d.producto), motivo_visita: t(d.motivo_visita),
+      correo_cliente: t(d.correo_cliente), desarrollo: t(d.desarrollo), filas: normalizarFilas(filasCrudas),
+      pies: (pies || []).map(t), conclusion: t(d.conclusion),
+      firmante: { nombre: t(d.firm_nombre), cargo: t(d.firm_cargo), movil: t(d.firm_movil), correo: t(d.firm_correo) },
+    };
+  }
+
+  // Firmante del informe: lo del usuario conectado, y manda lo que el equipo recuerda de la vez anterior.
+  const CARGO_FIRMANTE = 'Asesor Técnico';
+  function firmanteInicial(yo, guardado) {
+    const g = guardado || {}, u = yo || {};
+    const v = (k, otro) => (typeof g[k] === 'string' && g[k].trim() ? g[k].trim() : otro);
+    return { nombre: v('nombre', u.nombre || ''), cargo: v('cargo', CARGO_FIRMANTE), movil: v('movil', ''), correo: v('correo', u.email || '') };
+  }
+
+  // Encabezado que se dibuja en cada hoja del informe de adherencia (documento controlado DOC-PM-LAB-05).
+  const encabezadoInforme = (pagina, total) => ({
+    titulo: DOC_META.titulo,
+    detalle: 'Código ' + DOC_META.codigo + ' · Creación ' + DOC_META.creacion + ' · Versión ' + DOC_META.version,
+    pagina: 'Página ' + pagina + ' de ' + total,
+  });
+
   // ── Correos al cliente ──
   const fechaCL = (iso) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
@@ -80,7 +153,7 @@
     const cuerpo = saludo(reg)
       + 'Junto con saludar, adjuntamos el informe de la prueba de adherencia realizada el ' + fechaCL(reg.fecha) + (reg.obra ? ' en la obra ' + reg.obra : '') + '.\n\n'
       + linea('Motivo de la visita', d.motivo_visita)
-      + (n ? 'Se ensayaron ' + n + ' probeta' + (n === 1 ? '' : 's') + (r.min != null ? ', con resultados entre ' + String(r.min).replace('.', ',') + ' y ' + String(r.max).replace('.', ',') + ' MPa.\n' : '.\n') : '')
+      + (n ? 'Se ensayaron ' + n + ' probeta' + (n === 1 ? '' : 's') + (r.min != null ? ', con resultados entre ' + fmtMpa(r.min) + ' y ' + fmtMpa(r.max) + ' MPa.\n' : '.\n') : '')
       + 'El detalle de los resultados y las conclusiones se encuentra en el documento adjunto.\n'
       + despedida;
     return { asunto: 'Informe prueba de adherencia ' + (reg.obra || '') + ' – ' + fechaCL(reg.fecha), cuerpo };
@@ -272,7 +345,7 @@
     const r = reg || {};
     const quien = String(r.obra || r.cliente || '').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
     const f = fechaCL(r.fecha);
-    return ['Informe visita técnica', quien, f].filter(Boolean).join(' - ') + '.pdf';
+    return [r.kind === 'adherencia' ? 'Informe prueba adherencia' : 'Informe visita técnica', quien, f].filter(Boolean).join(' - ') + '.pdf';
   }
 
   const INF_CSS = '.inf{font-family:Arial,Helvetica,sans-serif;color:#1b1b1b;font-size:12.5px;line-height:1.5;background:#fff;width:100%;padding:0 0 4px}'
@@ -291,7 +364,7 @@
     + '.inf-firmas{display:flex;gap:28px;margin-top:10px}.inf-firma{flex:1;break-inside:avoid;page-break-inside:avoid}'
     + '.inf-firma-esp{height:78px;border-bottom:1px solid #1b1b1b;display:flex;align-items:flex-end;justify-content:center}.inf-firma-img{max-width:100%;max-height:74px;object-fit:contain}'
     + '.inf-firma b{display:block;margin-top:4px}.inf-firma span{display:block;font-size:11px;color:#555}'
-    + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:justify;border-top:1px solid #ddd;padding-top:8px}';
+    + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:left;border-top:1px solid #ddd;padding-top:8px}';
 
   // Tipo real de una imagen según sus primeros bytes (no se confía en el tipo que declare el servidor). null si no es JPEG, PNG ni WebP.
   function tipoImagen(bytes) {
@@ -305,15 +378,20 @@
   // Las fotos van de a dos por fila; cada fila no se parte entre hojas.
   const filasDeFotos = (fotos) => { const filas = []; fotos.forEach((src, i) => { if (i % 2 === 0) filas.push([]); filas[filas.length - 1].push({ src, n: i + 1 }); }); return filas; };
 
+  // Las fotos del informe: una que no calza no se omite en silencio (el cliente notaría el hueco y el PM no): se corta la generación.
+  function fotosDelInforme(lista, de) {
+    const fotos = (lista || []).filter((f) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f));
+    const mala = (lista || []).findIndex((f) => !fotos.includes(f));
+    if (mala >= 0) throw new Error('La fotografía ' + (mala + 1) + ' ' + de + ' no se pudo incluir en el informe (formato no válido). Quítala y vuelve a elegirla.');
+    return fotos;
+  }
+
   // HTML del informe (sin pie de página: el número "Página X de Y" y la dirección los pone el PDF en cada hoja).
   // reg: { cliente, obra, fecha, datos:{…, cierre} }; opciones: { fotos: [data URL], logo: '<svg…>', pm: nombre del PM }.
   function informeVisitaHtml(reg, opciones) {
     const r = reg || {}, d = r.datos || {}, o = opciones || {};
     const cierre = cierreVisita(d.cierre) || {};
-    const fotos = (o.fotos || []).filter((f) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f));
-    // Una foto que no calza no se omite en silencio (el cliente notaría el hueco y el PM no): se corta la generación.
-    const mala = (o.fotos || []).findIndex((f) => !fotos.includes(f));
-    if (mala >= 0) throw new Error('La fotografía ' + (mala + 1) + ' de la visita no se pudo incluir en el informe (formato no válido). Quítala y vuelve a elegirla.');
+    const fotos = fotosDelInforme(o.fotos, 'de la visita');
     const celda = (k, v) => '<td>' + k + '</td><td>' + (v ? esc(v) : '&nbsp;') + '</td>';
     const seccion = (titulo, texto) => (texto && String(texto).trim() ? '<div class="inf-bloque"><h2>' + titulo + '</h2><p>' + esc(String(texto).trim()) + '</p></div>' : '');
     const firma = (png, rol, nombre, detalle) => '<div class="inf-firma"><div class="inf-firma-esp">' + (png ? '<img class="inf-firma-img" alt="Firma" src="' + png + '">' : '') + '</div>'
@@ -336,6 +414,50 @@
       + firma(cierre.firmaPm, 'Grupo TX', o.pm, 'Product Manager')
       + firma(cierre.firma, 'Recibe', cierre.nombre, cierre.cargo || contacto ? [cierre.cargo, contacto].filter(Boolean).join(' · ') : '')
       + '</div></div>'
+      + '<div class="inf-legal inf-bloque">' + esc(NOTA_LEGAL) + '</div></div>';
+  }
+
+
+  // ── Informe de adherencia (DOC-PM-LAB-05) ──
+  // Las secciones del documento original: I. Descripción, Desarrollo, Resultados, Imágenes, Conclusión, firma del asesor y
+  // nota legal. El encabezado con el código y "Página X de Y" y el pie los dibuja el PDF en cada hoja (encabezadoInforme).
+  // No dictamina: los indicadores de apoyo (mínimo, máximo, promedio, filas bajo 0,20 MPa) son solo de la pantalla.
+  const WEB = 'www.grupotx.cl';
+  const INF_CSS_ADH = '.inf-desc{width:100%;border-collapse:collapse}.inf-desc td{padding:4px 8px;border:1px solid #ddd;vertical-align:top}.inf-desc td:first-child{width:24%;background:#f4f4f2;font-weight:700;font-size:11px;color:#444}'
+    + '.inf-resultados{width:100%;border-collapse:collapse;font-size:11.5px}.inf-resultados th{background:#f4f4f2;border:1px solid #ddd;padding:4px 6px;text-align:left;font-size:10.5px;color:#444}.inf-resultados td{border:1px solid #ddd;padding:4px 6px;vertical-align:top}'
+    + '.inf-resultados .inf-n{width:6%;text-align:center}.inf-resultados .inf-num{text-align:right;white-space:nowrap}.inf-resultados .inf-mpa{text-align:right;white-space:nowrap;font-weight:700}'
+    + '.inf-res{break-inside:avoid;page-break-inside:avoid}.inf-nota{margin-top:4px;font-size:10.5px;color:#555}'
+    + '.inf-atte{margin-top:22px}.inf-atte p{margin:0}.inf-atte .inf-atte-nombre{margin-top:26px}';
+
+  function informeAdherenciaHtml(reg, opciones) {
+    const r = reg || {}, d = r.datos || {}, o = opciones || {};
+    const fotos = fotosDelInforme(o.fotos, 'del informe');
+    const filas = d.filas || [];
+    const f = d.firmante || {};
+    const fila = (k, v) => '<tr><td>' + k + '</td><td>' + (v ? esc(v) : '&nbsp;') + '</td></tr>';
+    const seccion = (titulo, texto) => (texto && String(texto).trim() ? '<div class="inf-bloque"><h2>' + titulo + '</h2><p>' + esc(String(texto).trim()) + '</p></div>' : '');
+    const hayManual = filas.some(esManual);
+    const filaRes = (x) => '<tr class="inf-res"><td class="inf-n">' + esc(x.n) + '</td><td>' + esc(x.sustrato || '') + '</td>'
+      + '<td class="inf-num">' + esc(fmtNum(x.cargaKn)) + '</td>'
+      + '<td class="inf-num">' + (x.anchoMm && x.altoMm ? esc(fmtNum(x.anchoMm)) + ' x ' + esc(fmtNum(x.altoMm)) : '') + '</td>'
+      + '<td class="inf-mpa">' + esc(fmtMpa(mpaFila(x))) + (esManual(x) ? ' *' : '') + '</td><td>' + esc(x.falla || '') + '</td></tr>';
+    const linea = (k, v) => (v && String(v).trim() ? '<p>' + k + ' : ' + esc(String(v).trim()) + '</p>' : '');
+    return '<div class="inf"><style>' + INF_CSS + INF_CSS_ADH + '</style>'
+      + '<div class="inf-banda"><div class="inf-logo">' + (o.logo || '') + '</div></div>'
+      + '<div class="inf-bloque"><h2>I. Descripción</h2><table class="inf-desc">'
+      + fila('Constructora', r.cliente) + fila('Obra', r.obra) + fila('Dirección', d.direccion) + fila('Contacto', d.contacto)
+      + fila('Producto', d.producto) + fila('Motivo de visita', d.motivo_visita) + fila('Fecha de visita', fechaCL(r.fecha)) + '</table></div>'
+      + seccion('Desarrollo', d.desarrollo)
+      + (filas.length ? '<div class="inf-bloque"><h2>Resultados</h2><table class="inf-resultados"><thead><tr><th class="inf-n">N°</th><th>Sustrato o ubicación</th><th>Carga (kN)</th><th>Área del corte (mm)</th><th>Adherencia (MPa)</th><th>Tipo de falla</th></tr></thead><tbody>'
+        + filas.map(filaRes).join('') + '</tbody></table>'
+        + (hayManual ? '<p class="inf-nota">* Valor de adherencia informado por el laboratorio.</p>' : '') + '</div>' : '')
+      + (fotos.length ? '<h2>Imágenes</h2>' + filasDeFotos(fotos).map((fi) => '<div class="inf-fila">' + fi.map((x) => {
+        const pie = (d.pies || [])[x.n - 1];
+        return '<figure class="inf-foto"><img alt="Imagen ' + x.n + '" src="' + x.src + '">' + (pie && String(pie).trim() ? '<figcaption>' + esc(String(pie).trim()) + '</figcaption>' : '') + '</figure>';
+      }).join('') + '</div>').join('') : '')
+      + seccion('Conclusión', d.conclusion)
+      + '<div class="inf-bloque inf-atte"><p>Atentamente</p><p class="inf-atte-nombre"><b>' + (f.nombre ? esc(f.nombre) : '&nbsp;') + '</b></p>'
+      + (f.cargo ? '<p>' + esc(f.cargo) + '</p>' : '') + linea('Móvil', f.movil) + linea('Mail', f.correo) + '<p>Web : ' + WEB + '</p></div>'
       + '<div class="inf-legal inf-bloque">' + esc(NOTA_LEGAL) + '</div></div>';
   }
 
@@ -374,8 +496,19 @@
     no_autorizado: 'tu sesión expiró: vuelve a ingresar',
     red: 'no hubo conexión con el servicio de correo (si no estás seguro, revisa tu bandeja: recibirás una copia si salió)',
   };
-  function textoErrorEnvio(codigo, detalle) {
+  // Lo que cambia cuando el registro es un ensayo de adherencia en vez de una visita.
+  const TEXTOS_ENVIO_ENSAYO = {
+    sin_guardar: 'el ensayo aún no está guardado',
+    otra_visita: 'el informe generado corresponde a otro ensayo',
+    desactualizado: 'el informe no corresponde a lo que hay ahora en el ensayo',
+    mensaje_no_corresponde: 'el mensaje no corresponde a este ensayo (debe nombrar al cliente y la obra); si cambió el cliente o la obra desde otra sesión, recarga la página o vuelve a guardar el ensayo',
+    correo_no_coincide: 'el correo del cliente guardado en el ensayo es otro: guarda el ensayo de nuevo',
+    no_es_autor: 'solo el autor del ensayo o un administrador puede enviarlo',
+    registro_no_existe: 'el ensayo no está guardado',
+  };
+  function textoErrorEnvio(codigo, detalle, kind) {
     if (codigo === 'apps_script') return 'el servicio de correo respondió un error' + (detalle ? ': ' + detalle : '');
+    if (kind === 'adherencia' && TEXTOS_ENVIO_ENSAYO[codigo]) return TEXTOS_ENVIO_ENSAYO[codigo];
     return TEXTOS_ENVIO[codigo] || 'error inesperado' + (codigo ? ' (' + codigo + ')' : '');
   }
 
@@ -427,15 +560,18 @@
   const historialNoSalio = (datos) => ((datos && datos.envios) || []).filter((e) => e.estado === 'no_salio')
     .map((e) => 'Intento del ' + fechaHoraCL(e.ts) + ' a ' + e.para + ' marcado como no salido por ' + (e.resueltoPor || '—') + (e.resueltoEn ? ' el ' + fechaHoraCL(e.resueltoEn) : ''));
 
-  // Texto del botón de envío en la ficha, o null si la visita no tiene un correo de cliente válido.
-  function botonEnvio(datos) {
+  // Correo al que va la copia: el de quien recibe la visita (cierre) o el que se escribió en el ensayo de adherencia.
+  const correoCliente = (kind, datos) => (kind === 'adherencia' ? (datos && datos.correo_cliente) : (datos && datos.cierre && datos.cierre.email)) || '';
+
+  // Texto del botón de envío en la ficha, o null si el registro no tiene un correo de cliente válido.
+  function botonEnvio(datos, kind) {
     const d = datos || {};
-    if (!correoValido(d.cierre && d.cierre.email)) return null;
+    if (!correoValido(correoCliente(kind, d))) return null;
     if (envioDudoso(d)) return 'Reenviar (puede duplicar el correo)';
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

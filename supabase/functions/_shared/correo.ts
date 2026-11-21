@@ -17,7 +17,9 @@ export type Solicitud = { registro_id: string; para: string; asunto: string; cue
 // desfasado no puede mandar el informe a otra dirección) y el mensaje debe corresponder a la visita: el cuerpo nombra al
 // cliente y la obra, y el asunto sigue el patrón de TC.correoVisita ('Visita técnica <obra> – <fecha>'). El PM puede editar
 // el texto, pero no usar la casilla institucional para un mensaje ajeno a la visita.
-export type ContextoVisita = { cierreEmail: string | null | undefined; cliente: string | null | undefined; obra: string | null | undefined };
+// `kind`: 'visita' (por omisión) o 'adherencia'; en un ensayo el correo guardado es datos.correo_cliente y el asunto sigue el patrón de TC.correoEnsayo.
+export type ContextoVisita = { kind?: 'visita' | 'adherencia'; cierreEmail: string | null | undefined; cliente: string | null | undefined; obra: string | null | undefined };
+const PREFIJO_ASUNTO = { visita: 'Visita técnica ', adherencia: 'Informe prueba de adherencia ' };
 export function validarSolicitud(b: unknown, ctx: ContextoVisita):
   { ok: true; solicitud: Solicitud } | { ok: false; error: string } {
   const x = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
@@ -26,7 +28,7 @@ export function validarSolicitud(b: unknown, ctx: ContextoVisita):
   if (typeof x.asunto === 'string' && x.asunto.length > 200) return { ok: false, error: 'asunto_largo' };
   if (typeof x.asunto !== 'string' || !x.asunto.trim() || /[\r\n]/.test(x.asunto)) return { ok: false, error: 'solicitud_invalida' };
   if (typeof x.cuerpo !== 'string' || !x.cuerpo.trim() || x.cuerpo.length > 20000) return { ok: false, error: 'solicitud_invalida' };
-  if (!x.asunto.startsWith('Visita técnica ' + (ctx.obra || '') + ' – ')) return { ok: false, error: 'mensaje_no_corresponde' };
+  if (!x.asunto.startsWith(PREFIJO_ASUNTO[ctx.kind === 'adherencia' ? 'adherencia' : 'visita'] + (ctx.obra || '') + ' – ')) return { ok: false, error: 'mensaje_no_corresponde' };
   if ((ctx.cliente && !x.cuerpo.includes(ctx.cliente)) || (ctx.obra && !x.cuerpo.includes(ctx.obra))) return { ok: false, error: 'mensaje_no_corresponde' };
   if (typeof x.nombre !== 'string' || !/\.pdf$/i.test(x.nombre) || /[\\/\r\n]/.test(x.nombre) || x.nombre.length > 200) return { ok: false, error: 'archivo_invalido' };
   if (typeof x.base64 !== 'string' || !x.base64) return { ok: false, error: 'archivo_invalido' };

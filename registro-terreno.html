@@ -83,6 +83,21 @@ textarea{min-height:84px;resize:vertical}
 .firmas-cierre{display:flex;flex-wrap:wrap;gap:14px 24px;margin-top:6px}
 .firma-cierre{display:flex;align-items:center;gap:8px}
 .firma-cierre .rotulo{font-size:13px;font-weight:600}
+.enlace{background:none;border:0;padding:0;color:var(--brand);font-weight:600;font-size:13px;cursor:pointer;text-decoration:underline}
+.ens-fila{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:var(--bg)}
+.ens-cab{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.ens-n{font-family:var(--f-mono);font-weight:700;color:var(--mute);min-width:3.2em}
+.ens-fila .x{background:transparent;border:1px solid var(--line);border-radius:10px;color:var(--mute);padding:9px 11px;cursor:pointer}
+.ens-g{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+@media (max-width:560px){.ens-g{grid-template-columns:1fr 1fr}}
+.ens-fila label{margin:0 0 4px;font-size:10px}
+.ens-fila .ens-falla{margin-top:8px}
+.ens-fila:not([data-manual="1"]) .ens-man{display:none}
+.ens-g .ens-man{margin-left:6px;color:var(--warn);font-weight:700;letter-spacing:0;text-transform:none}
+.ens-apoyo{background:var(--sunk);border:1px dashed var(--line);border-radius:12px;padding:10px 12px;margin:12px 0;font-size:13.5px}
+.ens-apoyo p{margin:4px 0 0}
+.ens-apoyo .aviso{margin:6px 0 0}
+.pies label{margin-top:10px}
 .informe-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px}
 .informe-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;overflow:auto}
 .informe-dlg h2{margin:0 0 2px}
@@ -107,7 +122,7 @@ textarea{min-height:84px;resize:vertical}
 .hero .eb{font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:700}
 .hero h2{font-size:24px;margin:6px 0 4px}
 .hero .acciones{margin-top:14px}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
 @media (max-width:700px){.kpis{grid-template-columns:repeat(2,1fr)}}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 .kpi span{display:block;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);font-weight:700}
@@ -160,6 +175,7 @@ details.mas p{margin:6px 0}
     <button data-a="nav" data-v="panel">Panel</button>
     <button data-a="nav" data-v="charla" data-vistas="charla capacitacion">Charla / Capacitación</button>
     <button data-a="nav" data-v="visita">Visita por reclamo</button>
+    <button data-a="nav" data-v="adherencia">Ensayos de adherencia</button>
     <button data-a="nav" data-v="registros">Registros</button>
     <button data-a="nav" data-v="accesos" id="nav-accesos" hidden>Accesos</button>
   </nav>
@@ -185,9 +201,14 @@ const TIPOS_CAP = ['Curso','Taller','Capacitación','Instrucción','Auditoría',
 const PRODUCTOS = ['Autonivelante PrimerPro','Autonivelante','Adhesivo cementoso','Mortero','Otro'];
 const CAUSAS = ['Aplicación / procedimiento','Preparación de sustrato','Dosificación o mezcla','Condiciones de obra (humedad, temperatura, inundación)','Producto','Por determinar'];
 const ESTADOS = ['Abierto','En seguimiento','Cerrado'];
-const KIND_LABEL = { charla: 'Charla técnica', capacitacion: 'Capacitación', visita: 'Visita por reclamo' };
-const COLOR = { charla: '#e4032e', capacitacion: '#1d1d1f', visita: '#8d939a' };
-const TITULOS = { panel: 'Panel', charla: 'Charla técnica', capacitacion: 'Capacitación', visita: 'Visita por reclamo', registros: 'Registros', accesos: 'Accesos' };
+const KIND_LABEL = { charla: 'Charla técnica', capacitacion: 'Capacitación', visita: 'Visita por reclamo', adherencia: 'Ensayo de adherencia' };
+const COLOR = { charla: '#e4032e', capacitacion: '#1d1d1f', visita: '#8d939a', adherencia: '#5e6066' };   // adherencia: el gris oscuro de la paleta (--mute), distinto del gris de la visita
+const TITULOS = { panel: 'Panel', charla: 'Charla técnica', capacitacion: 'Capacitación', visita: 'Visita por reclamo', adherencia: 'Ensayos de adherencia', registros: 'Registros', accesos: 'Accesos' };
+const FALLAS = ['Cohesión Nivelador', 'Cohesión Sustrato', 'Adhesión en la interfaz', 'Otra'];
+const MOTIVO_ADHERENCIA = 'Tracción Directa';
+const esInforme = k => k === 'visita' || k === 'adherencia';   // los registros que generan informe PDF para el cliente
+// Palabras que cambian entre una visita y un ensayo en los mensajes del guardado y del envío.
+const gen = k => k === 'adherencia' ? { Art: 'El ensayo', este: 'este ensayo', o: 'o' } : { Art: 'La visita', este: 'esta visita', o: 'a' };
 const iniciales = s => String(s || '?').split(/[\s@.]+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
 /* ===================== Estado ===================== */
@@ -334,8 +355,8 @@ async function firmarFila(b){
   if (png !== null) ponerFirma(row, png);
 }
 
-function campoCliente(){
-  return `<label>Cliente</label>
+function campoCliente(rotulo = 'Cliente'){
+  return `<label>${rotulo}</label>
   <div class="ac">
     <input name="cliente" data-cli autocomplete="off" placeholder="Busca por nombre o RUT en la base de clientes">
     <div class="sug" hidden></div>
@@ -348,6 +369,9 @@ function campoCliente(){
     </div>
   </div>`;
 }
+const campoProducto = () => `<label>Producto</label>
+    <input name="producto" list="prod-dl" autocomplete="off" placeholder="Escribe para buscar en el catálogo">
+    <datalist id="prod-dl">${(catalogo.length ? catalogo.map(p => p.name) : PRODUCTOS).map(p => `<option value="${esc(p)}"></option>`).join('')}</datalist>`;
 const campoObra = () => `<label>Obra</label><input name="obra" list="obras-dl" autocomplete="off"><datalist id="obras-dl"></datalist>`;
 
 const PLACEHOLDER_ACT = { charla: 'Ej: Charla técnica aplicación de autonivelante', capacitacion: 'Ej: Capacitación aplicación de autonivelante' };
@@ -408,9 +432,7 @@ function formVisita(){
       <div><label>Contacto en obra</label><input name="contacto"></div>
       <div><label>Fecha de visita</label><input type="date" name="fecha" value="${hoy()}"></div>
     </div>
-    <label>Producto</label>
-    <input name="producto" list="prod-dl" autocomplete="off" placeholder="Escribe para buscar en el catálogo">
-    <datalist id="prod-dl">${(catalogo.length ? catalogo.map(p => p.name) : PRODUCTOS).map(p => `<option value="${esc(p)}"></option>`).join('')}</datalist>
+    ${campoProducto()}
     <label>Motivo del reclamo</label>
     <textarea name="motivo" placeholder="Qué reporta el cliente"></textarea>
     <label>Verificación en terreno</label>
@@ -448,6 +470,146 @@ function formVisita(){
       <button type="button" class="btn ghost" data-a="nav" data-v="panel">Cancelar</button>
     </div>
   </div>`;
+}
+
+/* ===================== Ensayo de adherencia ===================== */
+// Firmante recordado en este equipo, por usuario (si el navegador no deja guardar, simplemente no se recuerda).
+const claveFirmante = () => 'tx-terreno-firmante-' + (me ? me.id : '');
+function firmanteGuardado(){ try { return JSON.parse(localStorage.getItem(claveFirmante()) || 'null'); } catch(e){ return null; } }
+function recordarFirmante(d){
+  try { localStorage.setItem(claveFirmante(), JSON.stringify({ nombre: d.firm_nombre, cargo: d.firm_cargo, movil: d.firm_movil, correo: d.firm_correo })); } catch(e){}
+}
+
+// Una extracción. El MPa se muestra calculado (carga × 1000 ÷ área); si el laboratorio entrega otro valor el PM lo
+// escribe y la fila queda marcada como manual (data-manual) hasta que vuelva al calculado.
+function filaEnsayoHtml(f = {}){
+  const manual = TC.esManual(f);
+  const calc = TC.mpaDeFila({ ...f, mpa: undefined });
+  return `<div class="ens-fila" data-manual="${manual ? 1 : ''}">
+    <div class="ens-cab"><span class="ens-n"></span><input class="e-sustrato" placeholder="Sustrato o ubicación (ej. Dpto 106)" value="${esc(f.sustrato)}">
+      <button type="button" class="x" data-a="delFilaEns" title="Quitar esta extracción">✕</button></div>
+    <div class="ens-g">
+      <div><label>Carga (kN)</label><input class="e-carga" inputmode="decimal" value="${esc(TC.fmtNum(f.cargaKn))}"></div>
+      <div><label>Ancho corte (mm)</label><input class="e-ancho" inputmode="decimal" value="${esc(TC.fmtNum(f.anchoMm === undefined ? 50 : f.anchoMm))}"></div>
+      <div><label>Alto corte (mm)</label><input class="e-alto" inputmode="decimal" value="${esc(TC.fmtNum(f.altoMm === undefined ? 50 : f.altoMm))}"></div>
+      <div><label>MPa<span class="ens-man">manual</span></label><input class="e-mpa" inputmode="decimal" value="${esc(manual ? TC.fmtNum(f.mpa) : TC.fmtMpa(calc))}"></div>
+    </div>
+    <div class="ens-falla"><label>Tipo de falla</label><input class="e-falla" list="fallas-dl" placeholder="Elige de la lista o escribe" value="${esc(f.falla)}"></div>
+    <button type="button" class="enlace ens-man" data-a="mpaAuto" style="margin:6px 0 0">Volver al MPa calculado</button>
+  </div>`;
+}
+
+function formEnsayo(){
+  const fi = TC.firmanteInicial(me, firmanteGuardado());
+  return `<div id="form" class="card" data-kind="adherencia">
+    <h2 id="act-titulo">Ensayo de adherencia</h2>
+    <p class="mute" style="margin:0">Informe de la prueba de adherencia (tracción directa). La app calcula el MPa; los textos quedan editables y la conclusión la escribe quien firma.</p>
+    <h3>I. Descripción</h3>
+    ${campoCliente('Constructora (cliente)')}
+    <div class="row">
+      <div>${campoObra()}</div>
+      <div><label>Dirección</label><input name="direccion"></div>
+    </div>
+    <div class="row">
+      <div><label>Contacto en obra</label><input name="contacto"></div>
+      <div><label>Fecha de visita</label><input type="date" name="fecha" value="${hoy()}"></div>
+    </div>
+    <div class="row">
+      <div>${campoProducto()}</div>
+      <div><label>Motivo de visita</label><input name="motivo_visita" value="${esc(MOTIVO_ADHERENCIA)}"></div>
+    </div>
+    <label>Correo del cliente (para enviarle la copia)</label>
+    <input name="correo_cliente" type="email" inputmode="email" autocomplete="off" placeholder="Solo si vas a enviarle el informe">
+    <h3>Desarrollo</h3>
+    <textarea name="desarrollo" style="min-height:96px">${esc(TC.DESARROLLO_DEFECTO)}</textarea>
+    <h3>Resultados</h3>
+    <p class="mute" style="margin:0 0 8px">MPa = carga (kN) × 1000 ÷ área del corte (mm²). Si el laboratorio entrega otro valor, escríbelo en la casilla MPa: queda marcado como manual.</p>
+    <datalist id="fallas-dl">${FALLAS.map(x => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+    <div id="ens-filas">${[0, 1, 2].map(() => filaEnsayoHtml()).join('')}</div>
+    <button type="button" class="btn ghost" data-a="addFilaEns">+ Agregar extracción</button>
+    <div class="ens-apoyo" id="ens-apoyo" aria-live="polite"></div>
+    <h3>Imágenes</h3>
+    <label style="margin-top:0">Fotos (máximo ${TC.MAX_FOTOS} por ensayo)</label>
+    <input type="file" name="fotos" accept="image/*" multiple capture="environment">
+    <div class="pies"><div id="pies-guardadas"></div><div id="pies-nuevas"></div></div>
+    <h3>Conclusión</h3>
+    <textarea name="conclusion" id="conclusion" style="min-height:140px"></textarea>
+    <div class="acciones" style="margin-top:8px"><button type="button" class="btn ghost" data-a="conclusionBase">Restablecer el texto base</button></div>
+    <h3>Firmante</h3>
+    <div class="row">
+      <div><label>Nombre</label><input name="firm_nombre" autocomplete="off" value="${esc(fi.nombre)}"></div>
+      <div><label>Cargo</label><input name="firm_cargo" autocomplete="off" value="${esc(fi.cargo)}"></div>
+    </div>
+    <div class="row">
+      <div><label>Móvil</label><input name="firm_movil" type="tel" inputmode="tel" autocomplete="off" value="${esc(fi.movil)}"></div>
+      <div><label>Correo</label><input name="firm_correo" type="email" inputmode="email" autocomplete="off" value="${esc(fi.correo)}"></div>
+    </div>
+    <p class="mute">Se recuerdan en este equipo para el próximo ensayo.</p>
+    <div class="acciones">
+      <button type="button" class="btn ghost" data-a="verInforme">Ver informe</button>
+      <button type="button" class="btn" data-a="guardarEnviar">Guardar y enviar copia al cliente</button>
+      <button type="button" class="btn ghost" data-a="guardar" data-t="adherencia">Guardar sin enviar</button>
+      <button type="button" class="btn ghost" data-a="nav" data-v="panel">Cancelar</button>
+    </div>
+  </div>`;
+}
+
+// Las filas tal como están escritas (el MPa solo cuenta si es manual).
+const leerFilasEnsayo = () => [...document.querySelectorAll('#ens-filas .ens-fila')].map(row => ({
+  sustrato: row.querySelector('.e-sustrato').value, carga: row.querySelector('.e-carga').value,
+  ancho: row.querySelector('.e-ancho').value, alto: row.querySelector('.e-alto').value,
+  mpa: row.dataset.manual ? row.querySelector('.e-mpa').value : '', falla: row.querySelector('.e-falla').value
+}));
+const leerPies = () => [...document.querySelectorAll('#form .pie-foto')].map(i => i.value.trim());
+
+// Recalcula lo que depende de la tabla: numeración, MPa calculado, indicadores de apoyo (solo pantalla) y texto base de la conclusión.
+function actualizarEnsayo(){
+  if (!$('#ens-filas')) return;
+  const crudas = leerFilasEnsayo();
+  let k = 0;
+  document.querySelectorAll('#ens-filas .ens-fila').forEach((row, i) => {
+    const c = crudas[i];
+    row.querySelector('.ens-n').textContent = TC.filaEnBlanco(c) ? '—' : 'N° ' + (++k);
+    if (!row.dataset.manual) row.querySelector('.e-mpa').value = TC.fmtMpa(TC.mpa(TC.numero(c.carga), TC.numero(c.ancho), TC.numero(c.alto)));
+  });
+  const filas = TC.normalizarFilas(crudas), r = TC.resumenEnsayo(filas);
+  $('#ens-apoyo').innerHTML = `<b>Apoyo para redactar la conclusión</b> <span class="mute">solo se ve aquí: no aparece en el informe</span>`
+    + (r.min == null ? '<p class="mute">Aún no hay resultados.</p>'
+      : `<p>Mínimo <b>${TC.fmtMpa(r.min)}</b> · Máximo <b>${TC.fmtMpa(r.max)}</b> · Promedio <b>${TC.fmtMpa(r.prom)}</b> MPa</p>`
+        + (r.bajoUmbral.length ? `<p class="aviso">Bajo 0,20 MPa: N° ${r.bajoUmbral.map(esc).join(', ')}</p>` : '<p class="mute">Ninguna extracción bajo 0,20 MPa.</p>'));
+  const c = $('#conclusion');
+  if (c && !c.dataset.editada) c.value = TC.conclusionBase(filas);
+}
+
+// Un pie de foto por cada foto elegida (las ya guardadas tienen el suyo en #pies-guardadas).
+function renderPiesNuevos(){
+  const cont = $('#pies-nuevas'), input = document.querySelector('#form [name="fotos"]'); if (!cont || !input) return;
+  const previos = [...cont.querySelectorAll('.pie-foto')].map(i => i.value);
+  const base = document.querySelectorAll('#pies-guardadas .pie-foto').length;
+  cont.innerHTML = [...input.files].map((f, i) => `<label>Pie de la imagen ${base + i + 1} · ${esc(f.name)}</label><input class="pie-foto" placeholder="Ubicación o descripción (ej. Dpto 106)" value="${esc(previos[i] || '')}">`).join('');
+}
+
+// "Crear ensayo de adherencia para esta obra": abre el formulario con lo que la visita ya sabe.
+function crearEnsayoDeVisita(id){
+  const r = registros.find(x => x.id === id); if (!r) return;
+  vista = 'adherencia'; editandoId = null; cliNuevo = false;
+  cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null;
+  render(); window.scrollTo(0, 0);
+  const f = $('#form');
+  [['cliente', r.cliente], ['obra', r.obra], ['direccion', r.direccion], ['contacto', r.contacto], ['producto', r.producto]]
+    .forEach(([n, v]) => { const el = f.querySelector(`[name="${n}"]`); if (el && v) el.value = v; });
+  infoCliente();
+  toast('Cargué los datos de la visita: completa los resultados del ensayo.');
+}
+
+/* Abre un ensayo guardado en el formulario (el resto de los campos los llena editarRegistro). */
+function cargarEnsayoEnFormulario(r){
+  $('#act-titulo').textContent = 'Corregir ensayo de adherencia';
+  $('#ens-filas').innerHTML = (r.filas || []).map(f => filaEnsayoHtml(f)).join('');
+  $('#conclusion').dataset.editada = (r.conclusion || '') === TC.conclusionBase(r.filas || []) ? '' : '1';
+  $('#pies-guardadas').innerHTML = (r.fotos || []).map((p, i) => `<label>Pie de la imagen ${i + 1} (ya guardada)</label><input class="pie-foto" value="${esc((r.pies || [])[i] || '')}">`).join('');
+  if ((r.fotos || []).length) document.querySelector('#form [name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).</p>`);
+  actualizarEnsayo();
 }
 
 /* ===================== Buscador de clientes (base única Silos / CRM) ===================== */
@@ -562,6 +724,12 @@ function comprimir(file){
 }
 
 function validarCampos(kind, d, fotosPrevias = 0){
+  if (kind === 'adherencia') {
+    const falta = TC.validarEnsayo(d, TC.normalizarFilas(leerFilasEnsayo()));
+    if (falta) return falta;
+    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length);
+    return sobran ? `Máximo ${TC.MAX_FOTOS} fotos por ensayo: quita ${sobran}` : '';
+  }
   if (!d.fecha) return 'Falta la fecha';
   if (!d.cliente) return 'Indica el cliente';
   if (kind === 'visita') {
@@ -605,7 +773,7 @@ async function persistir(kind, d, registroId, btn){
   if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
   const id = registroId || crypto.randomUUID();
   const fotos = [];
-  if (kind === 'visita' && d.fotos && d.fotos.length) {
+  if (esInforme(kind) && d.fotos && d.fotos.length) {
     for (let i = 0; i < d.fotos.length; i++) {
       if (btn) btn.textContent = `Subiendo foto ${i + 1} de ${d.fotos.length}…`;
       const blob = await comprimir(d.fotos[i]);
@@ -622,6 +790,8 @@ async function persistir(kind, d, registroId, btn){
     // Los datos del cliente al cierre no son obligatorios: sin nada escrito ni firmado no se guarda `cierre`.
     const cierre = cierreDeCampos(d);
     if (cierre) datos.cierre = cierre; else delete datos.cierre;
+  } else if (kind === 'adherencia') {
+    Object.assign(datos, TC.datosEnsayo(d, leerFilasEnsayo(), leerPies()));
   } else {
     // Los participantes ya no viajan en datos: viven en rt_asistencias.
     Object.assign(datos, {
@@ -630,7 +800,7 @@ async function persistir(kind, d, registroId, btn){
       tipo_act: kind === 'capacitacion' ? (d.tipo_act || 'Capacitación') : 'Charla técnica'
     });
   }
-  const plan = kind === 'visita' ? null : TC.planParticipantes(leerParticipantes(), { quitados: [...quitados], viejo: partsViejo });
+  const plan = esInforme(kind) ? null : TC.planParticipantes(leerParticipantes(), { quitados: [...quitados], viejo: partsViejo });
 
   const fila = {
     kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
@@ -666,8 +836,8 @@ async function persistir(kind, d, registroId, btn){
 // `enviar`: tras guardar, ofrece enviar la copia al cliente (con confirmación; nada sale sin que el PM la acepte).
 async function guardar(kind, btn, registroId, enviar){
   const d = leerCampos();
-  if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
-  const falta = validarCampos(kind, d, kind === 'visita' && registroId ? (registros.find(x => x.id === registroId)?.fotos || []).length : 0);
+  if (!esInforme(kind)) kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
+  const falta = validarCampos(kind, d, esInforme(kind) && registroId ? (registros.find(x => x.id === registroId)?.fotos || []).length : 0);
   if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
@@ -675,6 +845,7 @@ async function guardar(kind, btn, registroId, enviar){
   try {
     const eraBorrador = TC.esBorrador(registros.find(x => x.id === registroId));
     const id = await persistir(kind, d, registroId, btn);
+    if (kind === 'adherencia') recordarFirmante(d);
     // Al guardar la actividad el enlace del QR deja de aceptar participantes. Si el cierre falla el registro queda
     // como "en curso" en Registros, con su botón para cerrarlo.
     let aviso = '';
@@ -686,7 +857,7 @@ async function guardar(kind, btn, registroId, enviar){
     }
     toast((registroId && !eraBorrador ? 'Cambios guardados.' : 'Registro guardado.') + aviso);
     cliSel = null; cliNuevo = false; editandoId = null;
-    vista = registroId || kind === 'visita' ? 'registros' : 'panel';
+    vista = registroId || esInforme(kind) ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
     guardadoId = id;
     if (!enviar) cargar();
@@ -694,10 +865,10 @@ async function guardar(kind, btn, registroId, enviar){
     btn.disabled = false; btn.textContent = txt;
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
-  // El envío va aparte: si falla, la visita YA está guardada y el aviso no debe decir que no se guardó.
+  // El envío va aparte: si falla, el registro YA está guardado y el aviso no debe decir que no se guardó.
   if (guardadoId && enviar) {
     try { await cargar(); await enviarRegistro(guardadoId); }
-    catch(e){ console.error(e); toast('La visita quedó guardada, pero el envío falló: ' + (e.message || 'error') + '. Revisa la ficha antes de reintentar.'); }
+    catch(e){ console.error(e); toast(gen(kind).Art + ' quedó guardad' + gen(kind).o + ', pero el envío falló: ' + (e.message || 'error') + '. Revisa la ficha antes de reintentar.'); }
   }
 }
 
@@ -706,7 +877,10 @@ async function guardar(kind, btn, registroId, enviar){
 // `currentColor` y las variables CSS no se resuelven, así que se fijan los colores.
 const logoInforme = () => $('.topbar .txmark svg').outerHTML.replace(/style="[^"]*"/, 'width="92" height="39"').replace(/currentColor/g, '#121212').replace(/var\(--brand\)/g, '#e4032e');
 
-const informeHtml = reg => TC.informeVisitaHtml(reg, { fotos: reg.fotos, logo: logoInforme(), pm: reg.pm });
+const informeHtml = reg => reg.kind === 'adherencia'
+  ? TC.informeAdherenciaHtml(reg, { fotos: reg.fotos, logo: logoInforme() })
+  : TC.informeVisitaHtml(reg, { fotos: reg.fotos, logo: logoInforme(), pm: reg.pm });
+const TITULO_INFORME = { visita: 'Informe de visita técnica', adherencia: 'Informe de prueba de adherencia' };
 
 const blobADataUrl = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
 
@@ -716,7 +890,7 @@ const blobADataUrl = blob => new Promise((res, rej) => { const fr = new FileRead
 // no debe pasar por foto. Si los bytes no son de imagen, la foto se trata como no disponible y se avisa cuál.
 async function comoImagen(blob, n){
   const tipo = TC.tipoImagen(new Uint8Array(await blob.slice(0, 12).arrayBuffer()));
-  if (!tipo) throw new Error(`La fotografía ${n} de la visita no está disponible (el archivo no es una imagen).`);
+  if (!tipo) throw new Error(`La fotografía ${n} no está disponible (el archivo no es una imagen).`);
   return blob.type === tipo ? blob : new Blob([blob], { type: tipo });
 }
 async function fotoGuardadaDataUrl(path, n){
@@ -724,10 +898,10 @@ async function fotoGuardadaDataUrl(path, n){
   if (data) return blobADataUrl(await comoImagen(data, n));
   if (window.fotoArchivada) {
     const u = await fotoArchivada(BUCKET, path), res = await fetch(u);
-    if (!res.ok) throw new Error(`La fotografía ${n} de la visita no está disponible (respuesta ${res.status}).`);
+    if (!res.ok) throw new Error(`La fotografía ${n} no está disponible (respuesta ${res.status}).`);
     return blobADataUrl(await comoImagen(await res.blob(), n));
   }
-  throw new Error(`La fotografía ${n} de la visita no está disponible.`);
+  throw new Error(`La fotografía ${n} no está disponible.`);
 }
 
 // Fotos de la visita como data URL: las ya guardadas más las recién elegidas (reducidas igual que al subirlas).
@@ -740,13 +914,13 @@ async function fotosComoDataUrl(rutas, archivos){
 
 // Registro tal como lo consume el informe. `datos` ya incluye `cierre` (quien recibe y las dos firmas).
 function regParaInforme(r, fotos){
-  return { id: r.id, cliente: r.cliente, obra: r.obra, fecha: r.fecha, datos: r._datos || {}, pm: r.autor_nombre || me.nombre, fotos };
+  return { kind: r.kind, id: r.id, cliente: r.cliente, obra: r.obra, fecha: r.fecha, datos: r._datos || {}, pm: r.autor_nombre || me.nombre, fotos };
 }
-function regDesdeFormulario(){
+function regDesdeFormulario(kind = 'visita'){
   const d = leerCampos(), previo = editandoId ? registros.find(x => x.id === editandoId) : null;
   return {
-    id: editandoId || null, cliente: d.cliente, obra: d.obra, fecha: d.fecha, pm: previo ? previo.autor_nombre : me.nombre,
-    datos: { ...datosVisita(d), cierre: cierreDeCampos(d) }
+    kind, id: editandoId || null, cliente: d.cliente, obra: d.obra, fecha: d.fecha, pm: previo ? previo.autor_nombre : me.nombre,
+    datos: kind === 'adherencia' ? TC.datosEnsayo(d, leerFilasEnsayo(), leerPies()) : { ...datosVisita(d), cierre: cierreDeCampos(d) }
   };
 }
 
@@ -754,19 +928,33 @@ function regDesdeFormulario(){
 const huellaTexto = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + '-' + s.length; };
 
 const MARGEN_PDF = [24, 28, 64, 28];   // pt: arriba, derecha, abajo (aquí va el pie), izquierda
+const MARGEN_PDF_ADHERENCIA = [66, 28, 64, 28];   // más arriba: aquí va el encabezado del documento controlado
+const margenPdf = reg => reg.kind === 'adherencia' ? MARGEN_PDF_ADHERENCIA : MARGEN_PDF;
 const ANCHO_PDF_PX = Math.floor((595.28 - MARGEN_PDF[1] - MARGEN_PDF[3]) * 96 / 72);   // ancho útil de la hoja A4 en px: el informe se maqueta a este ancho
 
-// Pie institucional y "Página X de Y" en cada hoja (html2pdf no los trae).
-function pieDePagina(pdf){
+// Encabezado del documento controlado (informe de adherencia), en cada hoja: título, código, creación, versión y "Página X de Y".
+function encabezadoDePagina(pdf, i, n){
+  const W = pdf.internal.pageSize.getWidth(), h = TC.encabezadoInforme(i, n);
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(27);
+  pdf.text(h.titulo, MARGEN_PDF_ADHERENCIA[3], 36);
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(90);
+  pdf.text(h.detalle, W - MARGEN_PDF_ADHERENCIA[1], 30, { align: 'right' });
+  pdf.text(h.pagina, W - MARGEN_PDF_ADHERENCIA[1], 42, { align: 'right' });
+  pdf.setDrawColor(228, 3, 46); pdf.setLineWidth(1.2); pdf.line(MARGEN_PDF_ADHERENCIA[3], 50, W - MARGEN_PDF_ADHERENCIA[1], 50);
+}
+
+// Pie institucional en cada hoja y, en la visita, "Página X de Y" (en el informe de adherencia va en el encabezado). html2pdf no los trae.
+function pieDePagina(pdf, adherencia){
   const n = pdf.internal.getNumberOfPages(), W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
   for (let i = 1; i <= n; i++) {
     pdf.setPage(i);
+    if (adherencia) encabezadoDePagina(pdf, i, n);
     pdf.setDrawColor(200); pdf.setLineWidth(0.5); pdf.line(MARGEN_PDF[3], H - 56, W - MARGEN_PDF[1], H - 56);
     pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.setTextColor(90);
     pdf.text(TC.PIE[0], W / 2, H - 46, { align: 'center' });
     pdf.setFont('helvetica', 'normal');
     TC.PIE.slice(1).forEach((t, k) => pdf.text(t, W / 2, H - 37 + k * 9, { align: 'center' }));
-    pdf.text(`Página ${i} de ${n}`, W - MARGEN_PDF[1], H - 14, { align: 'right' });
+    if (!adherencia) pdf.text(`Página ${i} de ${n}`, W - MARGEN_PDF[1], H - 14, { align: 'right' });
   }
 }
 
@@ -780,12 +968,12 @@ async function generarPdf(reg){
   host.innerHTML = html; document.body.appendChild(host);
   try {
     const pdf = await html2pdf().set({
-      margin: MARGEN_PDF, image: { type: 'jpeg', quality: 0.9 },
+      margin: margenPdf(reg), image: { type: 'jpeg', quality: 0.9 },
       html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
       jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css'], avoid: ['.inf-bloque', '.inf-fila'] }
+      pagebreak: { mode: ['css'], avoid: ['.inf-bloque', '.inf-fila', '.inf-res'] }
     }).from(host.firstElementChild).toPdf().get('pdf');
-    pieDePagina(pdf);
+    pieDePagina(pdf, reg.kind === 'adherencia');
     const blob = pdf.output('blob');
     const base64 = (await blobADataUrl(blob)).split(',')[1];
     return { blob, base64, nombre: TC.nombreInforme(reg), huella: huellaTexto(html), registroId: reg.id || null };
@@ -799,14 +987,14 @@ function cerrarInforme(){
   const ov = $('#informe-ov'); if (ov) ov.remove();
   if (urlInforme) { URL.revokeObjectURL(urlInforme); urlInforme = null; }
 }
-function mostrarInforme(res){
+function mostrarInforme(res, kind){
   cerrarInforme();
   urlInforme = URL.createObjectURL(res.blob);
   const t = TC.tamanoInforme(res.blob.size);
   const ov = document.createElement('div');
   ov.id = 'informe-ov'; ov.className = 'informe-ov';
   ov.innerHTML = `<div class="informe-dlg" role="dialog" aria-label="Vista previa del informe">
-    <h2>Informe de visita técnica</h2>
+    <h2>${esc(TITULO_INFORME[kind] || TITULO_INFORME.visita)}</h2>
     <p class="mute">${esc(res.nombre)} · ${esc(t.texto)}</p>
     ${t.excede ? `<div class="aviso">El informe pesa ${esc(t.texto)} y supera los ${TC.LIMITE_ENVIO_BYTES / 1048576} MB que admite el envío por correo. Reduce las fotos antes de enviarlo.</div>` : ''}
     <iframe class="informe-vista" title="Informe" src="${esc(urlInforme)}"></iframe>
@@ -821,10 +1009,10 @@ async function verInforme(armar, btn){
   try {
     const { reg, rutas, archivos } = armar();
     const sobran = TC.cupoFotos(rutas.length, archivos.length).sobran;
-    if (sobran) throw new Error(`Máximo ${TC.MAX_FOTOS} fotos por visita: quita ${sobran}.`);
+    if (sobran) throw new Error(`Máximo ${TC.MAX_FOTOS} fotos por ${reg.kind === 'adherencia' ? 'ensayo' : 'visita'}: quita ${sobran}.`);
     reg.fotos = await fotosComoDataUrl(rutas, archivos);
     ultimoInforme = await generarPdf(reg);
-    mostrarInforme(ultimoInforme);
+    mostrarInforme(ultimoInforme, reg.kind);
   } catch(e){
     console.error(e); toast('No se pudo generar el informe: ' + (e.message || 'error'));
   } finally { btn.disabled = false; btn.textContent = txt; }
@@ -892,7 +1080,7 @@ function mostrarOcupado(msg){
 
 // Confirmación previa: dirección exacta, asunto y peso del adjunto. Resuelve true solo si el PM pulsa "Enviar".
 // El foco inicial queda en "Cancelar" para que un Enter distraído no envíe.
-function confirmarEnvio(envio, pdf, dudoso){
+function confirmarEnvio(envio, pdf, dudoso){   // envio.este: "esta visita" o "este ensayo"
   return new Promise(resolve => {
     const t = TC.tamanoInforme(pdf.blob.size);
     const ov = document.createElement('div');
@@ -903,7 +1091,7 @@ function confirmarEnvio(envio, pdf, dudoso){
       + '<dl class="envio-dl"><dt>Asunto</dt><dd data-e="asunto">' + esc(envio.asunto) + '</dd>'
       + '<dt>Adjunto</dt><dd data-e="adjunto">' + esc(pdf.nombre) + ' · ' + esc(t.texto) + '</dd>'
       + '<dt>Copia a</dt><dd>' + esc(me.email) + ' (tú)</dd></dl>'
-      + (dudoso ? '<div class="aviso">Un envío anterior a esta visita no se pudo confirmar: puede que el cliente ya tenga la copia. Revisa tu bandeja antes de reenviar, o el cliente recibirá el correo dos veces.</div>' : '')
+      + (dudoso ? '<div class="aviso">Un envío anterior a ' + esc(envio.este) + ' no se pudo confirmar: puede que el cliente ya tenga la copia. Revisa tu bandeja antes de reenviar, o el cliente recibirá el correo dos veces.</div>' : '')
       + (t.excede ? '<div class="aviso">El informe pesa ' + esc(t.texto) + ' y supera los ' + TC.LIMITE_ENVIO_BYTES / 1048576 + ' MB que admite el envío. Reduce las fotos y vuelve a intentarlo.</div>' : '')
       + '<details class="mas"><summary>Ver el mensaje</summary><pre class="envio-msg">' + esc(envio.cuerpo) + '</pre></details>'
       + '<div class="acciones"><button type="button" class="btn ghost" data-e="cancelar">Cancelar</button>'
@@ -943,9 +1131,10 @@ async function resolverIntento(id, resultado){
 async function enviarRegistro(id){
   if (enviando) return;
   const r = registros.find(x => x.id === id);
-  if (!r || r.kind !== 'visita' || !TC.puedeEditar(r, me)) return toast('No se puede enviar esta visita.');
-  const para = String((r.cierre && r.cierre.email) || '').trim();
-  if (!TC.correoValido(para)) return toast('La visita no tiene un correo de cliente válido: edítala y escríbelo en «Cierre con el cliente».');
+  if (!r || !esInforme(r.kind) || !TC.puedeEditar(r, me)) return toast('No se puede enviar ' + (r ? gen(r.kind).este : 'este registro') + '.');
+  const g = gen(r.kind);
+  const para = String(TC.correoCliente(r.kind, r._datos)).trim();
+  if (!TC.correoValido(para)) return toast(r.kind === 'adherencia' ? 'El ensayo no tiene un correo de cliente válido: edítalo y escríbelo en «Correo del cliente».' : 'La visita no tiene un correo de cliente válido: edítala y escríbelo en «Cierre con el cliente».');
   enviando = true;
   try {
     let informe, envio;
@@ -954,23 +1143,23 @@ async function enviarRegistro(id){
       const reg = regParaInforme(r, await fotosComoDataUrl(r.fotos, []));
       const huella = huellaTexto(informeHtml(reg));
       informe = TC.puedeEnviar(ultimoInforme, { id: r.id, huella }).ok ? ultimoInforme : (ultimoInforme = await generarPdf(reg));
-      const { asunto, cuerpo } = TC.correoVisita({ fecha: r.fecha, cliente: r.cliente, obra: r.obra, datos: r._datos });
-      envio = { id: r.id, huella, para, asunto, cuerpo };
+      const { asunto, cuerpo } = (r.kind === 'adherencia' ? TC.correoEnsayo : TC.correoVisita)({ fecha: r.fecha, cliente: r.cliente, obra: r.obra, datos: r._datos });
+      envio = { id: r.id, huella, para, asunto, cuerpo, este: g.este };
       const v = TC.puedeEnviar(informe, envio);
-      if (!v.ok) throw new Error(TC.textoErrorEnvio(v.motivo));
+      if (!v.ok) throw new Error(TC.textoErrorEnvio(v.motivo, undefined, r.kind));
     } catch(e){
       console.error(e);
-      return toast('No se pudo preparar el informe: ' + (e.message || 'error') + ' La visita quedó guardada; usa «Reintentar envío».');
+      return toast('No se pudo preparar el informe: ' + (e.message || 'error') + ' ' + g.Art + ' quedó guardad' + g.o + '; usa «Reintentar envío».');
     } finally { fin(); }
 
     const dudoso = TC.envioDudoso(r._datos);
-    if (!(await confirmarEnvio(envio, informe, dudoso))) return toast('No se envió la copia. La visita quedó guardada; puedes enviarla con «Reintentar envío».');
+    if (!(await confirmarEnvio(envio, informe, dudoso))) return toast('No se envió la copia. ' + g.Art + ' quedó guardad' + g.o + '; puedes enviarla con «Reintentar envío».');
 
     // Primero se anota el intento (estado "enviando"): sin esa huella en el registro no sale ningún correo. Así, aunque
     // se corte la red o la página tras el envío, la ficha sabe que PUEDE haber salido y no invita a duplicarlo.
     const ts = new Date().toISOString();
     let datos = TC.registrarEnvio(r._datos, { ts, para, asunto: envio.asunto, por: me.nombre, estado: 'enviando' });
-    if (!(await anotarEnvio(r, datos))) return toast('No se envió nada: no se pudo anotar el intento en el registro. La visita quedó guardada; vuelve a intentarlo.');
+    if (!(await anotarEnvio(r, datos))) return toast('No se envió nada: no se pudo anotar el intento en el registro. ' + g.Art + ' quedó guardad' + g.o + '; vuelve a intentarlo.');
 
     const fin2 = mostrarOcupado('Enviando la copia');
     let res;
@@ -981,9 +1170,9 @@ async function enviarRegistro(id){
     if (res.ok) {
       toast(anotado ? 'Copia enviada a ' + para + '.' : 'La copia SÍ se envió a ' + para + ', pero no se pudo actualizar el estado en el registro: no la envíes de nuevo.');
     } else if (estado === 'dudoso') {
-      toast('No se pudo confirmar el envío: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; el correo PUEDE haber salido: revisa tu bandeja antes de reenviar.');
+      toast('No se pudo confirmar el envío: ' + TC.textoErrorEnvio(res.error, res.detalle, r.kind) + '. ' + g.Art + ' quedó guardad' + g.o + '; el correo PUEDE haber salido: revisa tu bandeja antes de reenviar.');
     } else {
-      toast('No se envió la copia: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; puedes usar «Reintentar envío».');
+      toast('No se envió la copia: ' + TC.textoErrorEnvio(res.error, res.detalle, r.kind) + '. ' + g.Art + ' quedó guardad' + g.o + '; puedes usar «Reintentar envío».');
     }
     if (vista === 'registros') render();
   } finally { enviando = false; }
@@ -1092,7 +1281,8 @@ async function editarRegistro(id){
   const r = registros.find(x => x.id === id);
   if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor del registro o un administrador puede corregirlo');
   let filas = [];
-  if (r.kind !== 'visita') {   // los participantes se piden al abrir (con sus firmas), no en el listado
+  const esActividad = r.kind === 'charla' || r.kind === 'capacitacion';
+  if (esActividad) {   // los participantes se piden al abrir (con sus firmas), no en el listado
     const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', id).order('created_at');
     if (error) return toast('No se pudieron cargar los participantes');
     filas = data || [];
@@ -1102,18 +1292,21 @@ async function editarRegistro(id){
   vista = r.kind; render(); window.scrollTo(0, 0);
   const f = $('#form');
   const c = r.cierre || {};
-  const valores = { ...r, cliente: r.cliente, obra: r.obra, cierre_nombre: c.nombre, cierre_cargo: c.cargo, cierre_email: c.email, cierre_fono: c.fono, cierre_firma: c.firma, cierre_firma_pm: c.firmaPm };
+  const fm = r.firmante || {};
+  const valores = { ...r, cliente: r.cliente, obra: r.obra, firm_nombre: fm.nombre, firm_cargo: fm.cargo, firm_movil: fm.movil, firm_correo: fm.correo, cierre_nombre: c.nombre, cierre_cargo: c.cargo, cierre_email: c.email, cierre_fono: c.fono, cierre_firma: c.firma, cierre_firma_pm: c.firmaPm };
   f.querySelectorAll('[name]').forEach(el => {
     const n = el.name, v = valores[n];
     if (el.type === 'file' || v === undefined || v === null) return;
     if (el.type === 'checkbox') el.checked = [].concat(v).includes(el.value);
     else if (el.type !== 'radio') el.value = v;
   });
-  if (r.kind !== 'visita') {
+  if (esActividad) {
     partsViejo = !filas.length && (r.participantes || []).length > 0;
     $('#partics').innerHTML = TC.participantesVista(filas, r.participantes).map(p => filaPart(p, filas.length ? 'tabla' : 'viejo')).join('');
     $('#act-titulo').textContent = 'Corregir ' + KIND_LABEL[r.kind].toLowerCase();
     botonesAsistencia();
+  } else if (r.kind === 'adherencia') {
+    cargarEnsayoEnFormulario(r);
   } else {
     f.querySelector('h2').textContent = 'Corregir visita por reclamo';
     refrescarFirmasCierre();
@@ -1142,8 +1335,9 @@ async function eliminar(id){
 /* ===================== Panel ===================== */
 function vistaPanel(){
   const regs = TC.sinBorradores(registros);   // las actividades en curso (QR abierto) no cuentan todavía
-  const actividades = regs.filter(r => r.kind !== 'visita');
+  const actividades = regs.filter(r => r.kind === 'charla' || r.kind === 'capacitacion');
   const visitas = regs.filter(r => r.kind === 'visita');
+  const ensayos = regs.filter(r => r.kind === 'adherencia');
   const participantes = actividades.reduce((s,r) => s + TC.totalParticipantes(r), 0);
   const abiertas = visitas.filter(r => r.estado !== 'Cerrado').length;
   const cerradas = visitas.length - abiertas;
@@ -1157,17 +1351,19 @@ function vistaPanel(){
   <div class="hero">
     <div class="eb">${esc(fechaHoy)}</div>
     <h2>Hola, ${esc((me?.nombre || '').split(' ')[0])}</h2>
-    <p class="mute" style="margin:0">Registra charlas técnicas, capacitaciones y visitas por reclamo en obra.</p>
+    <p class="mute" style="margin:0">Registra charlas técnicas, capacitaciones, visitas por reclamo y ensayos de adherencia en obra.</p>
     <div class="acciones">
       <button class="btn" data-a="nav" data-v="charla">+ Charla técnica</button>
       <button class="btn ghost" data-a="nav" data-v="capacitacion">+ Capacitación</button>
       <button class="btn ghost" data-a="nav" data-v="visita">+ Visita por reclamo</button>
+      <button class="btn ghost" data-a="nav" data-v="adherencia">+ Ensayo de adherencia</button>
     </div>
   </div>
   <div class="kpis">
     <div class="kpi"><span>Charlas técnicas</span><b>${actividades.filter(r => r.kind === 'charla').length}</b><small>${delMes('charla')} este mes</small></div>
     <div class="kpi"><span>Capacitaciones</span><b>${actividades.filter(r => r.kind === 'capacitacion').length}</b><small>${delMes('capacitacion')} este mes</small></div>
     <div class="kpi"><span>Participantes</span><b>${participantes}</b><small>capacitados en total</small></div>
+    <div class="kpi"><span>Ensayos de adherencia</span><b>${ensayos.length}</b><small>${delMes('adherencia')} este mes</small></div>
     <div class="kpi ${abiertas ? 'hot' : ''}"><span>Reclamos abiertos</span><b>${abiertas}</b><small>${pctCerradas}% cerrados</small></div>
   </div>
   ${regs.length ? `<div class="graficos">
@@ -1210,7 +1406,8 @@ function dibujarGraficos(){
     data: { labels, datasets: [
       { label: 'Charlas técnicas', data: porMes('charla'), backgroundColor: COLOR.charla },
       { label: 'Capacitaciones', data: porMes('capacitacion'), backgroundColor: inkC },
-      { label: 'Visitas', data: porMes('visita'), backgroundColor: COLOR.visita }
+      { label: 'Visitas', data: porMes('visita'), backgroundColor: COLOR.visita },
+      { label: 'Ensayos de adherencia', data: porMes('adherencia'), backgroundColor: COLOR.adherencia }
     ]},
     options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
   });
@@ -1248,16 +1445,46 @@ function dibujarGraficos(){
 /* ===================== Registros ===================== */
 const puedeBorrar = r => me && (me.admin || r.autor === me.id);
 
+// Ver informe, enviar la copia al cliente y el historial de envíos: igual para una visita y para un ensayo.
+function bloqueInforme(r){
+  const boton = TC.puedeEditar(r, me) && TC.botonEnvio(r._datos, r.kind);
+  return `<div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button>${boton ? `<button class="btn ghost" data-a="enviarReg" data-id="${esc(r.id)}">${boton}</button>` : ''}</div>
+      ${TC.lineaEnvio(r._datos) ? `<p class="mute" data-envio="${esc(r.id)}">${esc(TC.lineaEnvio(r._datos))}</p>` : ''}
+      ${TC.historialNoSalio(r._datos).map(t => `<p class="mute" data-historial="${esc(r.id)}">${esc(t)}</p>`).join('')}
+      ${(TC.puedeEditar(r, me) && TC.envioDudoso(r._datos)) ? `<div class="acciones"><button class="btn ghost" data-a="confirmarLlego" data-id="${esc(r.id)}">Sí llegó</button><button class="btn ghost" data-a="confirmarNoSalio" data-id="${esc(r.id)}">No salió</button></div>` : ''}`;
+}
+
+// Los resultados de un ensayo, tal como los ve el PM en la ficha (aquí sí van el mínimo, el máximo y las filas bajo 0,20 MPa: no son parte del informe).
+function resultadosEnsayo(r){
+  const filas = r.filas || [], res = TC.resumenEnsayo(filas);
+  if (!filas.length) return '';
+  const linea = f => `<p>N° ${esc(f.n)} · ${esc(f.sustrato || '—')} · ${esc(TC.fmtNum(f.cargaKn) || '—')} kN · <b>${esc(TC.fmtMpa(TC.mpaDeFila(f)) || '—')} MPa</b>${TC.esManual(f) ? ' (manual)' : ''}${f.falla ? ' · ' + esc(f.falla) : ''}</p>`;
+  return `<p>${filas.length} extracción(es)${res.min != null ? ` · ${TC.fmtMpa(res.min)} a ${TC.fmtMpa(res.max)} MPa (promedio ${TC.fmtMpa(res.prom)})` : ''}</p>
+      ${res.bajoUmbral.length ? `<div class="aviso">Bajo 0,20 MPa: N° ${res.bajoUmbral.map(esc).join(', ')}</div>` : ''}
+      <details class="mas"><summary>Ver resultados</summary>${filas.map(linea).join('')}</details>`;
+}
+
 function tarjeta(r){
   const autor = `<span class="mute"> · ${esc(nombreAutor(r))}</span>`;
   const del = (puedeBorrar(r) ? `<button class="del" data-a="eliminar" data-id="${esc(r.id)}">Eliminar</button>` : '')
     + (TC.puedeEditar(r, me) ? `<button class="del" data-a="editar" data-id="${esc(r.id)}">Editar</button>` : '');
+  if (r.kind === 'adherencia') {
+    return `<div class="card">${del}
+      <span class="tag">Adherencia</span><b>${esc(r.cliente)}</b>${autor}
+      <p class="mute">${esc(r.obra || '')} · ${fmtFecha(r.fecha)} · ${esc(r.producto || '')}</p>
+      <p><b>Motivo:</b> ${esc(r.motivo_visita || '—')}</p>
+      ${resultadosEnsayo(r)}
+      ${r.fotos && r.fotos.length ? `<div class="fotos" data-fotos="${esc(r.id)}">${r.fotos.map(p => `<a target="_blank" rel="noopener" data-path="${esc(p)}"><img alt="Foto del ensayo"></a>`).join('')}</div>` : ''}
+      ${bloqueInforme(r)}
+    </div>`;
+  }
   if (r.kind === 'visita') {
     return `<div class="card">${del}
       <span class="tag v">Visita</span><b>${esc(r.cliente)}</b>${autor}
       <p class="mute">${esc(r.obra || '')} · ${fmtFecha(r.fecha)} · ${esc(r.producto || '')}</p>
       <p><b>Motivo:</b> ${esc(r.motivo)}</p>
       <p><b>Causa probable:</b> ${esc(r.causa || '—')}${r.lab === 'Sí' ? ' · Requiere laboratorio' : ''}</p>
+      ${r.lab === 'Sí' ? `<p style="margin:0 0 8px"><button class="enlace" data-a="crearEnsayo" data-id="${esc(r.id)}">Crear ensayo de adherencia para esta obra</button></p>` : ''}
       ${(r.verificacion || r.solucion || r.contacto || r.direccion || r.observaciones) ? `<details class="mas"><summary>Ver detalle</summary>
         ${r.direccion ? `<p><b>Dirección:</b> ${esc(r.direccion)}</p>` : ''}
         ${r.contacto ? `<p><b>Contacto:</b> ${esc(r.contacto)}</p>` : ''}
@@ -1266,10 +1493,7 @@ function tarjeta(r){
         ${r.observaciones ? `<p><b>Observaciones:</b> ${esc(r.observaciones)}</p>` : ''}
       </details>` : ''}
       ${r.fotos && r.fotos.length ? `<div class="fotos" data-fotos="${esc(r.id)}">${r.fotos.map(p => `<a target="_blank" rel="noopener" data-path="${esc(p)}"><img alt="Foto de la visita"></a>`).join('')}</div>` : ''}
-      <div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button>${(TC.puedeEditar(r, me) && TC.botonEnvio(r._datos)) ? `<button class="btn ghost" data-a="enviarReg" data-id="${esc(r.id)}">${TC.botonEnvio(r._datos)}</button>` : ''}</div>
-      ${TC.lineaEnvio(r._datos) ? `<p class="mute" data-envio="${esc(r.id)}">${esc(TC.lineaEnvio(r._datos))}</p>` : ''}
-      ${TC.historialNoSalio(r._datos).map(t => `<p class="mute" data-historial="${esc(r.id)}">${esc(t)}</p>`).join('')}
-      ${(TC.puedeEditar(r, me) && TC.envioDudoso(r._datos)) ? `<div class="acciones"><button class="btn ghost" data-a="confirmarLlego" data-id="${esc(r.id)}">Sí llegó</button><button class="btn ghost" data-a="confirmarNoSalio" data-id="${esc(r.id)}">No salió</button></div>` : ''}
+      ${bloqueInforme(r)}
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
@@ -1301,12 +1525,13 @@ async function cargarParticipantes(det){
 }
 
 function vistaRegistros(){
-  const filtros = [['todos','Todos'],['charla','Charlas técnicas'],['capacitacion','Capacitaciones'],['visita','Visitas'],['abiertos','Abiertas'],['mios','Mis registros']];
+  const filtros = [['todos','Todos'],['charla','Charlas técnicas'],['capacitacion','Capacitaciones'],['visita','Visitas'],['adherencia','Ensayos de adherencia'],['abiertos','Abiertas'],['mios','Mis registros']];
   const lista = registros.filter(r =>
     filtro === 'todos' ||
     (filtro === 'charla' && r.kind === 'charla') ||
     (filtro === 'capacitacion' && r.kind === 'capacitacion') ||
     (filtro === 'visita' && r.kind === 'visita') ||
+    (filtro === 'adherencia' && r.kind === 'adherencia') ||
     (filtro === 'abiertos' && r.kind === 'visita' && r.estado !== 'Cerrado') ||
     (filtro === 'mios' && r.autor === me?.id)
   );
@@ -1362,18 +1587,24 @@ const acciones = {
   cerrarBorrador: b => cerrarBorrador(b.dataset.id),
   firmar: b => firmarFila(b),
   firmarCierre: b => firmarCierre(b),
+  addFilaEns: () => { $('#ens-filas').insertAdjacentHTML('beforeend', filaEnsayoHtml()); actualizarEnsayo(); },
+  delFilaEns: b => { b.closest('.ens-fila').remove(); actualizarEnsayo(); },
+  mpaAuto: b => { b.closest('.ens-fila').dataset.manual = ''; actualizarEnsayo(); },
+  conclusionBase: () => { $('#conclusion').dataset.editada = ''; actualizarEnsayo(); },
+  crearEnsayo: b => crearEnsayoDeVisita(b.dataset.id),
   verInforme: b => verInforme(() => {
-    const d = leerCampos(), falta = validarCampos('visita', d);
+    const kind = $('#form').dataset.kind, d = leerCampos(), falta = validarCampos(kind, d);
     if (falta) throw new Error(falta);
     const previo = editandoId ? registros.find(x => x.id === editandoId) : null;
-    return { reg: regDesdeFormulario(), rutas: previo ? previo.fotos || [] : [], archivos: d.fotos };
+    return { reg: regDesdeFormulario(kind), rutas: previo ? previo.fotos || [] : [], archivos: d.fotos };
   }, b),
   verInformeReg: b => verInformeRegistro(b),
   cerrarInforme: () => cerrarInforme(),
   guardar: b => guardar(b.dataset.t, b, editandoId),
   guardarEnviar: b => {
-    if (!TC.correoValido(String(leerCampos().cierre_email || '').trim())) return toast('Para enviar la copia escribe un correo válido de quien recibe, en «Cierre con el cliente».');
-    return guardar('visita', b, editandoId, true);
+    const kind = $('#form').dataset.kind, d = leerCampos();
+    if (!TC.correoValido(String(kind === 'adherencia' ? d.correo_cliente : d.cierre_email || '').trim())) return toast(kind === 'adherencia' ? 'Para enviar la copia escribe un correo válido del cliente.' : 'Para enviar la copia escribe un correo válido de quien recibe, en «Cierre con el cliente».');
+    return guardar(kind, b, editandoId, true);
   },
   enviarReg: b => enviarRegistro(b.dataset.id),
   confirmarLlego: b => resolverIntento(b.dataset.id, 'llego'),
@@ -1398,6 +1629,12 @@ document.addEventListener('click', e => {
 
 document.addEventListener('input', e => {
   const fp = e.target.closest('#partics .part'); if (fp) fp.dataset.sucia = '1';   // el refresco no pisa lo que se está escribiendo
+  const fe = e.target.closest('#ens-filas .ens-fila');
+  if (fe) {   // escribir en la casilla MPa la deja como manual; vaciarla vuelve al calculado
+    if (e.target.classList.contains('e-mpa')) fe.dataset.manual = e.target.value.trim() ? '1' : '';
+    actualizarEnsayo();
+  }
+  if (e.target.matches('#conclusion')) e.target.dataset.editada = '1';   // desde aquí el texto base ya no se pisa solo
   if (e.target.matches('[data-cli]')) {
     if (cliSel && norm(cliSel.nombre) !== norm(e.target.value)) { cliSel = null; infoCliente(); }
     buscarClientes(e.target);
@@ -1422,8 +1659,9 @@ document.addEventListener('change', async e => {
       const dt = new DataTransfer();
       [...t.files].slice(0, admitidas).forEach(f => dt.items.add(f));
       t.files = dt.files;
-      toast(`Máximo ${TC.MAX_FOTOS} fotos por visita: se tomaron las primeras ${admitidas}.`);
+      toast(`Máximo ${TC.MAX_FOTOS} fotos por ${t.closest('#form').dataset.kind === 'adherencia' ? 'ensayo' : 'visita'}: se tomaron las primeras ${admitidas}.`);
     }
+    renderPiesNuevos();
     return;
   }
   if (t.matches('[data-acc]')) {
@@ -1457,6 +1695,7 @@ function render(){
     charla: () => formActividad('charla'),
     capacitacion: () => formActividad('capacitacion'),
     visita: formVisita,
+    adherencia: formEnsayo,
     registros: vistaRegistros,
     accesos: vistaAccesos
   };
@@ -1465,6 +1704,7 @@ function render(){
   const vt = $('#view-title'); if (vt) vt.textContent = TITULOS[vista] || '';
   if (vista === 'panel') dibujarGraficos();
   if (vista === 'registros') cargarFotos();
+  if (vista === 'adherencia') actualizarEnsayo();
 }
 
 iniciar();

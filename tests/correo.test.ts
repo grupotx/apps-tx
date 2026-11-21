@@ -64,3 +64,14 @@ test('validarSolicitud: topes de largo del asunto (200) y del cuerpo (20000)', (
   assert.deepEqual(validarSolicitud(ok({ asunto: 'Visita técnica Edificio Sur – ' + 'x'.repeat(200) }), ctx), { ok: false, error: 'asunto_largo' });
   assert.equal(validarSolicitud(ok({ cuerpo: 'Ingevec Edificio Sur ' + 'x'.repeat(20000) }), ctx).ok, false);
 });
+
+test('validarSolicitud de un ensayo de adherencia: asunto propio y destino en el correo guardado del ensayo', () => {
+  const ens = { kind: 'adherencia' as const, cierreEmail: 'obra@ingevec.cl', cliente: 'INGEVEC', obra: 'Torre 4' };
+  const pedido = (extra: object = {}) => ok({ para: 'obra@ingevec.cl', asunto: 'Informe prueba de adherencia Torre 4 – 20-11-2026', cuerpo: 'Estimado(a) INGEVEC: informe en la obra Torre 4.', nombre: 'Informe prueba adherencia.pdf', ...extra });
+  assert.equal(validarSolicitud(pedido(), ens).ok, true);
+  assert.deepEqual(validarSolicitud(pedido({ asunto: 'Visita técnica Torre 4 – 20-11-2026' }), ens), { ok: false, error: 'mensaje_no_corresponde' });
+  assert.deepEqual(validarSolicitud(pedido({ para: 'otro@ingevec.cl' }), ens), { ok: false, error: 'correo_no_coincide' });
+  assert.deepEqual(validarSolicitud(pedido(), { ...ens, cierreEmail: undefined }), { ok: false, error: 'correo_no_coincide' });
+  // Una visita sigue exigiendo su propio asunto.
+  assert.deepEqual(validarSolicitud(pedido(), { ...ens, kind: 'visita' }), { ok: false, error: 'mensaje_no_corresponde' });
+});
