@@ -13,15 +13,20 @@ export const bytesDeBase64 = (b64: string): number =>
 
 export type Solicitud = { registro_id: string; para: string; asunto: string; cuerpo: string; nombre: string; base64: string };
 
-// `cierreEmail`: el correo del cliente que la visita tiene GUARDADO. El destino debe ser exactamente ese: así un pedido
-// manipulado o desfasado no puede mandar el informe a otra dirección.
-export function validarSolicitud(b: unknown, cierreEmail: string | null | undefined):
+// `ctx`: lo que la visita tiene GUARDADO. El destino debe ser exactamente el correo guardado (así un pedido manipulado o
+// desfasado no puede mandar el informe a otra dirección) y el mensaje debe corresponder a la visita: el cuerpo nombra al
+// cliente y la obra, y el asunto sigue el patrón de TC.correoVisita ('Visita técnica <obra> – <fecha>'). El PM puede editar
+// el texto, pero no usar la casilla institucional para un mensaje ajeno a la visita.
+export type ContextoVisita = { cierreEmail: string | null | undefined; cliente: string | null | undefined; obra: string | null | undefined };
+export function validarSolicitud(b: unknown, ctx: ContextoVisita):
   { ok: true; solicitud: Solicitud } | { ok: false; error: string } {
   const x = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
   if (!correoValido(x.para)) return { ok: false, error: 'correo_invalido' };
-  if (!correoValido(cierreEmail) || x.para.trim().toLowerCase() !== cierreEmail.trim().toLowerCase()) return { ok: false, error: 'correo_no_coincide' };
-  if (typeof x.asunto !== 'string' || !x.asunto.trim() || x.asunto.length > 300 || /[\r\n]/.test(x.asunto)) return { ok: false, error: 'solicitud_invalida' };
-  if (typeof x.cuerpo !== 'string' || !x.cuerpo.trim() || x.cuerpo.length > 50000) return { ok: false, error: 'solicitud_invalida' };
+  if (!correoValido(ctx.cierreEmail) || x.para.trim().toLowerCase() !== ctx.cierreEmail.trim().toLowerCase()) return { ok: false, error: 'correo_no_coincide' };
+  if (typeof x.asunto !== 'string' || !x.asunto.trim() || x.asunto.length > 200 || /[\r\n]/.test(x.asunto)) return { ok: false, error: 'solicitud_invalida' };
+  if (typeof x.cuerpo !== 'string' || !x.cuerpo.trim() || x.cuerpo.length > 20000) return { ok: false, error: 'solicitud_invalida' };
+  if (!x.asunto.startsWith('Visita técnica ' + (ctx.obra || '') + ' – ')) return { ok: false, error: 'mensaje_no_corresponde' };
+  if ((ctx.cliente && !x.cuerpo.includes(ctx.cliente)) || (ctx.obra && !x.cuerpo.includes(ctx.obra))) return { ok: false, error: 'mensaje_no_corresponde' };
   if (typeof x.nombre !== 'string' || !/\.pdf$/i.test(x.nombre) || /[\\/\r\n]/.test(x.nombre) || x.nombre.length > 200) return { ok: false, error: 'archivo_invalido' };
   if (typeof x.base64 !== 'string' || !x.base64) return { ok: false, error: 'archivo_invalido' };
   if (bytesDeBase64(x.base64) > LIMITE_BYTES) return { ok: false, error: 'demasiado_grande' };

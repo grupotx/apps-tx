@@ -446,3 +446,41 @@ test('correoVisita repite los datos clave en el cuerpo (el PDF es imagen: no se 
   const c = TC.correoVisita({ fecha: '2026-11-20', cliente: 'Ingevec', obra: 'Edificio Sur', datos: { producto: 'TX-100', motivo: 'Grieta en piso', verificacion: 'Se midió humedad', causa: 'Humedad del sustrato', solucion: 'Secar y reaplicar' } });
   for (const t of ['Ingevec', 'Edificio Sur', '20-11-2026', 'TX-100', 'Grieta en piso', 'Se midió humedad', 'Humedad del sustrato', 'Secar y reaplicar']) assert.ok(c.cuerpo.includes(t), t);
 });
+
+// ---- Estado del envío (intento anotado ANTES de llamar a la función) ----
+const ENV = { ts: '2026-11-20T15:30:00Z', para: 'ana@obra.cl', asunto: 'A', por: 'Luis' };
+
+test('registrarEnvio con estado y resolverEnvio: cambia el estado de ESE intento o lo quita', () => {
+  const a = TC.registrarEnvio({}, { ...ENV, estado: 'enviando' });
+  assert.equal(a.envios[0].estado, 'enviando');
+  assert.equal(TC.registrarEnvio({}, ENV).envios[0].estado, undefined);   // sin estado = enviada (registros ya guardados)
+  const b = TC.resolverEnvio(a, ENV.ts, 'enviada');
+  assert.equal(b.envios[0].estado, 'enviada'); assert.equal(a.envios[0].estado, 'enviando');
+  assert.equal(TC.resolverEnvio(a, ENV.ts, null).envios.length, 0);
+  const dos = TC.registrarEnvio(b, { ...ENV, ts: '2026-11-21T10:00:00Z', estado: 'enviando' });
+  assert.equal(TC.resolverEnvio(dos, '2026-11-21T10:00:00Z', null).envios.length, 1);
+});
+
+test('envioNoSalio: solo los errores en que el correo seguro NO salió; red y apps_script son dudosos', () => {
+  for (const c of ['pendiente_publicar', 'otra_visita', 'desactualizado', 'sin_guardar', 'sin_informe', 'demasiado_grande', 'correo_no_coincide', 'mensaje_no_corresponde', 'sin_acceso', 'no_es_autor', 'no_autorizado']) assert.equal(TC.envioNoSalio(c), true, c);
+  for (const c of ['red', 'apps_script', 'algo_raro', undefined]) assert.equal(TC.envioNoSalio(c), false, String(c));
+});
+
+test('lineaEnvio y botonEnvio ante un intento dudoso: dice que PUEDE haber salido y advierte que reenviar duplica', () => {
+  const dudoso = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'dudoso' }] };
+  const enviando = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'enviando' }] };
+  for (const d of [dudoso, enviando]) {
+    assert.match(TC.lineaEnvio(d), /puede haber salido/);
+    assert.match(TC.lineaEnvio(d), /ana@obra\.cl/);
+    assert.match(TC.botonEnvio(d), /duplicar/);
+    assert.equal(TC.envioDudoso(d), true);
+  }
+  const ok = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'enviada' }] };
+  assert.equal(TC.envioDudoso(ok), false); assert.equal(TC.botonEnvio(ok), 'Reenviar copia');
+  assert.match(TC.lineaEnvio(ok), /^Copia enviada a ana@obra\.cl/);
+  assert.equal(TC.envioDudoso({}), false);
+});
+
+test('textoErrorEnvio: mensaje_no_corresponde', () => {
+  assert.match(TC.textoErrorEnvio('mensaje_no_corresponde'), /el mensaje no corresponde a esta visita/);
+});

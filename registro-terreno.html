@@ -671,6 +671,7 @@ async function guardar(kind, btn, registroId, enviar){
   if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
+  let guardadoId = null;
   try {
     const eraBorrador = TC.esBorrador(registros.find(x => x.id === registroId));
     const id = await persistir(kind, d, registroId, btn);
@@ -687,10 +688,16 @@ async function guardar(kind, btn, registroId, enviar){
     cliSel = null; cliNuevo = false; editandoId = null;
     vista = registroId || kind === 'visita' ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
-    if (enviar) { await cargar(); await enviarRegistro(id); } else cargar();
+    guardadoId = id;
+    if (!enviar) cargar();
   } catch(e){
     btn.disabled = false; btn.textContent = txt;
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
+  }
+  // El envío va aparte: si falla, la visita YA está guardada y el aviso no debe decir que no se guardó.
+  if (guardadoId && enviar) {
+    try { await cargar(); await enviarRegistro(guardadoId); }
+    catch(e){ console.error(e); toast('La visita quedó guardada, pero el envío falló: ' + (e.message || 'error') + '. Revisa la ficha antes de reintentar.'); }
   }
 }
 
@@ -885,7 +892,7 @@ function mostrarOcupado(msg){
 
 // Confirmación previa: dirección exacta, asunto y peso del adjunto. Resuelve true solo si el PM pulsa "Enviar".
 // El foco inicial queda en "Cancelar" para que un Enter distraído no envíe.
-function confirmarEnvio(envio, pdf){
+function confirmarEnvio(envio, pdf, dudoso){
   return new Promise(resolve => {
     const t = TC.tamanoInforme(pdf.blob.size);
     const ov = document.createElement('div');
@@ -896,6 +903,7 @@ function confirmarEnvio(envio, pdf){
       + '<dl class="envio-dl"><dt>Asunto</dt><dd data-e="asunto">' + esc(envio.asunto) + '</dd>'
       + '<dt>Adjunto</dt><dd data-e="adjunto">' + esc(pdf.nombre) + ' · ' + esc(t.texto) + '</dd>'
       + '<dt>Copia a</dt><dd>' + esc(me.email) + ' (tú)</dd></dl>'
+      + (dudoso ? '<div class="aviso">Un envío anterior a esta visita no se pudo confirmar: puede que el cliente ya tenga la copia. Revisa tu bandeja antes de reenviar, o el cliente recibirá el correo dos veces.</div>' : '')
       + (t.excede ? '<div class="aviso">El informe pesa ' + esc(t.texto) + ' y supera los ' + TC.LIMITE_ENVIO_BYTES / 1048576 + ' MB que admite el envío. Reduce las fotos y vuelve a intentarlo.</div>' : '')
       + '<details class="mas"><summary>Ver el mensaje</summary><pre class="envio-msg">' + esc(envio.cuerpo) + '</pre></details>'
       + '<div class="acciones"><button type="button" class="btn ghost" data-e="cancelar">Cancelar</button>'
@@ -906,6 +914,14 @@ function confirmarEnvio(envio, pdf){
     document.body.appendChild(ov);
     ov.querySelector('[data-e="cancelar"]').focus();
   });
+}
+
+// Escribe datos (con el historial de envíos) en el registro y refresca la lista local. true si quedó guardado.
+async function anotarEnvio(r, datos){
+  const { data, error } = await sb.from('registros').update({ datos }).eq('id', r.id).select('id');
+  if (error || !data || !data.length) return false;
+  actualizarLocal(r.id, { kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id, obra: r.obra, estado: r.estado }, datos, r.fotos);
+  return true;
 }
 
 // Prepara el informe de una visita ya guardada, pide confirmación, lo envía y anota el envío en datos.envios.
@@ -934,18 +950,28 @@ async function enviarRegistro(id){
       return toast('No se pudo preparar el informe: ' + (e.message || 'error') + ' La visita quedó guardada; usa «Reintentar envío».');
     } finally { fin(); }
 
-    if (!(await confirmarEnvio(envio, informe))) return toast('No se envió la copia. La visita quedó guardada; puedes enviarla con «Reintentar envío».');
+    const dudoso = TC.envioDudoso(r._datos);
+    if (!(await confirmarEnvio(envio, informe, dudoso))) return toast('No se envió la copia. La visita quedó guardada; puedes enviarla con «Reintentar envío».');
+
+    // Primero se anota el intento (estado "enviando"): sin esa huella en el registro no sale ningún correo. Así, aunque
+    // se corte la red o la página tras el envío, la ficha sabe que PUEDE haber salido y no invita a duplicarlo.
+    const ts = new Date().toISOString();
+    let datos = TC.registrarEnvio(r._datos, { ts, para, asunto: envio.asunto, por: me.nombre, estado: 'enviando' });
+    if (!(await anotarEnvio(r, datos))) return toast('No se envió nada: no se pudo anotar el intento en el registro. La visita quedó guardada; vuelve a intentarlo.');
+
     const fin2 = mostrarOcupado('Enviando la copia');
     let res;
     try { res = await enviarCopia(envio, informe); } finally { fin2(); }
-    if (!res.ok) return toast('No se envió la copia: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; puedes usar «Reintentar envío».');
-
-    // Salió: se anota quién, a quién y cuándo. Si no se pudiera anotar, se dice claro para que no se reenvíe por error.
-    const datos = TC.registrarEnvio(r._datos, { ts: new Date().toISOString(), para, asunto: envio.asunto, por: me.nombre });
-    const { data, error } = await sb.from('registros').update({ datos }).eq('id', r.id).select('id');
-    if (error || !data || !data.length) return toast('La copia SÍ se envió a ' + para + ', pero no se pudo anotar en el registro. No la envíes de nuevo.');
-    actualizarLocal(r.id, { kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id, obra: r.obra, estado: r.estado }, datos, r.fotos);
-    toast('Copia enviada a ' + para + '.');
+    const estado = res.ok ? 'enviada' : TC.envioNoSalio(res.error) ? null : 'dudoso';   // null: seguro no salió, se retira el intento
+    datos = TC.resolverEnvio(datos, ts, estado);
+    const anotado = await anotarEnvio(r, datos);
+    if (res.ok) {
+      toast(anotado ? 'Copia enviada a ' + para + '.' : 'La copia SÍ se envió a ' + para + ', pero no se pudo actualizar el estado en el registro: no la envíes de nuevo.');
+    } else if (estado === 'dudoso') {
+      toast('No se pudo confirmar el envío: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; el correo PUEDE haber salido: revisa tu bandeja antes de reenviar.');
+    } else {
+      toast('No se envió la copia: ' + TC.textoErrorEnvio(res.error, res.detalle) + '. La visita quedó guardada; puedes usar «Reintentar envío».');
+    }
     if (vista === 'registros') render();
   } finally { enviando = false; }
 }

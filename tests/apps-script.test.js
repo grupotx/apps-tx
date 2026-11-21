@@ -53,13 +53,14 @@ function cargarScript(opc) {
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => ({ RESPALDO_CLAVE: CLAVE, ROOT_FOLDER_ID: 'raiz' }[k]) }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => ({ t, setMimeType() { return this; } }) },
-    DriveApp: { getFolderById() { throw new Error('el correo no debe tocar Drive'); } },
-    LockService: { getScriptLock() { throw new Error('el correo no necesita el candado'); } },
+    // Sin `drive`, tocar Drive o el candado lanza: así se prueba que el correo no los usa. Con `drive` quedan operativos (rutas de las otras acciones).
+    DriveApp: { getFolderById() { if (!(opc && opc.drive)) throw new Error('el correo no debe tocar Drive'); return { getId: () => 'raiz' }; } },
+    LockService: { getScriptLock() { if (!(opc && opc.drive)) throw new Error('el correo no necesita el candado'); return { waitLock() {}, releaseLock() {} }; } },
   };
   vm.createContext(ctx);
   for (const f of ['lib.js', 'Codigo.gs']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'apps-script', f), 'utf8'), ctx, { filename: f });
   const post = (body) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).t);
-  return { post, enviados };
+  return { post, enviados, ctx };
 }
 
 const pedido = (extra) => ({
@@ -118,4 +119,26 @@ test('correo: caso bueno envía un solo correo con asunto, cuerpo, adjunto PDF y
 test('correo: si MailApp falla (cuota, etc.) responde el error y no lo da por enviado', () => {
   const { post } = cargarScript({ fallaEnvio: 'Límite de correos excedido' });
   assert.deepEqual(post(pedido()), { ok: false, error: 'Límite de correos excedido' });
+});
+
+test('doPost: una acción desconocida sigue respondiendo literalmente "acción desconocida" (de eso depende pendiente_publicar)', () => {
+  const { post } = cargarScript({ drive: true });
+  assert.deepEqual(post({ clave: CLAVE, accion: 'inventada' }), { ok: false, error: 'acción desconocida' });
+  assert.deepEqual(post({ clave: CLAVE }), { ok: false, error: 'acción desconocida' });
+});
+
+test('doPost: envio, eliminado, copia y archivo siguen enrutando tras el retorno temprano del correo', () => {
+  const llamadas = [];
+  const { post, ctx } = cargarScript({ drive: true });
+  ctx.guardarEnvio_ = (raiz, env) => { llamadas.push(['envio', env]); return { ok: true, via: 'envio' }; };
+  ctx.marcarEliminado_ = (raiz, app, numero) => { llamadas.push(['eliminado', app, numero]); return { ok: true, via: 'eliminado' }; };
+  ctx.guardarCopia_ = (raiz, nombre, base64) => { llamadas.push(['copia', nombre, base64]); return { ok: true, via: 'copia' }; };
+  ctx.leerArchivo_ = (raiz, fileId) => { llamadas.push(['archivo', fileId]); return { ok: true, via: 'archivo' }; };
+  assert.equal(post({ clave: CLAVE, accion: 'envio', envio: { n: 1 } }).via, 'envio');
+  assert.equal(post({ clave: CLAVE, accion: 'eliminado', app: 'terreno', numero: 7 }).via, 'eliminado');
+  assert.equal(post({ clave: CLAVE, accion: 'copia', nombre: 'b.gz', base64: 'QQ==' }).via, 'copia');
+  assert.equal(post({ clave: CLAVE, accion: 'archivo', fileId: 'F1' }).via, 'archivo');
+  assert.deepEqual(llamadas.map((l) => l[0]), ['envio', 'eliminado', 'copia', 'archivo']);
+  assert.deepEqual(llamadas[1], ['eliminado', 'terreno', 7]);
+  assert.deepEqual(llamadas[3], ['archivo', 'F1']);
 });

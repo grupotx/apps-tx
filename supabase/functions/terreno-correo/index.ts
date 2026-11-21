@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
   const { data: acceso, error: eAcceso } = await usuario.rpc('rt_tengo_acceso');
   if (eAcceso || acceso !== true) return responder({ ok: false, error: 'sin_acceso' }, 403);
   if (!registroId) return responder({ ok: false, error: 'registro_no_existe' }, 404);
-  const { data: reg } = await usuario.from('registros').select('id, kind, autor, datos').eq('id', registroId).maybeSingle();
+  const { data: reg } = await usuario.from('registros').select('id, kind, autor, cliente, obra, datos').eq('id', registroId).maybeSingle();
   if (!reg || reg.kind !== 'visita') return responder({ ok: false, error: 'registro_no_existe' }, 404);
   const { data: perfil } = await usuario.from('profiles').select('email, rol, activo').eq('id', user.id).maybeSingle();
   const esAdmin = !!(perfil && perfil.activo && perfil.rol === 'admin');
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
   const copia = perfil?.email || user.email;
   if (!correoValido(copia)) return responder({ ok: false, error: 'sin_acceso' }, 403);
 
-  const v = validarSolicitud(body, reg.datos?.cierre?.email);
+  const v = validarSolicitud(body, { cierreEmail: reg.datos?.cierre?.email, cliente: reg.cliente, obra: reg.obra });
   if (!v.ok) return responder({ ok: false, error: v.error }, 400);
   const s = v.solicitud;
 
