@@ -291,8 +291,21 @@ begin
   if not ok then raise exception 'un PM ajeno pudo agregar participantes a un registro que no es suyo'; end if;
   select count(*) into n from public.rt_asistencias where registro_id = reg;
   if n <> 80 then raise exception 'un PM activo debe poder leer los participantes (ve %)', n; end if;
-  perform set_config('request.jwt.claims', json_build_object('sub', pm1, 'role', 'authenticated')::text, true);
+  -- PM activo que no es el autor: update y delete de participantes ajenos no afectan ninguna fila
+  update public.rt_asistencias set nombre = 'Alterado' where registro_id = reg and nombre = 'Participante 1';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'un PM ajeno pudo actualizar un participante (% filas)', n; end if;
   delete from public.rt_asistencias where registro_id = reg and nombre = 'Participante 1';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'un PM ajeno pudo borrar un participante (% filas)', n; end if;
+  -- el autor sí puede actualizar y borrar
+  perform set_config('request.jwt.claims', json_build_object('sub', pm1, 'role', 'authenticated')::text, true);
+  update public.rt_asistencias set cargo = 'Editado por autor' where registro_id = reg and nombre = 'Participante 2';
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'el autor no pudo actualizar un participante (% filas)', n; end if;
+  delete from public.rt_asistencias where registro_id = reg and nombre = 'Participante 1';
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'el autor no pudo borrar un participante (% filas)', n; end if;
   insert into public.rt_asistencias (registro_id, nombre, origen) values (reg, 'Manual autor', 'manual');
   perform set_config('request.jwt.claims', json_build_object('sub', adm, 'role', 'authenticated')::text, true);
   insert into public.rt_asistencias (registro_id, nombre, origen) values (reg, 'Manual admin', 'manual');
