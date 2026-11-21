@@ -41,12 +41,14 @@ function esPdfBytes(bytes) {
   return true;
 }
 
+// Reglas compartidas con la función terreno-correo (supabase/functions/_shared/correo.ts: correoValido y tope del asunto):
+// si cambian allá, cambian aquí. El asunto admite hasta 200 caracteres, igual que allá.
 // Valida el pedido de la acción 'correo'. Devuelve '' si está bien, o el motivo del rechazo. No toca servicios de Google.
 function validarCorreo(c) {
   if (!correoValido(c.para)) return 'destino inválido';
   if (!correoValido(c.copia)) return 'falta la copia al PM';
   if (c.responderA && !correoValido(c.responderA)) return 'responderA inválido';
-  if (typeof c.asunto !== 'string' || !c.asunto.trim() || c.asunto.length > 300 || /[\r\n]/.test(c.asunto)) return 'asunto inválido';
+  if (typeof c.asunto !== 'string' || !c.asunto.trim() || c.asunto.length > 200 || /[\r\n]/.test(c.asunto)) return 'asunto inválido';
   if (typeof c.cuerpo !== 'string' || !c.cuerpo.trim() || c.cuerpo.length > 50000) return 'cuerpo inválido';
   if (typeof c.nombre !== 'string' || !/\.pdf$/i.test(c.nombre) || /[\/\r\n]/.test(c.nombre) || c.nombre.length > 200) return 'el adjunto debe ser un .pdf';
   if (typeof c.base64 !== 'string' || !c.base64) return 'el adjunto debe ser un pdf (vacío)';

@@ -143,7 +143,9 @@ async function cargar(){
   $('#a-cliente').textContent = a.cliente ? 'Cliente: ' + a.cliente : '';
   $('#a-obra').textContent = a.obra ? 'Obra: ' + a.obra : '';
   $('#a-obra').hidden = !a.obra;
+  $('#a-cliente').hidden = !a.cliente;
   $('#a-fecha').textContent = fechaCL(a.fecha);
+  $('#a-fecha').hidden = !fechaCL(a.fecha);
   mostrar('p-actividad', 'p-form');
 }
 $('#m-reintentar').onclick = cargar;

@@ -138,7 +138,7 @@
         const f = e.target.closest('[data-f]'); if (!f) return;
         if (f.dataset.f === 'limpiar') { trazos.length = 0; actual = null; limpiada = true; const im = caja.querySelector('img'); if (im) im.remove(); redibuja(); refresca(); }
         else if (f.dataset.f === 'cancelar') cerrar(null);
-        else if (f.dataset.f === 'aplicar' && !f.disabled) cerrar(trazos.length ? TC.trazoAPng(trazos, FIRMA_ANCHO_PNG) : '');
+        else if (f.dataset.f === 'aplicar' && !f.disabled) cerrar(trazos.length ? g.TC.trazoAPng(trazos, FIRMA_ANCHO_PNG) : '');
       });
       ajusta();
       ov.querySelector('[data-f="cancelar"]').focus();

@@ -128,6 +128,17 @@
   });
 
   // ── Correos al cliente ──
+  // El cuerpo es editable en la confirmación del envío. El servidor (validarSolicitud en correo.ts) exige que siga
+  // nombrando al cliente y la obra; esta es la misma regla aplicada antes de enviar, con texto para el PM.
+  // Devuelve '' si está bien, o el motivo.
+  function validarCuerpoCorreo(cuerpo, ref) {
+    const c = typeof cuerpo === 'string' ? cuerpo : '', r = ref || {};
+    if (!c.trim()) return 'El mensaje no puede quedar vacío.';
+    if (c.length > 20000) return 'El mensaje es demasiado largo: acórtalo.';
+    if (r.cliente && !c.includes(r.cliente)) return 'El mensaje debe seguir nombrando al cliente («' + r.cliente + '»).';
+    if (r.obra && !c.includes(r.obra)) return 'El mensaje debe seguir nombrando la obra («' + r.obra + '»).';
+    return '';
+  }
   const fechaCL = (iso) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
     return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
@@ -267,7 +278,7 @@
   function mensajeAsistencia(error) {
     const m = String((error && error.message) || '');
     if (/ya estás registrado/i.test(m)) return { tipo: 'duplicado', texto: 'Ya estás registrado en esta actividad. No necesitas ingresar de nuevo.' };
-    if (/enlace no válido/i.test(m)) return { tipo: 'cerrado', texto: 'Este enlace ya no recibe registros: la actividad terminó, el enlace no es válido o se completó el cupo. Consulta con quien dirige la actividad.' };
+    if (/enlace no válido/i.test(m)) return { tipo: 'cerrado', texto: 'Este enlace ya no recibe registros: la actividad terminó, el enlace no es válido, pasaron más de 48 horas desde que se generó el QR o se completó el cupo. Si la actividad sigue en curso, pide a quien la dirige que genere el QR de nuevo.' };
     return { tipo: 'red', texto: 'No pudimos enviar tus datos. Revisa tu conexión e inténtalo de nuevo; lo que escribiste sigue aquí.' };
   }
 
@@ -364,7 +375,7 @@
     + '.inf-firmas{display:flex;gap:28px;margin-top:10px}.inf-firma{flex:1;break-inside:avoid;page-break-inside:avoid}'
     + '.inf-firma-esp{height:78px;border-bottom:1px solid #1b1b1b;display:flex;align-items:flex-end;justify-content:center}.inf-firma-img{max-width:100%;max-height:74px;object-fit:contain}'
     + '.inf-firma b{display:block;margin-top:4px}.inf-firma span{display:block;font-size:11px;color:#555}'
-    + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:left;border-top:1px solid #ddd;padding-top:8px}';
+    + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:left;border-top:1px solid #ddd;padding-top:8px;padding-right:6pt}';
 
   // Tipo real de una imagen según sus primeros bytes (no se confía en el tipo que declare el servidor). null si no es JPEG, PNG ni WebP.
   function tipoImagen(bytes) {
@@ -474,6 +485,10 @@
 
   // ── Envío de la copia al cliente ──
   // Misma regla que valida el Apps Script: una sola dirección, sin espacios, comas, saltos de línea ni segundo @.
+  // Reglas del correo que existen en más de un runtime y deben cambiar juntas: la dirección (correoValido aquí,
+  // correo.ts de la función terreno-correo y lib.js del Apps Script) y el asunto (tope de 200 caracteres en correo.ts
+  // y lib.js; patrón 'Visita técnica <obra> – <fecha>' en correoVisita/correoEnsayo y PREFIJO_ASUNTO de correo.ts).
+  // tests/correo-contrato.test.ts ata la salida real de correoVisita/correoEnsayo con validarSolicitud.
   const correoValido = (s) => typeof s === 'string' && s.length <= 254 && /^[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[^\s@,;<>()"']{2,}$/.test(s);
 
   // ¿Este informe puede salir hacia esta visita? Exige la identidad (registroId) Y la huella del contenido: "Ver informe"
@@ -582,7 +597,7 @@
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -815,3 +815,25 @@ test('textoErrorEnvio: los errores de envío de un ensayo hablan de "el ensayo",
   }
   assert.equal(TC.textoErrorEnvio('demasiado_grande', undefined, 'adherencia'), TC.textoErrorEnvio('demasiado_grande'));
 });
+
+// ── Revisión final: cuerpo editable, nota legal, enlace caducado ──
+test('validarCuerpoCorreo: el cuerpo editado debe seguir nombrando al cliente y la obra (misma regla que el servidor)', () => {
+  const ref = { cliente: 'Ingevec', obra: 'Edificio Sur' };
+  assert.equal(TC.validarCuerpoCorreo('Ingevec, Edificio Sur: texto', ref), '');
+  assert.match(TC.validarCuerpoCorreo('   ', ref), /vacío/);
+  assert.match(TC.validarCuerpoCorreo('Edificio Sur', ref), /cliente/);
+  assert.match(TC.validarCuerpoCorreo('Ingevec', ref), /obra/);
+  assert.match(TC.validarCuerpoCorreo('x'.repeat(20001), {}), /largo/);
+  assert.equal(TC.validarCuerpoCorreo('texto', { cliente: '', obra: '' }), '', 'sin cliente ni obra guardados no hay qué exigir');
+  assert.match(TC.validarCuerpoCorreo(undefined, ref), /vacío/);
+});
+
+test('la nota legal de ambos informes deja ~6 pt de margen derecho para no sobresalir del bloque de texto', () => {
+  for (const h of [TC.informeVisitaHtml(regVisita(), { fotos: [] }), TC.informeAdherenciaHtml(regEnsayo(), {})]) {
+    assert.match(h, /\.inf-legal\{[^}]*padding-right:6pt/);
+  }
+});
+
+test('mensajeAsistencia: el enlace cerrado menciona que caduca a las 48 horas', () => {
+  assert.match(TC.mensajeAsistencia({ message: 'enlace no válido o actividad cerrada' }).texto, /48 horas/);
+});

@@ -142,3 +142,10 @@ test('doPost: envio, eliminado, copia y archivo siguen enrutando tras el retorno
   assert.deepEqual(llamadas[1], ['eliminado', 'terreno', 7]);
   assert.deepEqual(llamadas[3], ['archivo', 'F1']);
 });
+
+test('correo: el asunto admite hasta 200 caracteres, igual que la función terreno-correo (correo.ts)', () => {
+  const { post, enviados } = cargarScript();
+  assert.match(post(pedido({ asunto: 'a'.repeat(201) })).error, /asunto/);
+  assert.equal(enviados.length, 0);
+  assert.deepEqual(post(pedido({ asunto: 'a'.repeat(200) })), { ok: true });
+});

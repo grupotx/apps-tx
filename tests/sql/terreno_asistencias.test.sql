@@ -77,6 +77,33 @@ begin
   select count(*) into n from public.rt_asistencia_info('0123456789abcdef0123456789abcdef');
   if n <> 0 then raise exception 'info con token inventado devolvió % filas', n; end if;
 
+  -- ===== Caducidad del enlace (migración 20261126): un token abierto ahora funciona; uno abierto hace 49 horas se rechaza =====
+  -- (requiere haber aplicado 20261126_terreno_token_caduca.sql; antes de eso este bloque falla por columna inexistente)
+  reset role;
+  if (select abierto_en from public.rt_asistencia_tokens where registro_id = reg) < now() - interval '1 minute' then
+    raise exception 'abrir no dejó abierto_en en el momento de la apertura';
+  end if;
+  update public.rt_asistencia_tokens set abierto_en = now() - interval '47 hours' where registro_id = reg;
+  set local role anon;
+  select count(*) into n from public.rt_asistencia_info(tok);
+  if n <> 1 then raise exception 'un token de hace 47 horas debe seguir vigente (info devolvió % filas)', n; end if;
+  reset role;
+  update public.rt_asistencia_tokens set abierto_en = now() - interval '49 hours' where registro_id = reg;
+  set local role anon;
+  select count(*) into n from public.rt_asistencia_info(tok);
+  if n <> 0 then raise exception 'info aceptó un token de hace 49 horas (% filas)', n; end if;
+  ok := false;
+  begin
+    perform public.rt_asistencia_agregar(tok, 'Llegó tarde', '', '', '', '', '');
+  exception when others then
+    if sqlerrm <> 'enlace no válido o actividad cerrada' then raise exception 'error inesperado (token caducado): %', sqlerrm; end if;
+    ok := true;
+  end;
+  if not ok then raise exception 'agregar aceptó un token de hace 49 horas'; end if;
+  reset role;
+  update public.rt_asistencia_tokens set abierto_en = now() where registro_id = reg;
+  set local role anon;
+
   -- info devuelve el nombre de la actividad si existe y, si está vacío, el tipo
   reset role;
   update public.registros set datos = jsonb_set(datos, '{nombre}', '"Charla aplicación de autonivelante"') where id = reg;

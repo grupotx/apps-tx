@@ -5,6 +5,8 @@ export const LIMITE_BYTES = 8 * 1024 * 1024;
 const FIRMA_PDF_B64 = 'JVBERi0'; // "%PDF-" en base64
 
 // Misma regla que lib.js del Apps Script y TC.correoValido: una sola dirección, sin espacios, comas ni saltos de línea.
+// (lib.js del Apps Script repite esta regla y el tope de 200 caracteres del asunto; tests/correo-contrato.test.ts ata el asunto
+// y el cuerpo reales de TC.correoVisita / TC.correoEnsayo con validarSolicitud.)
 export const correoValido = (s: unknown): s is string =>
   typeof s === 'string' && s.length <= 254 && /^[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[^\s@,;<>()"']{2,}$/.test(s);
 

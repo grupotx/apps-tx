@@ -104,7 +104,7 @@ textarea{min-height:84px;resize:vertical}
 .envio-dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:10px 0;font-size:14px}
 .envio-dl dt{color:var(--mute);font-weight:600}.envio-dl dd{margin:0;word-break:break-word}
 .envio-para{font-size:18px;margin:2px 0 0;word-break:break-all}
-.envio-msg{white-space:pre-wrap;font:13px/1.45 inherit;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:240px;overflow:auto}
+.envio-msg{display:block;width:100%;box-sizing:border-box;white-space:pre-wrap;font:13px/1.45 inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:160px;max-height:320px;resize:vertical}
 .informe-vista{flex:1;min-height:55vh;width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:8px}
 .part-barra .mute{margin-left:auto}
 .ac{position:relative}
@@ -826,7 +826,10 @@ async function persistir(kind, d, registroId, btn){
     // Desde aquí el registro existe: si algo falla después, reintentar corrige este mismo registro en vez de duplicarlo.
     editandoId = id;
     actualizarLocal(id, fila, datos, fotos);
-    if (plan) await aplicarPlan(id, plan);
+    if (plan) {
+      try { await aplicarPlan(id, plan); }
+      catch(e){ throw Object.assign(e, { registroGuardado: true }); }   // el registro ya existe: quien llama debe decirlo
+    }
   }
   if (plan && plan.migrar) { partsViejo = false; quitados.clear(); }
   return id;
@@ -863,6 +866,7 @@ async function guardar(kind, btn, registroId, enviar){
     if (!enviar) cargar();
   } catch(e){
     btn.disabled = false; btn.textContent = txt;
+    if (e && e.registroGuardado) return toast('La actividad quedó guardada, pero no se pudo guardar la lista de participantes: ' + (e.message || e.code || 'error') + '. Toca Guardar otra vez para completarla.');
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
   // El envío va aparte: si falla, el registro YA está guardado y el aviso no debe decir que no se guardó.
@@ -1070,8 +1074,9 @@ function mostrarOcupado(msg){
   return () => ov.remove();
 }
 
-// Confirmación previa: dirección exacta, asunto y peso del adjunto. Resuelve true solo si el PM pulsa "Enviar".
-// El foco inicial queda en "Cancelar" para que un Enter distraído no envíe.
+// Confirmación previa: dirección exacta, asunto, peso del adjunto, el mensaje (editable) y el informe mismo ("Ver el informe":
+// el blob que se va a adjuntar, sin generarlo de nuevo). Resuelve true solo si el PM pulsa "Enviar"; en ese caso deja el
+// texto final en envio.cuerpo. El foco inicial queda en "Cancelar" para que un Enter distraído no envíe.
 function confirmarEnvio(envio, pdf, dudoso){   // envio.este: "esta visita" o "este ensayo"
   return new Promise(resolve => {
     const t = TC.tamanoInforme(pdf.blob.size);
@@ -1085,12 +1090,22 @@ function confirmarEnvio(envio, pdf, dudoso){   // envio.este: "esta visita" o "e
       + '<dt>Copia a</dt><dd>' + esc(me.email) + ' (tú)</dd></dl>'
       + (dudoso ? '<div class="aviso">Un envío anterior a ' + esc(envio.este) + ' no se pudo confirmar: puede que el cliente ya tenga la copia. Revisa tu bandeja antes de reenviar, o el cliente recibirá el correo dos veces.</div>' : '')
       + (t.excede ? '<div class="aviso">El informe pesa ' + esc(t.texto) + ' y supera los ' + TC.LIMITE_ENVIO_BYTES / 1048576 + ' MB que admite el envío. Reduce las fotos y vuelve a intentarlo.</div>' : '')
-      + '<details class="mas"><summary>Ver el mensaje</summary><pre class="envio-msg">' + esc(envio.cuerpo) + '</pre></details>'
-      + '<div class="acciones"><button type="button" class="btn ghost" data-e="cancelar">Cancelar</button>'
+      + '<label for="envio-cuerpo" style="margin-top:10px">Mensaje</label><p class="mute" style="margin:0 0 6px;font-size:12px">Puedes agregar una línea para el cliente; el texto debe seguir nombrando al cliente y la obra.</p>'
+      + '<textarea id="envio-cuerpo" class="envio-msg" rows="8" maxlength="20000">' + esc(envio.cuerpo) + '</textarea>'
+      + '<div class="aviso err" data-e="err" role="alert" hidden></div>'
+      + '<div class="acciones"><button type="button" class="btn ghost" data-e="ver">Ver el informe</button><button type="button" class="btn ghost" data-e="cancelar">Cancelar</button>'
       + '<button type="button" class="btn" data-e="enviar"' + (t.excede ? ' disabled' : '') + '>Enviar a ' + esc(envio.para) + '</button></div></div>';
-    const cerrar = ok => { ov.remove(); resolve(ok); };
+    const cerrar = ok => { cerrarInforme(); ov.remove(); resolve(ok); };
+    const err = ov.querySelector('[data-e="err"]'), area = ov.querySelector('#envio-cuerpo');
+    area.addEventListener('input', () => { err.hidden = true; });
     ov.querySelector('[data-e="cancelar"]').onclick = () => cerrar(false);
-    ov.querySelector('[data-e="enviar"]').onclick = () => cerrar(true);
+    ov.querySelector('[data-e="ver"]').onclick = () => mostrarInforme(pdf, envio.kind);
+    ov.querySelector('[data-e="enviar"]').onclick = () => {
+      const falta = TC.validarCuerpoCorreo(area.value, { cliente: envio.cliente, obra: envio.obra });
+      if (falta) { err.textContent = falta; err.hidden = false; area.focus(); return; }
+      envio.cuerpo = area.value;   // el texto que el PM ve es el que sale
+      cerrar(true);
+    };
     document.body.appendChild(ov);
     ov.querySelector('[data-e="cancelar"]').focus();
   });
@@ -1136,7 +1151,7 @@ async function enviarRegistro(id){
       const huella = huellaTexto(informeHtml(reg));
       informe = TC.puedeEnviar(ultimoInforme, { id: r.id, huella }).ok ? ultimoInforme : (ultimoInforme = await generarPdf(reg));
       const { asunto, cuerpo } = (r.kind === 'adherencia' ? TC.correoEnsayo : TC.correoVisita)({ fecha: r.fecha, cliente: r.cliente, obra: r.obra, datos: r._datos });
-      envio = { id: r.id, huella, para, asunto, cuerpo, este: g.este };
+      envio = { id: r.id, huella, para, asunto, cuerpo, este: g.este, kind: r.kind, cliente: r.cliente, obra: r.obra };
       const v = TC.puedeEnviar(informe, envio);
       if (!v.ok) throw new Error(TC.textoErrorEnvio(v.motivo, undefined, r.kind));
     } catch(e){
@@ -1243,8 +1258,9 @@ function iniciarRefresco(registroId){
 
 async function generarQR(btn){
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Preparando…';
+  let id = null;
   try {
-    const id = await guardarBorrador();
+    id = await guardarBorrador();
     let token = tokenQR && tokenQR.registroId === id ? tokenQR.token : null;   // el mismo QR mientras no se cierre el formulario
     if (!token) {
       const { data, error } = await sb.rpc('rt_asistencia_abrir', { p_registro: id });
@@ -1255,7 +1271,12 @@ async function generarQR(btn){
     mostrarQR(TC.enlaceAsistencia(token));
     iniciarRefresco(id);
   } catch(e){
-    toast(e.validacion ? e.message : 'No se pudo generar el QR: ' + (e.message || e.code || 'error'));
+    const det = e.message || e.code || 'error';
+    // Si el borrador ya se guardó, decirlo: queda sin QR y cuenta como actividad terminada hasta que se abra el QR o se borre.
+    toast(e.validacion ? e.message
+      : e.registroGuardado ? 'La actividad quedó guardada, pero no se pudo guardar la lista de participantes: ' + det + '. Vuelve a intentar el QR (o toca Guardar).'
+      : id ? 'La actividad quedó guardada, pero no se pudo generar el QR: ' + det + '. Vuelve a intentar el QR o bórrala en Registros.'
+      : 'No se pudo generar el QR: ' + det);
   } finally { btn.disabled = false; btn.textContent = txt; }
 }
 
@@ -1559,8 +1580,12 @@ async function cargarAccesos(){
 }
 
 /* ===================== Eventos ===================== */
+const FORMS = ['charla', 'capacitacion', 'visita', 'adherencia'];   // vistas con formulario: sus datos viven en el DOM
 const acciones = {
-  nav: b => { vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
+  nav: b => {
+    // Tocar el botón de la pantalla que ya está abierta no la reconstruye: perdería lo escrito, las firmas y los participantes llegados por QR.
+    if (FORMS.includes(vista) && (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)) return window.scrollTo(0, 0);
+    vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
   addPart: () => $('#partics').insertAdjacentHTML('beforeend', filaPart()),
   delPart: b => {
     const row = b.closest('.part');
@@ -1680,6 +1705,7 @@ sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); })
 
 /* ===================== Render ===================== */
 function render(){
+  cerrarInforme();   // la vista previa (blob y capa) no sobrevive a una pantalla nueva
   detenerRefresco(); tokenQR = null; quitados = new Set(); partsViejo = false;   // la asistencia es del formulario que se cierra
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)));
   const vistas = {
