@@ -11,6 +11,7 @@
 <script src="terreno-firma.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" integrity="sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:#fde7eb;--red:var(--brand);--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;--line:#dfdfdb;--gray:#8d939a;--ok:#18864a;--ok-soft:#ddf2e5;--warn:#b86e00;--warn-soft:#fbeed6;
   --f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;color-scheme:light}
@@ -78,6 +79,14 @@ textarea{min-height:84px;resize:vertical}
 .qr-box .qr-enlace{font-family:var(--f-mono);font-size:14px;font-weight:700;word-break:break-all;user-select:all;margin:14px 0 4px}
 .qr-box .acciones{justify-content:center}
 .part-barra{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.cierre{border-top:1px solid var(--line);margin-top:22px;padding-top:4px}
+.firmas-cierre{display:flex;flex-wrap:wrap;gap:14px 24px;margin-top:6px}
+.firma-cierre{display:flex;align-items:center;gap:8px}
+.firma-cierre .rotulo{font-size:13px;font-weight:600}
+.informe-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px}
+.informe-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;overflow:auto}
+.informe-dlg h2{margin:0 0 2px}
+.informe-vista{flex:1;min-height:55vh;width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;margin-top:8px}
 .part-barra .mute{margin-left:auto}
 .ac{position:relative}
 .sug{position:absolute;left:0;right:0;top:100%;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;max-height:280px;overflow:auto;box-shadow:0 18px 40px -16px rgba(0,0,0,.45)}
@@ -410,9 +419,26 @@ function formVisita(){
       <div><label>¿Requiere ensayo en laboratorio?</label><select name="lab"><option>No</option><option>Sí</option></select></div>
       <div><label>Estado</label><select name="estado">${ESTADOS.map(e => `<option>${e}</option>`).join('')}</select></div>
     </div>
-    <label>Fotos</label>
+    <label>Fotos (máximo ${TC.MAX_FOTOS} por visita)</label>
     <input type="file" name="fotos" accept="image/*" multiple capture="environment">
+    <div class="cierre">
+      <h3>Cierre con el cliente</h3>
+      <p class="mute">Opcional para guardar. Quien recibe la visita deja sus datos y firma; el informe en PDF los incluye.</p>
+      <div class="row">
+        <div><label>Nombre de quien recibe</label><input name="cierre_nombre" autocomplete="off"></div>
+        <div><label>Cargo</label><input name="cierre_cargo" autocomplete="off"></div>
+      </div>
+      <div class="row">
+        <div><label>Correo</label><input name="cierre_email" type="email" inputmode="email" autocomplete="off"></div>
+        <div><label>Teléfono</label><input name="cierre_fono" type="tel" inputmode="tel" autocomplete="off"></div>
+      </div>
+      <div class="firmas-cierre">
+        <div class="firma-cierre"><input type="hidden" name="cierre_firma"><span class="rotulo">Firma del cliente</span><span class="firma-vista"></span><button type="button" class="btn ghost firmar" data-a="firmarCierre" data-titulo="Firma de quien recibe">Firmar</button></div>
+        <div class="firma-cierre"><input type="hidden" name="cierre_firma_pm"><span class="rotulo">Firma del Product Manager</span><span class="firma-vista"></span><button type="button" class="btn ghost firmar" data-a="firmarCierre" data-titulo="Firma del Product Manager">Firmar</button></div>
+      </div>
+    </div>
     <div class="acciones">
+      <button type="button" class="btn ghost" data-a="verInforme">Ver informe</button>
       <button type="button" class="btn" data-a="guardar" data-t="visita">Guardar visita</button>
       <button type="button" class="btn ghost" data-a="nav" data-v="panel">Cancelar</button>
     </div>
@@ -530,12 +556,23 @@ function comprimir(file){
   });
 }
 
-function validarCampos(kind, d){
+function validarCampos(kind, d, fotosPrevias = 0){
   if (!d.fecha) return 'Falta la fecha';
   if (!d.cliente) return 'Indica el cliente';
-  if (kind === 'visita') return d.motivo ? '' : 'Describe el motivo del reclamo';
+  if (kind === 'visita') {
+    if (!d.motivo) return 'Describe el motivo del reclamo';
+    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length);
+    return sobran ? `Máximo ${TC.MAX_FOTOS} fotos por visita: quita ${sobran}` : '';
+  }
   return d.nombre ? '' : 'Falta el nombre de la actividad';
 }
+
+// Campos de la visita que van a `datos` (los usa el guardado y el informe: lo que se ve es lo que se guarda).
+const datosVisita = d => ({
+  direccion: d.direccion || '', contacto: d.contacto || '', producto: d.producto || '',
+  motivo: d.motivo, verificacion: d.verificacion || '', causa: d.causa || '',
+  solucion: d.solucion || '', lab: d.lab || 'No'
+});
 
 // Refleja en la lista local lo que acaba de quedar en la base, sin volver a pedir todos los registros.
 function actualizarLocal(id, fila, datos, fotos){
@@ -576,11 +613,10 @@ async function persistir(kind, d, registroId, btn){
 
   const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
   if (kind === 'visita') {
-    Object.assign(datos, {
-      direccion: d.direccion || '', contacto: d.contacto || '', producto: d.producto || '',
-      motivo: d.motivo, verificacion: d.verificacion || '', causa: d.causa || '',
-      solucion: d.solucion || '', lab: d.lab || 'No'
-    });
+    Object.assign(datos, datosVisita(d));
+    // Los datos del cliente al cierre no son obligatorios: sin nada escrito ni firmado no se guarda `cierre`.
+    const cierre = cierreDeCampos(d);
+    if (cierre) datos.cierre = cierre; else delete datos.cierre;
   } else {
     // Los participantes ya no viajan en datos: viven en rt_asistencias.
     Object.assign(datos, {
@@ -625,7 +661,7 @@ async function persistir(kind, d, registroId, btn){
 async function guardar(kind, btn, registroId){
   const d = leerCampos();
   if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
-  const falta = validarCampos(kind, d);
+  const falta = validarCampos(kind, d, kind === 'visita' && registroId ? (registros.find(x => x.id === registroId)?.fotos || []).length : 0);
   if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
@@ -650,6 +686,147 @@ async function guardar(kind, btn, registroId){
     btn.disabled = false; btn.textContent = txt;
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
+}
+
+/* ===================== Informe de la visita (PDF) ===================== */
+// El logo sale del SVG de la barra superior (vectorial: imprime nítido y no agrega archivos). Dentro de una imagen
+// `currentColor` y las variables CSS no se resuelven, así que se fijan los colores.
+const logoInforme = () => $('.topbar .txmark svg').outerHTML.replace(/style="[^"]*"/, 'width="92" height="39"').replace(/currentColor/g, '#121212').replace(/var\(--brand\)/g, '#e4032e');
+
+const informeHtml = reg => TC.informeVisitaHtml(reg, { fotos: reg.fotos, logo: logoInforme(), pm: reg.pm });
+
+const blobADataUrl = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob); });
+
+// Foto ya subida: se lee igual que la ficha (Storage; si ya se archivó en Drive, por la función foto-archivada).
+// Ya viene reducida (1600 px, JPEG): se incrusta tal cual.
+async function fotoGuardadaDataUrl(path){
+  const { data } = await sb.storage.from(BUCKET).download(path);
+  if (data) return blobADataUrl(data);
+  if (window.fotoArchivada) { const u = await fotoArchivada(BUCKET, path); return blobADataUrl(await (await fetch(u)).blob()); }
+  throw new Error('no se pudo leer una foto de la visita');
+}
+
+// Fotos de la visita como data URL: las ya guardadas más las recién elegidas (reducidas igual que al subirlas).
+async function fotosComoDataUrl(rutas, archivos){
+  const guardadas = await Promise.all((rutas || []).map(fotoGuardadaDataUrl));
+  const nuevas = [];
+  for (const f of archivos || []) nuevas.push(await blobADataUrl(await comprimir(f)));
+  return [...guardadas, ...nuevas].slice(0, TC.MAX_FOTOS);
+}
+
+// Registro tal como lo consume el informe. `datos` ya incluye `cierre` (quien recibe y las dos firmas).
+function regParaInforme(r, fotos){
+  return { cliente: r.cliente, obra: r.obra, fecha: r.fecha, datos: r._datos || {}, pm: r.autor_nombre || me.nombre, fotos };
+}
+function regDesdeFormulario(){
+  const d = leerCampos(), previo = editandoId ? registros.find(x => x.id === editandoId) : null;
+  return {
+    cliente: d.cliente, obra: d.obra, fecha: d.fecha, pm: previo ? previo.autor_nombre : me.nombre,
+    datos: { ...datosVisita(d), cierre: cierreDeCampos(d) }
+  };
+}
+
+// Hash corto del HTML: permite saber si el informe que se vio sigue siendo el de lo que hay ahora en pantalla.
+const huellaTexto = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + '-' + s.length; };
+
+const MARGEN_PDF = [24, 28, 64, 28];   // pt: arriba, derecha, abajo (aquí va el pie), izquierda
+const ANCHO_PDF_PX = Math.floor((595.28 - MARGEN_PDF[1] - MARGEN_PDF[3]) * 96 / 72);   // ancho útil de la hoja A4 en px: el informe se maqueta a este ancho
+
+// Pie institucional y "Página X de Y" en cada hoja (html2pdf no los trae).
+function pieDePagina(pdf){
+  const n = pdf.internal.getNumberOfPages(), W = pdf.internal.pageSize.getWidth(), H = pdf.internal.pageSize.getHeight();
+  for (let i = 1; i <= n; i++) {
+    pdf.setPage(i);
+    pdf.setDrawColor(200); pdf.setLineWidth(0.5); pdf.line(MARGEN_PDF[3], H - 56, W - MARGEN_PDF[1], H - 56);
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.setTextColor(90);
+    pdf.text(TC.PIE[0], W / 2, H - 46, { align: 'center' });
+    pdf.setFont('helvetica', 'normal');
+    TC.PIE.slice(1).forEach((t, k) => pdf.text(t, W / 2, H - 37 + k * 9, { align: 'center' }));
+    pdf.text(`Página ${i} de ${n}`, W - MARGEN_PDF[1], H - 14, { align: 'right' });
+  }
+}
+
+// Genera el PDF UNA vez. Quien lo ve y quien lo envía usan este mismo resultado: { blob, base64, nombre, huella }.
+async function generarPdf(reg){
+  if (!window.html2pdf) throw new Error('No se pudo cargar el generador de PDF. Revisa tu conexión.');
+  const html = informeHtml(reg);
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${ANCHO_PDF_PX}px;background:#fff`;
+  host.innerHTML = html; document.body.appendChild(host);
+  try {
+    const pdf = await html2pdf().set({
+      margin: MARGEN_PDF, image: { type: 'jpeg', quality: 0.9 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css'], avoid: ['.inf-bloque', '.inf-fila'] }
+    }).from(host.firstElementChild).toPdf().get('pdf');
+    pieDePagina(pdf);
+    const blob = pdf.output('blob');
+    const base64 = (await blobADataUrl(blob)).split(',')[1];
+    return { blob, base64, nombre: TC.nombreInforme(reg), huella: huellaTexto(html) };
+  } finally { host.remove(); }
+}
+
+/* Vista previa: lo que ve el PM es el mismo `blob` que luego se adjuntará (Task 7 lee `ultimoInforme`). */
+let ultimoInforme = null;     // { blob, base64, nombre, huella } del último informe visto
+let urlInforme = null;
+function cerrarInforme(){
+  const ov = $('#informe-ov'); if (ov) ov.remove();
+  if (urlInforme) { URL.revokeObjectURL(urlInforme); urlInforme = null; }
+}
+function mostrarInforme(res){
+  cerrarInforme();
+  urlInforme = URL.createObjectURL(res.blob);
+  const t = TC.tamanoInforme(res.blob.size);
+  const ov = document.createElement('div');
+  ov.id = 'informe-ov'; ov.className = 'informe-ov';
+  ov.innerHTML = `<div class="informe-dlg" role="dialog" aria-label="Vista previa del informe">
+    <h2>Informe de visita técnica</h2>
+    <p class="mute">${esc(res.nombre)} · ${esc(t.texto)}</p>
+    ${t.excede ? `<div class="aviso">El informe pesa ${esc(t.texto)} y supera los ${TC.LIMITE_ENVIO_BYTES / 1048576} MB que admite el envío por correo. Reduce las fotos antes de enviarlo.</div>` : ''}
+    <iframe class="informe-vista" title="Informe" src="${esc(urlInforme)}"></iframe>
+    <div class="acciones"><a class="btn ghost" target="_blank" rel="noopener" href="${esc(urlInforme)}">Abrir en otra pestaña</a>
+      <a class="btn ghost" download="${esc(res.nombre)}" href="${esc(urlInforme)}">Descargar</a>
+      <button type="button" class="btn" data-a="cerrarInforme">Cerrar</button></div></div>`;
+  document.body.appendChild(ov);
+}
+
+async function verInforme(armar, btn){
+  const txt = btn.textContent; btn.disabled = true; btn.textContent = 'Generando informe…';
+  try {
+    const { reg, rutas, archivos } = armar();
+    const sobran = TC.cupoFotos(rutas.length, archivos.length).sobran;
+    if (sobran) throw new Error(`Máximo ${TC.MAX_FOTOS} fotos por visita: quita ${sobran}.`);
+    reg.fotos = await fotosComoDataUrl(rutas, archivos);
+    ultimoInforme = await generarPdf(reg);
+    mostrarInforme(ultimoInforme);
+  } catch(e){
+    console.error(e); toast('No se pudo generar el informe: ' + (e.message || 'error'));
+  } finally { btn.disabled = false; btn.textContent = txt; }
+}
+
+/* Cierre con el cliente: quien recibe, y las firmas (cliente y PM) con la ventana de firma compartida. */
+const firmaVistaHtml = png => esPngFirma(png) ? `<img class="firma-mini" alt="Firma" src="${esc(png)}">` : '';
+async function firmarCierre(b){
+  const box = b.closest('.firma-cierre'), inp = box.querySelector('input[type="hidden"]');
+  const png = await abrirFirma({ titulo: b.dataset.titulo, firma: inp.value });
+  if (png === null) return;
+  inp.value = png;
+  refrescarFirmasCierre();
+}
+function refrescarFirmasCierre(){
+  document.querySelectorAll('#form .firma-cierre').forEach(box => {
+    const png = box.querySelector('input[type="hidden"]').value;
+    box.querySelector('.firma-vista').innerHTML = firmaVistaHtml(png);
+    box.querySelector('.firmar').textContent = png ? 'Cambiar' : 'Firmar';
+  });
+}
+const cierreDeCampos = d => TC.cierreVisita({ nombre: d.cierre_nombre, cargo: d.cierre_cargo, email: d.cierre_email, fono: d.cierre_fono, firma: d.cierre_firma, firmaPm: d.cierre_firma_pm });
+
+// Un informe de otra visita ya guardada (botón "Ver informe" de Registros).
+async function verInformeRegistro(b){
+  const r = registros.find(x => x.id === b.dataset.id); if (!r) return;
+  await verInforme(() => ({ reg: regParaInforme(r, []), rutas: r.fotos || [], archivos: [] }), b);
 }
 
 /* ===================== QR de asistencia ===================== */
@@ -764,7 +941,8 @@ async function editarRegistro(id){
   cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null; cliNuevo = false;
   vista = r.kind; render(); window.scrollTo(0, 0);
   const f = $('#form');
-  const valores = { ...r, cliente: r.cliente, obra: r.obra };
+  const c = r.cierre || {};
+  const valores = { ...r, cliente: r.cliente, obra: r.obra, cierre_nombre: c.nombre, cierre_cargo: c.cargo, cierre_email: c.email, cierre_fono: c.fono, cierre_firma: c.firma, cierre_firma_pm: c.firmaPm };
   f.querySelectorAll('[name]').forEach(el => {
     const n = el.name, v = valores[n];
     if (el.type === 'file' || v === undefined || v === null) return;
@@ -778,7 +956,8 @@ async function editarRegistro(id){
     botonesAsistencia();
   } else {
     f.querySelector('h2').textContent = 'Corregir visita por reclamo';
-    if (r.fotos.length) f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan.</p>`);
+    refrescarFirmasCierre();
+    if (r.fotos.length) f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).</p>`);
   }
   f.querySelector('[data-a="guardar"]').textContent = 'Guardar cambios';
   const cancelar = f.querySelector('.acciones [data-a="nav"]'); if (cancelar) cancelar.dataset.v = 'registros';
@@ -927,6 +1106,7 @@ function tarjeta(r){
         ${r.observaciones ? `<p><b>Observaciones:</b> ${esc(r.observaciones)}</p>` : ''}
       </details>` : ''}
       ${r.fotos && r.fotos.length ? `<div class="fotos" data-fotos="${esc(r.id)}">${r.fotos.map(p => `<a target="_blank" rel="noopener" data-path="${esc(p)}"><img alt="Foto de la visita"></a>`).join('')}</div>` : ''}
+      <div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button></div>
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
@@ -1018,6 +1198,15 @@ const acciones = {
   },
   cerrarBorrador: b => cerrarBorrador(b.dataset.id),
   firmar: b => firmarFila(b),
+  firmarCierre: b => firmarCierre(b),
+  verInforme: b => verInforme(() => {
+    const d = leerCampos(), falta = validarCampos('visita', d);
+    if (falta) throw new Error(falta);
+    const previo = editandoId ? registros.find(x => x.id === editandoId) : null;
+    return { reg: regDesdeFormulario(), rutas: previo ? previo.fotos || [] : [], archivos: d.fotos };
+  }, b),
+  verInformeReg: b => verInformeRegistro(b),
+  cerrarInforme: () => cerrarInforme(),
   guardar: b => guardar(b.dataset.t, b, editandoId),
   editar: b => editarRegistro(b.dataset.id),
   filtro: b => { filtro = b.dataset.f; render(); },
@@ -1054,6 +1243,17 @@ document.addEventListener('change', async e => {
     $('#tipo-act').hidden = k !== 'capacitacion';
     f.querySelector('[name="nombre"]').placeholder = PLACEHOLDER_ACT[k];
     const vt = $('#view-title'); if (vt) vt.textContent = TITULOS[k];
+    return;
+  }
+  if (t.matches('#form [name="fotos"]')) {   // el tope de fotos se avisa al elegirlas, no al guardar
+    const previo = editandoId ? registros.find(x => x.id === editandoId) : null;
+    const { admitidas, sobran } = TC.cupoFotos(previo ? (previo.fotos || []).length : 0, t.files.length);
+    if (sobran) {
+      const dt = new DataTransfer();
+      [...t.files].slice(0, admitidas).forEach(f => dt.items.add(f));
+      t.files = dt.files;
+      toast(`Máximo ${TC.MAX_FOTOS} fotos por visita: se tomaron las primeras ${admitidas}.`);
+    }
     return;
   }
   if (t.matches('[data-acc]')) {

@@ -238,7 +238,96 @@
     return c.toDataURL('image/png');
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias };
+  // ── Cierre con el cliente e informe de la visita ──
+  // El informe reusa el marco institucional (logo, banda, nota legal) pero NO la identidad del documento controlado
+  // de adherencia: no lleva código, versión ni fecha de creación.
+  const MAX_FOTOS = 8;
+  const LIMITE_ENVIO_BYTES = 8 * 1024 * 1024;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Cuántas fotos nuevas caben contando las que la visita ya tiene.
+  function cupoFotos(existentes, elegidas) {
+    const hay = Math.max(0, Number(existentes) || 0), n = Math.max(0, Number(elegidas) || 0);
+    const admitidas = Math.min(n, Math.max(0, MAX_FOTOS - hay));
+    return { admitidas, sobran: n - admitidas };
+  }
+
+  // Datos de quien recibe al cierre. Sin nada escrito ni firmado devuelve null (no se guarda `cierre`).
+  function cierreVisita(c) {
+    const x = c || {};
+    const t = (v) => String(v == null ? '' : v).trim();
+    const png = (v) => (esPngFirma(v) ? v : '');
+    const r = { nombre: t(x.nombre), cargo: t(x.cargo), email: t(x.email), fono: t(x.fono), firma: png(x.firma), firmaPm: png(x.firmaPm) };
+    return Object.values(r).some(Boolean) ? r : null;
+  }
+
+  // El correo adjunta el PDF con un tope de 8 MB: el PM debe ver cuánto pesa antes de enviarlo.
+  function tamanoInforme(bytes) {
+    const n = Number(bytes) || 0;
+    const texto = n >= 1024 * 1024 ? (Math.round((n / 1048576) * 10) / 10).toString().replace('.', ',') + ' MB' : Math.round(n / 1024) + ' KB';
+    return { texto, excede: n > LIMITE_ENVIO_BYTES };
+  }
+
+  function nombreInforme(reg) {
+    const r = reg || {};
+    const quien = String(r.obra || r.cliente || '').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+    const f = fechaCL(r.fecha);
+    return ['Informe visita técnica', quien, f].filter(Boolean).join(' - ') + '.pdf';
+  }
+
+  const INF_CSS = '.inf{font-family:Arial,Helvetica,sans-serif;color:#1b1b1b;font-size:12.5px;line-height:1.5;background:#fff;width:100%;padding:0 0 4px}'
+    + '.inf *{box-sizing:border-box}'
+    + '.inf-banda{display:flex;align-items:center;gap:18px;background:#fff;border-bottom:4px solid #e4032e;padding:6px 0 12px;margin-bottom:16px}'
+    + '.inf-logo{width:92px;flex:none;color:#121212}.inf-logo svg{display:block;width:100%;height:auto}'
+    + '.inf-tit{flex:1}.inf-tit small{display:block;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#e4032e;font-weight:700}'
+    + '.inf-tit h1{margin:2px 0 0;font-size:22px;line-height:1.2;font-weight:800}'
+    + '.inf-fecha{text-align:right;font-size:11px;color:#555}.inf-fecha b{display:block;font-size:14px;color:#1b1b1b}'
+    + '.inf h2{margin:16px 0 5px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#e4032e;font-weight:800;border-bottom:1px solid #ddd;padding-bottom:3px}'
+    + '.inf p{margin:0 0 4px;white-space:pre-wrap}'
+    + '.inf-datos{width:100%;border-collapse:collapse}.inf-datos td{padding:4px 8px;border:1px solid #ddd;vertical-align:top}.inf-datos td:nth-child(odd){width:17%;background:#f4f4f2;font-weight:700;font-size:11px;color:#444}.inf-datos td:nth-child(even){width:33%}'
+    + '.inf-bloque{break-inside:avoid;page-break-inside:avoid}'
+    + '.inf-fila{display:flex;gap:12px;margin-bottom:12px;break-inside:avoid;page-break-inside:avoid}.inf-foto{width:calc(50% - 6px);margin:0}'
+    + '.inf-foto img{display:block;width:100%;height:210px;object-fit:cover;border:1px solid #ccc;background:#f4f4f2}.inf-foto figcaption{font-size:11px;color:#555;margin-top:3px}'
+    + '.inf-firmas{display:flex;gap:28px;margin-top:10px}.inf-firma{flex:1;break-inside:avoid;page-break-inside:avoid}'
+    + '.inf-firma-esp{height:78px;border-bottom:1px solid #1b1b1b;display:flex;align-items:flex-end;justify-content:center}.inf-firma-img{max-width:100%;max-height:74px;object-fit:contain}'
+    + '.inf-firma b{display:block;margin-top:4px}.inf-firma span{display:block;font-size:11px;color:#555}'
+    + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:justify;border-top:1px solid #ddd;padding-top:8px}';
+
+  // Las fotos van de a dos por fila; cada fila no se parte entre hojas.
+  const filasDeFotos = (fotos) => { const filas = []; fotos.forEach((src, i) => { if (i % 2 === 0) filas.push([]); filas[filas.length - 1].push({ src, n: i + 1 }); }); return filas; };
+
+  // HTML del informe (sin pie de página: el número "Página X de Y" y la dirección los pone el PDF en cada hoja).
+  // reg: { cliente, obra, fecha, datos:{…, cierre} }; opciones: { fotos: [data URL], logo: '<svg…>', pm: nombre del PM }.
+  function informeVisitaHtml(reg, opciones) {
+    const r = reg || {}, d = r.datos || {}, o = opciones || {};
+    const cierre = cierreVisita(d.cierre) || {};
+    const fotos = (o.fotos || []).filter((f) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f));
+    const celda = (k, v) => '<td>' + k + '</td><td>' + (v ? esc(v) : '&nbsp;') + '</td>';
+    const seccion = (titulo, texto) => (texto && String(texto).trim() ? '<div class="inf-bloque"><h2>' + titulo + '</h2><p>' + esc(String(texto).trim()) + '</p></div>' : '');
+    const firma = (png, rol, nombre, detalle) => '<div class="inf-firma"><div class="inf-firma-esp">' + (png ? '<img class="inf-firma-img" alt="Firma" src="' + png + '">' : '') + '</div>'
+      + '<b>' + (nombre ? esc(nombre) : '&nbsp;') + '</b><span>' + rol + (detalle ? ' · ' + esc(detalle) : '') + '</span></div>';
+    const contacto = [cierre.email, cierre.fono].filter(Boolean).join(' · ');
+    return '<div class="inf"><style>' + INF_CSS + '</style>'
+      + '<div class="inf-banda"><div class="inf-logo">' + (o.logo || '') + '</div><div class="inf-tit"><small>Grupo TX</small><h1>Informe de Visita Técnica</h1></div>'
+      + '<div class="inf-fecha">Fecha de visita<b>' + esc(fechaCL(r.fecha)) + '</b></div></div>'
+      + '<div class="inf-bloque"><table class="inf-datos"><tr>' + celda('Cliente', r.cliente) + celda('Obra', r.obra) + '</tr>'
+      + '<tr>' + celda('Dirección', d.direccion) + celda('Producto', d.producto) + '</tr>'
+      + '<tr>' + celda('Contacto en obra', d.contacto) + celda('Visita realizada por', o.pm) + '</tr></table></div>'
+      + seccion('Motivo del reclamo', d.motivo)
+      + seccion('Verificación en terreno', d.verificacion)
+      + seccion('Causa probable', d.causa)
+      + seccion('Solución propuesta', d.solucion)
+      + (d.lab === 'Sí' ? seccion('Ensayo de laboratorio', 'Se requiere ensayo en laboratorio.') : '')
+      + seccion('Observaciones', d.observaciones)
+      + (fotos.length ? '<h2>Registro fotográfico</h2>' + filasDeFotos(fotos).map((fila) => '<div class="inf-fila">' + fila.map((f) => '<figure class="inf-foto"><img alt="Fotografía ' + (f.n) + '" src="' + f.src + '"><figcaption>Fotografía ' + f.n + ' de ' + fotos.length + '</figcaption></figure>').join('') + '</div>').join('') : '')
+      + '<div class="inf-bloque"><h2>Cierre de la visita</h2><div class="inf-firmas">'
+      + firma(cierre.firmaPm, 'Grupo TX', o.pm, 'Product Manager')
+      + firma(cierre.firma, 'Recibe', cierre.nombre, cierre.cargo || contacto ? [cierre.cargo, contacto].filter(Boolean).join(' · ') : '')
+      + '</div></div>'
+      + '<div class="inf-legal inf-bloque">' + esc(NOTA_LEGAL) + '</div></div>';
+  }
+
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

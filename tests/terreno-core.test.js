@@ -277,3 +277,91 @@ test('conteoAsistencias: tolera array con objeto, objeto suelto, número o texto
   assert.equal(TC.conteoAsistencias([{ count: '7' }]), 7);
   for (const raro of [undefined, null, [], {}, [{}], 'x', [{ count: -1 }], [{ count: 'abc' }]]) assert.equal(TC.conteoAsistencias(raro), 0);
 });
+
+// ── Cierre de la visita e informe en PDF ──
+const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+const JPG = (n) => 'data:image/jpeg;base64,/9j/' + n;
+const regVisita = (extra = {}) => ({
+  cliente: 'Constructora Los Andes', obra: 'Edificio Alameda', fecha: '2026-11-18',
+  datos: { direccion: 'Av. Siempre Viva 123', contacto: 'Ana Soto', producto: 'Piso Autonivelante', motivo: 'Fisuras en el piso', verificacion: 'Se revisó la aplicación', causa: 'Aplicación', solucion: 'Reparar con mortero', lab: 'Sí', observaciones: '',
+    cierre: { nombre: 'Pedro Rojas', cargo: 'Jefe de obra', email: 'pedro@andes.cl', fono: '+56 9 1111 2222', firma: PNG, firmaPm: PNG }, ...(extra.datos || {}) },
+  ...Object.fromEntries(Object.entries(extra).filter(([k]) => k !== 'datos')),
+});
+const contar = (html, clase) => html.split('class="' + clase + '"').length - 1;
+
+test('informeVisitaHtml: lleva título propio, cliente, quien recibe y la nota legal verbatim, y no inventa código de documento', () => {
+  const h = TC.informeVisitaHtml(regVisita(), { fotos: [], logo: '<svg id="logo"></svg>', pm: 'María PM' });
+  assert.match(h, /Informe de Visita Técnica/);
+  assert.match(h, /Constructora Los Andes/);
+  assert.match(h, /Pedro Rojas/);
+  assert.match(h, /María PM/);
+  assert.match(h, /18-11-2026/);
+  assert.ok(h.includes('<svg id="logo"></svg>'));
+  assert.ok(h.includes(TC.NOTA_LEGAL), 'la nota legal va completa');
+  for (const ajeno of [TC.DOC_META.codigo, TC.DOC_META.titulo, TC.DOC_META.creacion, 'Versión']) assert.ok(!h.includes(ajeno), 'no usa la identidad del informe de adherencia: ' + ajeno);
+});
+
+test('informeVisitaHtml: un bloque por foto, con su pie numerado; sin fotos no hay sección', () => {
+  const con = TC.informeVisitaHtml(regVisita(), { fotos: [JPG('a'), JPG('b')] });
+  assert.equal(contar(con, 'inf-foto'), 2);
+  assert.match(con, /Fotografía 1 de 2/);
+  assert.match(con, /Fotografía 2 de 2/);
+  const sin = TC.informeVisitaHtml(regVisita(), { fotos: [] });
+  assert.equal(contar(sin, 'inf-foto'), 0);
+  assert.ok(!/Registro fotográfico/.test(sin));
+});
+
+test('informeVisitaHtml: las dos firmas aparecen como imagen; sin firma del cliente queda la línea en blanco', () => {
+  const h = TC.informeVisitaHtml(regVisita(), {});
+  assert.equal(contar(h, 'inf-firma-img'), 2);
+  const sinCliente = TC.informeVisitaHtml(regVisita({ datos: { cierre: null } }), { pm: 'María PM' });
+  assert.equal(contar(sinCliente, 'inf-firma-img'), 0);
+  assert.equal(contar(sinCliente, 'inf-firma'), 2);
+});
+
+test('informeVisitaHtml: escapa el texto del usuario y no deja pasar imágenes que no sean data URL de imagen', () => {
+  const h = TC.informeVisitaHtml(regVisita({ cliente: '<img src=x onerror=alert(1)>', datos: { motivo: 'a <b>b</b> & c' } }), { fotos: ['javascript:alert(1)', JPG('ok')] });
+  assert.ok(!h.includes('<img src=x'));
+  assert.ok(h.includes('a &lt;b&gt;b&lt;/b&gt; &amp; c'));
+  assert.equal(contar(h, 'inf-foto'), 1);
+  assert.ok(!h.includes('javascript:'));
+});
+
+test('informeVisitaHtml: omite las secciones opcionales vacías y no inventa texto', () => {
+  const h = TC.informeVisitaHtml(regVisita({ datos: { verificacion: '', solucion: '', observaciones: '', direccion: '' } }), {});
+  assert.ok(!/Verificación en terreno/.test(h));
+  assert.ok(!/Solución propuesta/.test(h));
+  assert.ok(!/Observaciones/.test(h));
+  assert.match(h, /Fisuras en el piso/);
+});
+
+test('cierreVisita: recorta los datos, descarta firmas que no son PNG y devuelve null si el cliente no dejó nada', () => {
+  assert.equal(TC.cierreVisita({}), null);
+  assert.equal(TC.cierreVisita({ nombre: '  ', firma: 'javascript:x' }), null);
+  assert.deepEqual(TC.cierreVisita({ nombre: ' Pedro ', email: ' p@a.cl ', firma: PNG, firmaPm: 'x' }),
+    { nombre: 'Pedro', cargo: '', email: 'p@a.cl', fono: '', firma: PNG, firmaPm: '' });
+  assert.deepEqual(TC.cierreVisita({ firmaPm: PNG }), { nombre: '', cargo: '', email: '', fono: '', firma: '', firmaPm: PNG });
+});
+
+test('cupoFotos: tope de 8 por visita contando las que ya tenía', () => {
+  assert.equal(TC.MAX_FOTOS, 8);
+  assert.deepEqual(TC.cupoFotos(0, 8), { admitidas: 8, sobran: 0 });
+  assert.deepEqual(TC.cupoFotos(0, 9), { admitidas: 8, sobran: 1 });
+  assert.deepEqual(TC.cupoFotos(6, 4), { admitidas: 2, sobran: 2 });
+  assert.deepEqual(TC.cupoFotos(8, 1), { admitidas: 0, sobran: 1 });
+  assert.deepEqual(TC.cupoFotos(undefined, 0), { admitidas: 0, sobran: 0 });
+});
+
+test('tamanoInforme: texto legible y aviso sobre el límite de envío de 8 MB', () => {
+  assert.deepEqual(TC.tamanoInforme(1572864), { texto: '1,5 MB', excede: false });
+  assert.deepEqual(TC.tamanoInforme(512000), { texto: '500 KB', excede: false });
+  assert.equal(TC.tamanoInforme(8 * 1024 * 1024).excede, false);
+  assert.equal(TC.tamanoInforme(8 * 1024 * 1024 + 1).excede, true);
+  assert.equal(TC.LIMITE_ENVIO_BYTES, 8 * 1024 * 1024);
+});
+
+test('nombreInforme: archivo seguro con obra y fecha', () => {
+  assert.equal(TC.nombreInforme({ obra: 'Edificio Alameda / Torre 2', fecha: '2026-11-18' }), 'Informe visita técnica - Edificio Alameda Torre 2 - 18-11-2026.pdf');
+  assert.equal(TC.nombreInforme({ cliente: 'Cliente X', fecha: '2026-11-18' }), 'Informe visita técnica - Cliente X - 18-11-2026.pdf');
+  assert.equal(TC.nombreInforme({}), 'Informe visita técnica.pdf');
+});
