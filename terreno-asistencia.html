@@ -63,8 +63,9 @@ input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--br
   </section>
 
   <section id="p-actividad" class="card" hidden>
-    <p class="eb" id="a-tipo"></p>
-    <h1 id="a-cliente"></h1>
+    <p class="eb">Actividad</p>
+    <h1 id="a-nombre"></h1>
+    <p class="mute" id="a-cliente"></p>
     <p class="mute" id="a-obra"></p>
     <p class="mute" id="a-fecha"></p>
   </section>
@@ -138,8 +139,8 @@ async function cargar(){
   if (error) return mensaje('No pudimos cargar la actividad', 'Revisa tu conexión e inténtalo de nuevo.', true);
   if (!data || !data.length) return cerrado();
   const a = data[0];   // solo actividad, cliente, obra y fecha: la base no entrega nada más
-  $('#a-tipo').textContent = TIPOS[a.actividad] || 'Actividad';
-  $('#a-cliente').textContent = a.cliente || '';
+  $('#a-nombre').textContent = TIPOS[a.actividad] || a.actividad || 'Actividad';   // el nombre de la actividad; sin nombre, el tipo
+  $('#a-cliente').textContent = a.cliente ? 'Cliente: ' + a.cliente : '';
   $('#a-obra').textContent = a.obra ? 'Obra: ' + a.obra : '';
   $('#a-obra').hidden = !a.obra;
   $('#a-fecha').textContent = fechaCL(a.fecha);

@@ -77,6 +77,22 @@ begin
   select count(*) into n from public.rt_asistencia_info('0123456789abcdef0123456789abcdef');
   if n <> 0 then raise exception 'info con token inventado devolvió % filas', n; end if;
 
+  -- info devuelve el nombre de la actividad si existe y, si está vacío, el tipo
+  reset role;
+  update public.registros set datos = jsonb_set(datos, '{nombre}', '"Charla aplicación de autonivelante"') where id = reg;
+  set local role anon;
+  select * into fila from public.rt_asistencia_info(tok);
+  if fila.actividad <> 'Charla aplicación de autonivelante' then raise exception 'info no devolvió el nombre de la actividad: %', fila; end if;
+  reset role;
+  update public.registros set datos = jsonb_set(datos, '{nombre}', '"   "') where id = reg;
+  set local role anon;
+  select * into fila from public.rt_asistencia_info(tok);
+  if fila.actividad <> 'charla' then raise exception 'info con nombre vacío debe devolver el tipo: %', fila; end if;
+  if (select count(*) from jsonb_object_keys(to_jsonb(fila))) <> 4 then raise exception 'info cambió sus columnas: %', to_jsonb(fila); end if;
+  reset role;
+  update public.registros set datos = '{"tema":"original"}'::jsonb where id = reg;
+  set local role anon;
+
   -- ===== 3) agregar con solo el nombre: correo vacío y origen qr =====
   if public.rt_asistencia_agregar(tok, 'Ana Pérez', '', '', '', '', '') is not true then raise exception 'agregar solo nombre no devolvió true'; end if;
   -- 4) segunda inserción inmediata (sin espera) también funciona
