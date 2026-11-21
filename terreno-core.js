@@ -287,7 +287,7 @@
     + '.inf-datos{width:100%;border-collapse:collapse}.inf-datos td{padding:4px 8px;border:1px solid #ddd;vertical-align:top}.inf-datos td:nth-child(odd){width:17%;background:#f4f4f2;font-weight:700;font-size:11px;color:#444}.inf-datos td:nth-child(even){width:33%}'
     + '.inf-bloque{break-inside:avoid;page-break-inside:avoid}'
     + '.inf-fila{display:flex;gap:12px;margin-bottom:12px;break-inside:avoid;page-break-inside:avoid}.inf-foto{width:calc(50% - 6px);margin:0}'
-    + '.inf-foto img{display:block;width:100%;height:210px;object-fit:cover;border:1px solid #ccc;background:#f4f4f2}.inf-foto figcaption{font-size:11px;color:#555;margin-top:3px}'
+    + '.inf-foto img{display:block;width:100%;height:250px;object-fit:contain;border:1px solid #ccc;background:#f4f4f2}.inf-foto figcaption{font-size:11px;color:#555;margin-top:3px}'
     + '.inf-firmas{display:flex;gap:28px;margin-top:10px}.inf-firma{flex:1;break-inside:avoid;page-break-inside:avoid}'
     + '.inf-firma-esp{height:78px;border-bottom:1px solid #1b1b1b;display:flex;align-items:flex-end;justify-content:center}.inf-firma-img{max-width:100%;max-height:74px;object-fit:contain}'
     + '.inf-firma b{display:block;margin-top:4px}.inf-firma span{display:block;font-size:11px;color:#555}'
@@ -302,6 +302,8 @@
     const r = reg || {}, d = r.datos || {}, o = opciones || {};
     const cierre = cierreVisita(d.cierre) || {};
     const fotos = (o.fotos || []).filter((f) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f));
+    // Una foto que no calza no se omite en silencio (el cliente notaría el hueco y el PM no): se corta la generación.
+    if (fotos.length !== (o.fotos || []).length) throw new Error('Una foto de la visita no se pudo incluir en el informe (formato no válido). Quítala y vuelve a elegirla.');
     const celda = (k, v) => '<td>' + k + '</td><td>' + (v ? esc(v) : '&nbsp;') + '</td>';
     const seccion = (titulo, texto) => (texto && String(texto).trim() ? '<div class="inf-bloque"><h2>' + titulo + '</h2><p>' + esc(String(texto).trim()) + '</p></div>' : '');
     const firma = (png, rol, nombre, detalle) => '<div class="inf-firma"><div class="inf-firma-esp">' + (png ? '<img class="inf-firma-img" alt="Firma" src="' + png + '">' : '') + '</div>'

@@ -320,11 +320,22 @@ test('informeVisitaHtml: las dos firmas aparecen como imagen; sin firma del clie
 });
 
 test('informeVisitaHtml: escapa el texto del usuario y no deja pasar imágenes que no sean data URL de imagen', () => {
-  const h = TC.informeVisitaHtml(regVisita({ cliente: '<img src=x onerror=alert(1)>', datos: { motivo: 'a <b>b</b> & c' } }), { fotos: ['javascript:alert(1)', JPG('ok')] });
+  const h = TC.informeVisitaHtml(regVisita({ cliente: '<img src=x onerror=alert(1)>', datos: { motivo: 'a <b>b</b> & c' } }), { fotos: [JPG('ok')] });
   assert.ok(!h.includes('<img src=x'));
   assert.ok(h.includes('a &lt;b&gt;b&lt;/b&gt; &amp; c'));
   assert.equal(contar(h, 'inf-foto'), 1);
-  assert.ok(!h.includes('javascript:'));
+});
+
+test('informeVisitaHtml: una foto con data URL inválido no se omite en silencio, falla con mensaje claro', () => {
+  for (const mala of ['javascript:alert(1)', 'data:application/octet-stream;base64,AAAA', 'data:;base64,AAAA', '']) {
+    assert.throws(() => TC.informeVisitaHtml(regVisita(), { fotos: [JPG('a'), mala] }), /foto de la visita no se pudo incluir/);
+  }
+});
+
+test('informeVisitaHtml: la foto se muestra completa (contain), sin recorte', () => {
+  const h = TC.informeVisitaHtml(regVisita(), { fotos: [JPG('a')] });
+  assert.ok(h.includes('object-fit:contain'));
+  assert.ok(!h.includes('object-fit:cover'));
 });
 
 test('informeVisitaHtml: omite las secciones opcionales vacías y no inventa texto', () => {

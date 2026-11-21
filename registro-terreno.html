@@ -699,10 +699,12 @@ const blobADataUrl = blob => new Promise((res, rej) => { const fr = new FileRead
 
 // Foto ya subida: se lee igual que la ficha (Storage; si ya se archivó en Drive, por la función foto-archivada).
 // Ya viene reducida (1600 px, JPEG): se incrusta tal cual.
+// Una foto archivada puede volver sin tipo (o `application/octet-stream`): se fija a image/jpeg, que es como se subieron.
+const comoImagen = blob => /^image\//.test(blob.type) ? blob : new Blob([blob], { type: 'image/jpeg' });
 async function fotoGuardadaDataUrl(path){
   const { data } = await sb.storage.from(BUCKET).download(path);
-  if (data) return blobADataUrl(data);
-  if (window.fotoArchivada) { const u = await fotoArchivada(BUCKET, path); return blobADataUrl(await (await fetch(u)).blob()); }
+  if (data) return blobADataUrl(comoImagen(data));
+  if (window.fotoArchivada) { const u = await fotoArchivada(BUCKET, path); return blobADataUrl(comoImagen(await (await fetch(u)).blob())); }
   throw new Error('no se pudo leer una foto de la visita');
 }
 
@@ -716,12 +718,12 @@ async function fotosComoDataUrl(rutas, archivos){
 
 // Registro tal como lo consume el informe. `datos` ya incluye `cierre` (quien recibe y las dos firmas).
 function regParaInforme(r, fotos){
-  return { cliente: r.cliente, obra: r.obra, fecha: r.fecha, datos: r._datos || {}, pm: r.autor_nombre || me.nombre, fotos };
+  return { id: r.id, cliente: r.cliente, obra: r.obra, fecha: r.fecha, datos: r._datos || {}, pm: r.autor_nombre || me.nombre, fotos };
 }
 function regDesdeFormulario(){
   const d = leerCampos(), previo = editandoId ? registros.find(x => x.id === editandoId) : null;
   return {
-    cliente: d.cliente, obra: d.obra, fecha: d.fecha, pm: previo ? previo.autor_nombre : me.nombre,
+    id: editandoId || null, cliente: d.cliente, obra: d.obra, fecha: d.fecha, pm: previo ? previo.autor_nombre : me.nombre,
     datos: { ...datosVisita(d), cierre: cierreDeCampos(d) }
   };
 }
@@ -746,7 +748,8 @@ function pieDePagina(pdf){
   }
 }
 
-// Genera el PDF UNA vez. Quien lo ve y quien lo envía usan este mismo resultado: { blob, base64, nombre, huella }.
+// Genera el PDF UNA vez. Quien lo ve y quien lo envía usan este mismo resultado: { blob, base64, nombre, huella, registroId }.
+// `registroId` (null si la visita aún no está guardada) dice a qué visita pertenece: el envío debe validar identidad Y huella.
 async function generarPdf(reg){
   if (!window.html2pdf) throw new Error('No se pudo cargar el generador de PDF. Revisa tu conexión.');
   const html = informeHtml(reg);
@@ -763,7 +766,7 @@ async function generarPdf(reg){
     pieDePagina(pdf);
     const blob = pdf.output('blob');
     const base64 = (await blobADataUrl(blob)).split(',')[1];
-    return { blob, base64, nombre: TC.nombreInforme(reg), huella: huellaTexto(html) };
+    return { blob, base64, nombre: TC.nombreInforme(reg), huella: huellaTexto(html), registroId: reg.id || null };
   } finally { host.remove(); }
 }
 
