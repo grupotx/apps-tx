@@ -175,3 +175,97 @@ test('fotosEditadas: conserva las existentes, agrega las nuevas y no duplica', (
   assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/1.jpg', 'a/2.jpg']), ['a/1.jpg', 'a/2.jpg']);
   assert.deepEqual(TC.fotosEditadas(null, undefined), []);
 });
+
+// ── QR de asistencia: enlace, borradores y participantes en la tabla ──
+test('enlaceAsistencia: apunta a la página pública con el token en ?t=', () => {
+  assert.equal(TC.enlaceAsistencia('abc123'), 'https://apps.grouptx.app/terreno-asistencia.html?t=abc123');
+  assert.equal(TC.enlaceAsistencia('a b&c'), 'https://apps.grouptx.app/terreno-asistencia.html?t=a%20b%26c');
+});
+
+test('tokenValido: solo 32 caracteres hexadecimales (lo que genera la base)', () => {
+  assert.equal(TC.tokenValido('0123456789abcdef0123456789ABCDEF'), true);
+  for (const mal of ['', null, undefined, 'abc', 'g'.repeat(32), '0123456789abcdef0123456789abcdef0', '../../etc/passwd']) assert.equal(TC.tokenValido(mal), false);
+});
+
+test('esPngFirma: solo un PNG en data URL base64', () => {
+  assert.equal(TC.esPngFirma('data:image/png;base64,iVBORw0KGgo='), true);
+  for (const mal of [true, '', null, 'data:image/jpeg;base64,AA', 'data:image/png;base64,<script>', 'javascript:alert(1)']) assert.equal(TC.esPngFirma(mal), false);
+});
+
+test('borradores: se reconocen por la asistencia abierta, quedan fuera de las cifras y van primero en la lista', () => {
+  const a = { id: 'a', asistencia_abierta: false }, b = { id: 'b', asistencia_abierta: true }, c = { id: 'c' }, d = { id: 'd', asistencia_abierta: true };
+  assert.equal(TC.esBorrador(b), true);
+  assert.equal(TC.esBorrador(c), false);
+  assert.equal(TC.esBorrador(null), false);
+  assert.deepEqual(TC.sinBorradores([a, b, c, d]).map((r) => r.id), ['a', 'c']);
+  assert.deepEqual(TC.ordenarRegistros([a, b, c, d]).map((r) => r.id), ['b', 'd', 'a', 'c']);
+  const orig = [a, b];
+  TC.ordenarRegistros(orig);
+  assert.deepEqual(orig.map((r) => r.id), ['a', 'b'], 'no muta la lista original');
+});
+
+test('totalParticipantes: cuenta la tabla y, si no hay filas, los datos viejos', () => {
+  assert.equal(TC.totalParticipantes({ nAsistencias: 3, participantes: [{}, {}] }), 3);
+  assert.equal(TC.totalParticipantes({ nAsistencias: 0, participantes: [{}, {}] }), 2);
+  assert.equal(TC.totalParticipantes({}), 0);
+});
+
+const fila = (o) => ({ id: 'x', origenFila: 'nuevo', sucia: false, rut: '', nombre: '', cargo: '', email: '', fono: '', firma: '', ...o });
+
+test('planParticipantes: inserta las nuevas, actualiza solo las tocadas, borra las quitadas y las que quedaron vacías', () => {
+  const filas = [
+    fila({ id: 'n1', nombre: 'Ana' }),                                       // nueva con datos
+    fila({ id: 'n2' }),                                                      // nueva en blanco: se ignora
+    fila({ id: 't1', origenFila: 'tabla', nombre: 'Luis' }),                 // de la tabla, intacta
+    fila({ id: 't2', origenFila: 'tabla', nombre: 'Eva', sucia: true }),     // de la tabla, corregida
+    fila({ id: 't3', origenFila: 'tabla', sucia: true }),                    // de la tabla, la dejaron vacía
+  ];
+  const p = TC.planParticipantes(filas, { quitados: ['q1'], viejo: false });
+  assert.deepEqual(p.insertar.map((f) => f.id), ['n1']);
+  assert.deepEqual(p.actualizar.map((f) => f.id), ['t2']);
+  assert.deepEqual(p.borrar.sort(), ['q1', 't3']);
+  assert.equal(p.migrar, false);
+});
+
+test('planParticipantes: una fila con solo RUT cuenta como fila; en blanco no', () => {
+  const p = TC.planParticipantes([fila({ id: 'n1', rut: '1-9' }), fila({ id: 'n2', nombre: '   ' })], { quitados: [], viejo: false });
+  assert.deepEqual(p.insertar.map((f) => f.id), ['n1']);
+});
+
+test('planParticipantes: lista de un registro viejo sin tocar no se migra (conserva "firmó")', () => {
+  const filas = [fila({ id: 'v0', origenFila: 'viejo', nombre: 'Juan' }), fila({ id: 'n1' })];
+  assert.deepEqual(TC.planParticipantes(filas, { quitados: [], viejo: true }), { insertar: [], actualizar: [], borrar: [], migrar: false });
+});
+
+test('planParticipantes: si el PM cambia la lista de un registro viejo, pasa entera a la tabla', () => {
+  const base = () => [fila({ id: 'v0', origenFila: 'viejo', nombre: 'Juan' }), fila({ id: 'v1', origenFila: 'viejo', nombre: 'Ana' })];
+  const editada = base(); editada[1].sucia = true;
+  let p = TC.planParticipantes(editada, { quitados: [], viejo: true });
+  assert.deepEqual(p.insertar.map((f) => f.nombre), ['Juan', 'Ana']);
+  assert.deepEqual([p.actualizar, p.borrar, p.migrar], [[], [], true]);
+  p = TC.planParticipantes([base()[0]], { quitados: ['v1'], viejo: true });   // quitó una
+  assert.deepEqual(p.insertar.map((f) => f.nombre), ['Juan']);
+  assert.deepEqual([p.borrar, p.migrar], [[], true], 'no intenta borrar en la base un id que nunca estuvo allí');
+  p = TC.planParticipantes([], { quitados: ['v0', 'v1'], viejo: true });      // quitó todas
+  assert.deepEqual([p.insertar, p.migrar], [[], true]);
+  p = TC.planParticipantes([...base(), fila({ id: 'n1', nombre: 'Nueva' })], { quitados: [], viejo: true });   // agregó una
+  assert.equal(p.insertar.length, 3);
+});
+
+test('mensajeAsistencia: duplicado, enlace cerrado y falla de red se distinguen', () => {
+  assert.equal(TC.mensajeAsistencia({ code: 'P0001', message: 'ya estás registrado en esta actividad' }).tipo, 'duplicado');
+  const c = TC.mensajeAsistencia({ code: 'P0001', message: 'enlace no válido o actividad cerrada' });
+  assert.equal(c.tipo, 'cerrado');
+  assert.match(c.texto, /cupo/);
+  for (const e of [{ message: 'Failed to fetch' }, { message: 'TypeError: NetworkError' }, null, undefined, { code: '57014', message: 'canceling statement' }]) {
+    const m = TC.mensajeAsistencia(e);
+    assert.equal(m.tipo, 'red');
+    assert.match(m.texto, /conexión/);
+  }
+});
+
+test('llegadasNuevas: descarta las que ya están en pantalla y las que el PM quitó', () => {
+  const r = TC.llegadasNuevas(['a', 'b', 'c', 'd'], ['a'], ['c']);
+  assert.deepEqual(r, ['b', 'd']);
+  assert.deepEqual(TC.llegadasNuevas(null, null, null), []);
+});

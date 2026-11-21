@@ -8,6 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="foto-archivada.js"></script>
 <script src="terreno-core.js"></script>
+<script src="terreno-firma.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" integrity="sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:#fde7eb;--red:var(--brand);--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;--line:#dfdfdb;--gray:#8d939a;--ok:#18864a;--ok-soft:#ddf2e5;--warn:#b86e00;--warn-soft:#fbeed6;
@@ -69,17 +71,14 @@ textarea{min-height:84px;resize:vertical}
 @media (max-width:560px){.part{grid-template-columns:1fr 1fr}.part .pi-nombre{grid-column:1/-1}.part .pi-fila2{grid-template-columns:1fr 1fr auto}.part .pi-email{grid-column:1/-1}.part .pi-fono{grid-column:1/-1}.part .pi-firma-box{grid-column:1/3;grid-row:3}.part .x{grid-column:3;grid-row:3}}
 .kind-sel{margin:0 0 4px}
 .kind-sel .chip{font-size:14px;padding:9px 16px;margin:0;text-transform:none;letter-spacing:0;font-weight:600}
-/* Ventana de firma manuscrita (reutilizable: abrirFirma) */
-html.firma-abierta,html.firma-abierta body{overflow:hidden;overscroll-behavior:none}
-.firma-ov{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.firma-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(680px,100%);max-height:100%;box-shadow:0 24px 60px -20px rgba(0,0,0,.6)}
-.firma-dlg h2{margin:0 0 4px;font-size:17px}
-.firma-dlg p{margin:0 0 10px;font-size:12.5px}
-.firma-lienzo{position:relative;width:min(100%,calc((100vh - 190px) * 2));width:min(100%,calc((100dvh - 190px) * 2));min-width:200px;aspect-ratio:2/1;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.firma-lienzo::after{content:"";position:absolute;left:6%;right:6%;top:72%;border-top:1px dashed #b9bcc2;pointer-events:none}
-.firma-lienzo img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.22;pointer-events:none}
-.firma-lienzo canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
-.firma-dlg .acciones{margin-top:12px;justify-content:flex-end}
+.tag.enc{color:var(--warn);background:var(--warn-soft)}
+.qr-box{border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0;text-align:center;background:var(--sunk)}
+.qr-box .qr-img{width:min(100%,440px);aspect-ratio:1;margin:0 auto;background:#fff;border-radius:12px;padding:6px}
+.qr-box .qr-img svg{display:block;width:100%;height:100%}
+.qr-box .qr-enlace{font-family:var(--f-mono);font-size:14px;font-weight:700;word-break:break-all;user-select:all;margin:14px 0 4px}
+.qr-box .acciones{justify-content:center}
+.part-barra{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.part-barra .mute{margin-left:auto}
 .ac{position:relative}
 .sug{position:absolute;left:0;right:0;top:100%;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-top:4px;max-height:280px;overflow:auto;box-shadow:0 18px 40px -16px rgba(0,0,0,.45)}
 .sug button{display:block;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--ink);padding:10px 12px;cursor:pointer;font-weight:600}
@@ -190,6 +189,12 @@ let accesos = [];
 let editandoId = null;    // id del registro que se está corrigiendo (null = registro nuevo)
 let catalogo = [];
 let ultimaCarga = 0;
+// Asistencia del formulario abierto (se reinician en render()):
+let tokenQR = null;       // { registroId, token } del QR generado en esta sesión (la base no deja leerlo después)
+let refrescoQR = null;    // intervalo que trae los participantes que llegan por QR
+let refrescando = false;
+let quitados = new Set(); // ids de filas de la tabla que el PM quitó del formulario (se borran al guardar)
+let partsViejo = false;   // la lista del formulario viene de datos.participantes de un registro anterior
 const urlCache = {};
 
 /* ===================== Utilidades ===================== */
@@ -261,11 +266,16 @@ async function iniciar(){
   sb.rpc('rt_productos').then(({ data }) => { if (data && data.length) catalogo = data; });
 }
 
+// El listado NO trae los participantes (con sus firmas en PNG): solo cuántos son. Los datos de cada uno se piden
+// cuando se necesitan (abrir la actividad, "Ver participantes").
+const mapRegistro = r => ({ ...(r.datos || {}), id: r.id, kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id,
+  obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {},
+  asistencia_abierta: !!r.asistencia_abierta, nAsistencias: (r.rt_asistencias && r.rt_asistencias[0] && r.rt_asistencias[0].count) || 0 });
+
 async function cargar(){
-  const { data, error } = await sb.from('registros').select('*').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
+  const { data, error } = await sb.from('registros').select('*, rt_asistencias(count)').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
   if (error) { setConexion('Error de conexión'); toast('No se pudieron cargar los registros'); return; }
-  registros = data.map(r => ({ ...(r.datos || {}), id: r.id, kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id,
-    obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {} }));
+  registros = data.map(mapRegistro);
   ultimaCarga = Date.now();
   if (vista === 'panel' || vista === 'registros') render();
 }
@@ -273,118 +283,9 @@ async function cargar(){
 const nombreAutor = r => r.autor_nombre || 'PM';
 
 /* ===================== Formularios ===================== */
-/* ===================== Firma manuscrita ===================== */
-const FIRMA_ANCHO_PNG = 400;   // ancho del PNG guardado (recortado al trazo)
-const esPngFirma = f => typeof f === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(f);
-
-/* Abre una ventana para firmar con el dedo, lápiz o mouse (eventos pointer).
-   Devuelve una promesa: el PNG en base64 (data URL) al aplicar, '' si se aplicó dejando la firma en blanco,
-   o null al cancelar. `firma` (opcional) es la firma actual: se muestra tenue como guía.
-   Los trazos se guardan como puntos normalizados (unidad = ancho del lienzo) y se redibujan al girar o
-   cambiar de tamaño la pantalla; el PNG sale de TC.trazoAPng. */
-function abrirFirma({ titulo = 'Firma', firma = '' } = {}){
-  return new Promise(resolve => {
-    const previo = document.activeElement;
-    const trazos = [];
-    let actual = null, pid = null, limpiada = false;
-    const ov = document.createElement('div');
-    ov.className = 'firma-ov';
-    ov.innerHTML = `<div class="firma-dlg" role="dialog" aria-modal="true" aria-label="${esc(titulo)}">
-      <h2>${esc(titulo)}</h2>
-      <p class="mute">Firma con el dedo o el lápiz dentro del recuadro.</p>
-      <div class="firma-lienzo">${esPngFirma(firma) ? `<img alt="" src="${esc(firma)}">` : ''}<canvas></canvas></div>
-      <div class="acciones">
-        <button type="button" class="btn ghost" data-f="limpiar">Limpiar</button>
-        <button type="button" class="btn ghost" data-f="cancelar">Cancelar</button>
-        <button type="button" class="btn" data-f="aplicar" disabled>Aplicar</button>
-      </div></div>`;
-    document.documentElement.classList.add('firma-abierta');
-    document.body.appendChild(ov);
-    const caja = ov.querySelector('.firma-lienzo'), cv = ov.querySelector('canvas'), ctx = cv.getContext('2d');
-    const bAplicar = ov.querySelector('[data-f="aplicar"]');
-    const refresca = () => { bAplicar.disabled = !(trazos.length || (limpiada && esPngFirma(firma))); };
-
-    const grosor = () => Math.max(2, cv.width / 150);
-    const px = p => [p.x * cv.width, p.y * cv.width];
-    function estilo(){ ctx.lineWidth = grosor(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; }
-    function redibuja(){
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      estilo();
-      for (const t of trazos) {
-        if (!t.length) continue;
-        ctx.beginPath();
-        ctx.moveTo(...px(t[0]));
-        if (t.length === 1) ctx.lineTo(px(t[0])[0] + 0.01, px(t[0])[1]);
-        for (let i = 1; i < t.length; i++) ctx.lineTo(...px(t[i]));
-        ctx.stroke();
-      }
-    }
-    function ajusta(){
-      const r = caja.getBoundingClientRect(), k = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.round(r.width * k)), h = Math.max(1, Math.round(r.height * k));
-      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-      redibuja();
-    }
-    const punto = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.width }; };
-    function segmento(t, desde){
-      estilo(); ctx.beginPath();
-      ctx.moveTo(...px(t[desde - 1] || t[desde]));
-      for (let i = desde; i < t.length; i++) ctx.lineTo(...px(t[i]));
-      if (t.length === 1) ctx.lineTo(px(t[0])[0] + 0.01, px(t[0])[1]);
-      ctx.stroke();
-    }
-
-    cv.addEventListener('pointerdown', e => {
-      if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      e.preventDefault();
-      try { cv.setPointerCapture(e.pointerId); } catch(_){}
-      pid = e.pointerId; actual = [punto(e)]; trazos.push(actual);
-      segmento(actual, 0); refresca();
-    });
-    cv.addEventListener('pointermove', e => {
-      if (!actual || e.pointerId !== pid) return;
-      e.preventDefault();
-      const desde = actual.length;
-      const lote = e.getCoalescedEvents ? e.getCoalescedEvents() : [];   // a veces viene vacío
-      for (const ev of lote.length ? lote : [e]) actual.push(punto(ev));
-      segmento(actual, desde);
-    });
-    const fin = e => { if (actual && e.pointerId === pid) { actual = null; pid = null; } };
-    cv.addEventListener('pointerup', fin);
-    cv.addEventListener('pointercancel', fin);
-    // El navegador no debe arrastrar, seleccionar ni desplazar la página mientras se firma.
-    ov.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
-    ov.addEventListener('contextmenu', e => e.preventDefault());
-    ov.addEventListener('dragstart', e => e.preventDefault());
-
-    const ro = window.ResizeObserver ? new ResizeObserver(ajusta) : null;
-    const alGirar = () => setTimeout(ajusta, 150);
-    if (ro) ro.observe(caja);
-    window.addEventListener('resize', ajusta);
-    window.addEventListener('orientationchange', alGirar);
-
-    function cerrar(valor){
-      if (ro) ro.disconnect();
-      window.removeEventListener('resize', ajusta);
-      window.removeEventListener('orientationchange', alGirar);
-      document.removeEventListener('keydown', tecla, true);
-      ov.remove();
-      document.documentElement.classList.remove('firma-abierta');
-      if (previo && previo.focus) try { previo.focus(); } catch(_){}
-      resolve(valor);
-    }
-    function tecla(e){ if (e.key === 'Escape') { e.stopPropagation(); cerrar(null); } }
-    document.addEventListener('keydown', tecla, true);
-    ov.addEventListener('click', e => {
-      const f = e.target.closest('[data-f]'); if (!f) return;
-      if (f.dataset.f === 'limpiar') { trazos.length = 0; actual = null; limpiada = true; const im = caja.querySelector('img'); if (im) im.remove(); redibuja(); refresca(); }
-      else if (f.dataset.f === 'cancelar') cerrar(null);
-      else if (f.dataset.f === 'aplicar' && !f.disabled) cerrar(trazos.length ? TC.trazoAPng(trazos, FIRMA_ANCHO_PNG) : '');
-    });
-    ajusta();
-    ov.querySelector('[data-f="cancelar"]').focus();
-  });
-}
+/* La ventana de firma vive en terreno-firma.js (TFirma.abrirFirma), compartida con la página pública. */
+const { esPngFirma } = TC;
+const { abrirFirma } = TFirma;
 
 /* ===================== Participantes ===================== */
 // `p` viene de TC.participantesVista: { rut, nombre, cargo, email, fono, firma (PNG o ''), firmo }
@@ -392,9 +293,10 @@ function firmaHtml(p){
   if (esPngFirma(p.firma)) return `<img class="firma-mini" alt="Firma" src="${esc(p.firma)}">`;
   return p.firmo ? '<span class="firmo-ok">Firmó</span>' : '';   // registro viejo: firmó sin imagen
 }
-function filaPart(p = {}){
+// `origen`: 'tabla' (ya está en rt_asistencias), 'viejo' (de datos.participantes de un registro anterior) o 'nuevo'.
+function filaPart(p = {}, origen = 'nuevo'){
   const firmada = esPngFirma(p.firma);
-  return `<div class="part" data-firmo="${p.firmo ? 1 : ''}">
+  return `<div class="part" data-id="${esc(p.id || crypto.randomUUID())}" data-origen="${origen}" data-firmo="${p.firmo ? 1 : ''}">
     <input class="pi-rut" placeholder="RUT" value="${esc(p.rut)}">
     <input class="pi-nombre" placeholder="Nombre" value="${esc(p.nombre)}">
     <input class="pi-cargo" placeholder="Cargo" value="${esc(p.cargo)}">
@@ -409,6 +311,7 @@ function filaPart(p = {}){
 function ponerFirma(row, png){
   row.querySelector('.pi-firma').value = png;
   row.dataset.firmo = png ? '1' : '';
+  row.dataset.sucia = '1';
   row.querySelector('.pi-firma-vista').innerHTML = firmaHtml({ firma: png, firmo: !!png });
   row.querySelector('.firmar').textContent = png ? 'Cambiar' : 'Firmar';
 }
@@ -462,6 +365,13 @@ function formActividad(kind){
     <label>Contenidos tratados</label>
     <div class="checks">${TEMAS.map(t => `<label class="check"><input type="checkbox" name="temas" value="${esc(t)}" checked> ${esc(t)}</label>`).join('')}</div>
     <h3>Participantes</h3>
+    <p class="mute" style="margin:0 0 8px">Escríbelos aquí o deja que cada uno se registre desde su teléfono con un QR.</p>
+    <div class="part-barra">
+      <button type="button" class="btn ghost" id="btn-qr" data-a="generarQR">Generar QR de asistencia</button>
+      <button type="button" class="btn ghost" id="btn-act" data-a="actualizarPart" hidden>Actualizar lista</button>
+      <span class="mute" id="part-estado"></span>
+    </div>
+    <div id="qr-box" class="qr-box" hidden></div>
     <div id="partics">${[0,1,2,3,4].map(() => filaPart()).join('')}</div>
     <button type="button" class="btn ghost" data-a="addPart">+ Agregar participante</button>
     <label>Observaciones</label>
@@ -563,16 +473,44 @@ function leerCampos(){
   return d;
 }
 
+// Filas del formulario tal como están en pantalla. El plan (TC.planParticipantes) decide qué va a la base.
 function leerParticipantes(){
   return [...document.querySelectorAll('#partics .part')].map(row => ({
+    id: row.dataset.id, origenFila: row.dataset.origen, sucia: !!row.dataset.sucia,
     rut: row.querySelector('.pi-rut').value.trim(),
     nombre: row.querySelector('.pi-nombre').value.trim(),
     cargo: row.querySelector('.pi-cargo').value.trim(),
     email: row.querySelector('.pi-email').value.trim(),
     fono: row.querySelector('.pi-fono').value.trim(),
-    firma: row.querySelector('.pi-firma').value,
-    firmo: !!row.dataset.firmo
-  })).filter(p => p.rut || p.nombre);
+    firma: row.querySelector('.pi-firma').value
+  }));
+}
+
+const esUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+const colsPart = f => ({ nombre: f.nombre, rut: f.rut, cargo: f.cargo, email: f.email, fono: f.fono, firma: esPngFirma(f.firma) ? f.firma : '' });
+const filaDom = id => [...document.querySelectorAll('#partics .part')].find(r => r.dataset.id === id);
+
+// Lleva a rt_asistencias lo que el PM escribió (origen 'manual'). Las filas ya guardadas quedan marcadas como
+// 'tabla', así un reintento después de una falla a medias no duplica nada.
+async function aplicarPlan(registroId, plan){
+  const t = () => sb.from('rt_asistencias');
+  const borrar = plan.borrar.filter(esUuid);
+  if (borrar.length) {
+    const { error } = await t().delete().eq('registro_id', registroId).in('id', borrar);
+    if (error) throw error;
+    borrar.forEach(id => quitados.delete(id));
+  }
+  if (plan.insertar.length) {
+    const nuevas = plan.insertar.map(f => ({ f, id: esUuid(f.id) ? f.id : crypto.randomUUID() }));
+    const { error } = await t().insert(nuevas.map(({ f, id }) => ({ id, registro_id: registroId, origen: 'manual', ...colsPart(f) })));
+    if (error) throw error;
+    nuevas.forEach(({ f, id }) => { const row = filaDom(f.id); if (row) { row.dataset.id = id; row.dataset.origen = 'tabla'; delete row.dataset.sucia; } });
+  }
+  await Promise.all(plan.actualizar.map(async f => {
+    const { error } = await t().update(colsPart(f)).eq('id', f.id).eq('registro_id', registroId);
+    if (error) throw error;
+    const row = filaDom(f.id); if (row) delete row.dataset.sucia;
+  }));
 }
 
 // Reduce la foto antes de subirla (máx. 1600 px, JPEG)
@@ -592,73 +530,118 @@ function comprimir(file){
   });
 }
 
+function validarCampos(kind, d){
+  if (!d.fecha) return 'Falta la fecha';
+  if (!d.cliente) return 'Indica el cliente';
+  if (kind === 'visita') return d.motivo ? '' : 'Describe el motivo del reclamo';
+  return d.nombre ? '' : 'Falta el nombre de la actividad';
+}
+
+// Refleja en la lista local lo que acaba de quedar en la base, sin volver a pedir todos los registros.
+function actualizarLocal(id, fila, datos, fotos){
+  const i = registros.findIndex(x => x.id === id), previo = registros[i];
+  const nuevo = mapRegistro({ ...fila, id, datos, fotos, autor: previo ? previo.autor : me.id, autor_nombre: previo ? previo.autor_nombre : me.nombre,
+    created_at: previo ? previo.creado : new Date().toISOString(), asistencia_abierta: previo ? previo.asistencia_abierta : false,
+    rt_asistencias: [{ count: previo ? previo.nAsistencias : 0 }] });
+  if (i >= 0) registros[i] = nuevo; else registros.unshift(nuevo);
+}
+
+// Escribe el registro (insert o update) y, si es una actividad, sus participantes. Devuelve el id.
+// `registroId`: si viene, corrige ese registro; si no, crea uno nuevo. Sirve igual para el guardado final y para el
+// borrador que se crea al generar el QR. `btn` solo muestra el avance de las fotos.
+async function persistir(kind, d, registroId, btn){
+  /* Cliente: si no se eligió de la base, se crea (o se reutiliza si ya existe ese RUT/nombre) */
+  let clienteId = cliSel && norm(cliSel.nombre) === norm(d.cliente) ? cliSel.id : null;
+  if (!clienteId) {
+    const { data, error } = await sb.rpc('rt_crear_cliente', { p_nombre: d.cliente, p_rut: d.cli_rut || '', p_comuna: d.cli_comuna || '', p_direccion: d.direccion || '' });
+    if (error) throw error;
+    clienteId = data;
+    cliSel = { ...(cliSel || {}), id: clienteId, nombre: d.cliente }; cliNuevo = false; infoCliente();   // ya está en la base
+  }
+
+  const previo = registroId ? registros.find(x => x.id === registroId) : null;
+  if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
+  const id = registroId || crypto.randomUUID();
+  const fotos = [];
+  if (kind === 'visita' && d.fotos && d.fotos.length) {
+    for (let i = 0; i < d.fotos.length; i++) {
+      if (btn) btn.textContent = `Subiendo foto ${i + 1} de ${d.fotos.length}…`;
+      const blob = await comprimir(d.fotos[i]);
+      const path = `${id}/${i + 1}-${Date.now()}.jpg`;
+      const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || 'image/jpeg' });
+      if (error) throw error;
+      fotos.push(path);
+    }
+  }
+
+  const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
+  if (kind === 'visita') {
+    Object.assign(datos, {
+      direccion: d.direccion || '', contacto: d.contacto || '', producto: d.producto || '',
+      motivo: d.motivo, verificacion: d.verificacion || '', causa: d.causa || '',
+      solucion: d.solucion || '', lab: d.lab || 'No'
+    });
+  } else {
+    // Los participantes ya no viajan en datos: viven en rt_asistencias.
+    Object.assign(datos, {
+      nombre: d.nombre, duracion: d.duracion || '60', relator: d.relator || '',
+      cargo: d.cargo || '', temas: d.temas || [],
+      tipo_act: kind === 'capacitacion' ? (d.tipo_act || 'Capacitación') : 'Charla técnica'
+    });
+  }
+  const plan = kind === 'visita' ? null : TC.planParticipantes(leerParticipantes(), { quitados: [...quitados], viejo: partsViejo });
+
+  const fila = {
+    kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
+    estado: kind === 'visita' ? (d.estado || 'Abierto') : null
+  };
+  if (registroId) {
+    // Los participantes primero: si la lista de un registro viejo pasa a la tabla, datos.participantes solo se
+    // retira cuando ya están guardados en ella.
+    if (plan) await aplicarPlan(registroId, plan);
+    if (plan && plan.migrar) delete datos.participantes;
+    // Corrección: huella de quién y cuándo (un borrador que aún no se ha cerrado no es una corrección);
+    // autor y fotos previas no se tocan (se suman las nuevas).
+    const ahora = new Date().toISOString();
+    const datosFinal = TC.esBorrador(previo) ? datos : TC.marcarEdicion(datos, me.nombre, ahora);
+    const fotosFinal = TC.fotosEditadas(previo.fotos, fotos);
+    const { data, error } = await sb.from('registros').update({ ...fila, datos: datosFinal, fotos: fotosFinal, updated_at: ahora }).eq('id', registroId).select('id');
+    if (error) throw error;
+    if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
+    actualizarLocal(id, fila, datosFinal, fotosFinal);
+  } else {
+    const { error } = await sb.from('registros').insert({ id, ...fila, datos, fotos, autor: me.id, autor_nombre: me.nombre });
+    if (error) throw error;
+    // Desde aquí el registro existe: si algo falla después, reintentar corrige este mismo registro en vez de duplicarlo.
+    editandoId = id;
+    actualizarLocal(id, fila, datos, fotos);
+    if (plan) await aplicarPlan(id, plan);
+  }
+  if (plan && plan.migrar) { partsViejo = false; quitados.clear(); }
+  return id;
+}
+
 // `registroId`: si viene, corrige ese registro (update); si no, crea uno nuevo (insert).
 async function guardar(kind, btn, registroId){
   const d = leerCampos();
   if (kind !== 'visita') kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
-  if (!d.fecha) return toast('Falta la fecha');
-  if (!d.cliente) return toast('Indica el cliente');
-  if (kind === 'visita') { if (!d.motivo) return toast('Describe el motivo del reclamo'); }
-  else if (!d.nombre) return toast('Falta el nombre de la actividad');
+  const falta = validarCampos(kind, d);
+  if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
   try {
-    /* Cliente: si no se eligió de la base, se crea (o se reutiliza si ya existe ese RUT/nombre) */
-    let clienteId = cliSel && norm(cliSel.nombre) === norm(d.cliente) ? cliSel.id : null;
-    if (!clienteId) {
-      const { data, error } = await sb.rpc('rt_crear_cliente', { p_nombre: d.cliente, p_rut: d.cli_rut || '', p_comuna: d.cli_comuna || '', p_direccion: d.direccion || '' });
-      if (error) throw error;
-      clienteId = data;
+    const eraBorrador = TC.esBorrador(registros.find(x => x.id === registroId));
+    const id = await persistir(kind, d, registroId, btn);
+    // Al guardar la actividad el enlace del QR deja de aceptar participantes. Si el cierre falla el registro queda
+    // como "en curso" en Registros, con su botón para cerrarlo.
+    let aviso = '';
+    const reg = registros.find(x => x.id === id);
+    if (TC.esBorrador(reg)) {
+      const { error } = await sb.rpc('rt_asistencia_cerrar', { p_registro: id });
+      if (error) aviso = ' Pero no se pudo cerrar la asistencia por QR: ciérrala desde Registros.';
+      else reg.asistencia_abierta = false;
     }
-
-    const previo = registroId ? registros.find(x => x.id === registroId) : null;
-    if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
-    const id = registroId || crypto.randomUUID();
-    const fotos = [];
-    if (kind === 'visita' && d.fotos && d.fotos.length) {
-      for (let i = 0; i < d.fotos.length; i++) {
-        btn.textContent = `Subiendo foto ${i + 1} de ${d.fotos.length}…`;
-        const blob = await comprimir(d.fotos[i]);
-        const path = `${id}/${i + 1}-${Date.now()}.jpg`;
-        const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || 'image/jpeg' });
-        if (error) throw error;
-        fotos.push(path);
-      }
-    }
-
-    const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
-    if (kind === 'visita') {
-      Object.assign(datos, {
-        direccion: d.direccion || '', contacto: d.contacto || '', producto: d.producto || '',
-        motivo: d.motivo, verificacion: d.verificacion || '', causa: d.causa || '',
-        solucion: d.solucion || '', lab: d.lab || 'No'
-      });
-    } else {
-      Object.assign(datos, {
-        nombre: d.nombre, duracion: d.duracion || '60', relator: d.relator || '',
-        cargo: d.cargo || '', temas: d.temas || [],
-        tipo_act: kind === 'capacitacion' ? (d.tipo_act || 'Capacitación') : 'Charla técnica',
-        participantes: leerParticipantes()
-      });
-    }
-
-    const fila = {
-      kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
-      estado: kind === 'visita' ? (d.estado || 'Abierto') : null
-    };
-    if (registroId) {
-      // Corrección: huella de quién y cuándo; autor y fotos previas no se tocan (se suman las nuevas).
-      const ahora = new Date().toISOString();
-      const { data, error } = await sb.from('registros').update({
-        ...fila, datos: TC.marcarEdicion(datos, me.nombre, ahora), fotos: TC.fotosEditadas(previo.fotos, fotos), updated_at: ahora
-      }).eq('id', registroId).select('id');
-      if (error) throw error;
-      if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
-    } else {
-      const { error } = await sb.from('registros').insert({ id, ...fila, datos, fotos, autor: me.id, autor_nombre: me.nombre });
-      if (error) throw error;
-    }
-    toast(registroId ? 'Cambios guardados' : 'Registro guardado');
+    toast((registroId && !eraBorrador ? 'Cambios guardados.' : 'Registro guardado.') + aviso);
     cliSel = null; cliNuevo = false; editandoId = null;
     vista = registroId || kind === 'visita' ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
@@ -669,10 +652,108 @@ async function guardar(kind, btn, registroId){
   }
 }
 
+/* ===================== QR de asistencia ===================== */
+// Crea o actualiza el registro como borrador "en curso" (con lo escrito hasta ahora) y devuelve su id.
+// Exige cliente y nombre de la actividad. Desde aquí el formulario corrige ese registro (editandoId).
+async function guardarBorrador(){
+  const d = leerCampos();
+  const kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
+  const falta = validarCampos(kind, d);
+  if (falta) throw Object.assign(new Error(falta), { validacion: true });
+  return persistir(kind, d, editandoId, null);
+}
+
+function mostrarQR(url){
+  const box = $('#qr-box');
+  let img = '';
+  try { const q = qrcode(0, 'M'); q.addData(url); q.make(); img = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch(e){ img = ''; }
+  box.innerHTML = `<h3 style="margin-top:0">Escanea para registrar tu asistencia</h3>
+    ${img ? `<div class="qr-img" role="img" aria-label="Código QR del enlace de asistencia">${img}</div>`
+          : '<p class="aviso">No se pudo dibujar el QR (sin conexión a la librería). Comparte el enlace escrito.</p>'}
+    <p class="qr-enlace">${esc(url)}</p>
+    <p class="mute">¿Sin QR? Escribe este enlace en el navegador del teléfono.</p>
+    <div class="acciones"><button type="button" class="btn ghost" data-a="copiarQR" data-url="${esc(url)}">Copiar enlace</button>
+    <button type="button" class="btn ghost" data-a="ocultarQR">Ocultar QR</button></div>`;
+  box.hidden = false;
+  botonesAsistencia();
+}
+
+function botonesAsistencia(){
+  const act = $('#btn-act'); if (!act) return;
+  act.hidden = !(editandoId && $('#qr-box').hidden);
+  const r = registros.find(x => x.id === editandoId);
+  $('#part-estado').textContent = !$('#qr-box').hidden ? 'La lista se actualiza sola cada 5 segundos.'
+    : TC.esBorrador(r) ? 'La asistencia por QR sigue abierta. Generar el QR de nuevo anula el enlace anterior.' : '';
+}
+
+function detenerRefresco(){ clearInterval(refrescoQR); refrescoQR = null; }
+
+// Trae los participantes que llegaron por QR desde el último refresco. Solo agrega filas nuevas: lo que el PM
+// está escribiendo no se toca. El sondeo pide solo los ids; las firmas (PNG) se descargan una vez por fila nueva.
+async function refrescarParticipantes(registroId){
+  if (refrescando || !$('#partics')) return 0;
+  refrescando = true;
+  try {
+    const { data: ids, error } = await sb.from('rt_asistencias').select('id').eq('registro_id', registroId);
+    if (error) throw error;
+    const filasDom = () => [...document.querySelectorAll('#partics .part')];
+    const nuevos = TC.llegadasNuevas(ids.map(x => x.id), filasDom().map(r => r.dataset.id), [...quitados]);
+    if (!nuevos.length) return 0;
+    const { data: filas, error: e2 } = await sb.from('rt_asistencias').select('*').in('id', nuevos).order('created_at');
+    if (e2) throw e2;
+    const cont = $('#partics'); if (!cont) return 0;   // el formulario se cerró mientras tanto
+    // Las filas en blanco que vienen de fábrica estorban cuando ya llegan personas.
+    filasDom().filter(r => r.dataset.origen === 'nuevo' && !r.dataset.sucia && !r.querySelector('.pi-nombre').value && !r.querySelector('.pi-rut').value).forEach(r => r.remove());
+    const enPantalla = filasDom().map(r => r.dataset.id);
+    const mezcla = TC.mezclarParticipantes(filasDom().map(r => ({ id: r.dataset.id, _sucia: !!r.dataset.sucia })), TC.participantesVista(filas));
+    for (const p of mezcla) if (!enPantalla.includes(p.id)) cont.insertAdjacentHTML('beforeend', filaPart(p, 'tabla'));
+    return nuevos.length;
+  } finally { refrescando = false; }
+}
+
+function iniciarRefresco(registroId){
+  detenerRefresco();
+  refrescarParticipantes(registroId).catch(() => {});
+  refrescoQR = setInterval(() => { if (document.visibilityState === 'visible') refrescarParticipantes(registroId).catch(() => {}); }, 5000);
+}
+
+async function generarQR(btn){
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Preparando…';
+  try {
+    const id = await guardarBorrador();
+    let token = tokenQR && tokenQR.registroId === id ? tokenQR.token : null;   // el mismo QR mientras no se cierre el formulario
+    if (!token) {
+      const { data, error } = await sb.rpc('rt_asistencia_abrir', { p_registro: id });
+      if (error) throw error;
+      token = data; tokenQR = { registroId: id, token };
+    }
+    const r = registros.find(x => x.id === id); if (r) r.asistencia_abierta = true;
+    mostrarQR(TC.enlaceAsistencia(token));
+    iniciarRefresco(id);
+  } catch(e){
+    toast(e.validacion ? e.message : 'No se pudo generar el QR: ' + (e.message || e.code || 'error'));
+  } finally { btn.disabled = false; btn.textContent = txt; }
+}
+
+async function cerrarBorrador(id){
+  const r = registros.find(x => x.id === id);
+  if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor de la actividad o un administrador puede cerrar la asistencia');
+  if (!confirm('¿Cerrar la asistencia de esta actividad? El enlace del QR dejará de aceptar participantes.')) return;
+  const { error } = await sb.rpc('rt_asistencia_cerrar', { p_registro: id });
+  if (error) return toast('No se pudo cerrar la asistencia');
+  r.asistencia_abierta = false; render(); toast('Asistencia cerrada');
+}
+
 /* Abre el formulario del registro con sus datos para corregirlo (participantes y firmas incluidos). */
-function editarRegistro(id){
+async function editarRegistro(id){
   const r = registros.find(x => x.id === id);
   if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor del registro o un administrador puede corregirlo');
+  let filas = [];
+  if (r.kind !== 'visita') {   // los participantes se piden al abrir (con sus firmas), no en el listado
+    const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', id).order('created_at');
+    if (error) return toast('No se pudieron cargar los participantes');
+    filas = data || [];
+  }
   editandoId = id;
   cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null; cliNuevo = false;
   vista = r.kind; render(); window.scrollTo(0, 0);
@@ -685,8 +766,10 @@ function editarRegistro(id){
     else if (el.type !== 'radio') el.value = v;
   });
   if (r.kind !== 'visita') {
-    $('#partics').innerHTML = TC.participantesVista(null, r.participantes).map(filaPart).join('');
+    partsViejo = !filas.length && (r.participantes || []).length > 0;
+    $('#partics').innerHTML = TC.participantesVista(filas, r.participantes).map(p => filaPart(p, filas.length ? 'tabla' : 'viejo')).join('');
     $('#act-titulo').textContent = 'Corregir ' + KIND_LABEL[r.kind].toLowerCase();
+    botonesAsistencia();
   } else {
     f.querySelector('h2').textContent = 'Corregir visita por reclamo';
     if (r.fotos.length) f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan.</p>`);
@@ -713,16 +796,17 @@ async function eliminar(id){
 
 /* ===================== Panel ===================== */
 function vistaPanel(){
-  const actividades = registros.filter(r => r.kind !== 'visita');
-  const visitas = registros.filter(r => r.kind === 'visita');
-  const participantes = actividades.reduce((s,r) => s + (r.participantes || []).length, 0);
+  const regs = TC.sinBorradores(registros);   // las actividades en curso (QR abierto) no cuentan todavía
+  const actividades = regs.filter(r => r.kind !== 'visita');
+  const visitas = regs.filter(r => r.kind === 'visita');
+  const participantes = actividades.reduce((s,r) => s + TC.totalParticipantes(r), 0);
   const abiertas = visitas.filter(r => r.estado !== 'Cerrado').length;
   const cerradas = visitas.length - abiertas;
   const pctCerradas = visitas.length ? Math.round(cerradas / visitas.length * 100) : 0;
   const box = (id, t, cls = '') => `<div class="chart-box ${cls}"><h3>${t}</h3><div class="cv"><canvas id="${id}"></canvas></div></div>`;
 
   const mesAct = mesKey(new Date());
-  const delMes = k => registros.filter(r => r.kind === k && String(r.fecha || '').startsWith(mesAct)).length;
+  const delMes = k => regs.filter(r => r.kind === k && String(r.fecha || '').startsWith(mesAct)).length;
   const fechaHoy = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
   return `
   <div class="hero">
@@ -741,7 +825,7 @@ function vistaPanel(){
     <div class="kpi"><span>Participantes</span><b>${participantes}</b><small>capacitados en total</small></div>
     <div class="kpi ${abiertas ? 'hot' : ''}"><span>Reclamos abiertos</span><b>${abiertas}</b><small>${pctCerradas}% cerrados</small></div>
   </div>
-  ${registros.length ? `<div class="graficos">
+  ${regs.length ? `<div class="graficos">
     ${box('g-mes', 'Actividad por mes', 'ancho')}
     ${box('g-estado', 'Estado de reclamos')}
     ${box('g-causas', 'Causas probables')}
@@ -755,7 +839,8 @@ const topN = (obj, n) => Object.entries(obj).sort((a,b) => b[1] - a[1]).slice(0,
 const corto = s => s.length > 28 ? s.slice(0, 27) + '…' : s;
 
 function dibujarGraficos(){
-  if (!registros.length) return;
+  const regs = TC.sinBorradores(registros);
+  if (!regs.length) return;
   if (typeof Chart === 'undefined') {
     document.querySelectorAll('.chart-box').forEach(b => b.insertAdjacentHTML('beforeend', '<p class="mute">Gráficos no disponibles en este momento.</p>'));
     return;
@@ -774,7 +859,7 @@ function dibujarGraficos(){
   const hoyD = new Date();
   for (let i = 5; i >= 0; i--) meses.push(mesKey(new Date(hoyD.getFullYear(), hoyD.getMonth() - i, 1)));
   const labels = meses.map(m => { const [y, mo] = m.split('-'); return new Date(+y, +mo - 1, 1).toLocaleDateString('es-CL', { month: 'short', year: '2-digit' }); });
-  const porMes = kind => meses.map(m => registros.filter(r => r.kind === kind && String(r.fecha || '').startsWith(m)).length);
+  const porMes = kind => meses.map(m => regs.filter(r => r.kind === kind && String(r.fecha || '').startsWith(m)).length);
   charts.mes = new Chart($('#g-mes'), {
     type: 'bar',
     data: { labels, datasets: [
@@ -785,7 +870,7 @@ function dibujarGraficos(){
     options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
   });
 
-  const visitas = registros.filter(r => r.kind === 'visita');
+  const visitas = regs.filter(r => r.kind === 'visita');
   const est = contar(visitas, r => r.estado || 'Abierto');
   charts.estado = new Chart($('#g-estado'), {
     type: 'doughnut',
@@ -800,14 +885,14 @@ function dibujarGraficos(){
     options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 
-  const pm = topN(contar(registros, r => nombreAutor(r)), 10);
+  const pm = topN(contar(regs, r => nombreAutor(r)), 10);
   charts.pm = new Chart($('#g-pm'), {
     type: 'bar',
     data: { labels: pm.map(p => p[0]), datasets: [{ label: 'Registros', data: pm.map(p => p[1]), backgroundColor: COLOR.charla }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
   });
 
-  const cli = topN(contar(registros, r => r.cliente), 8);
+  const cli = topN(contar(regs, r => r.cliente), 8);
   charts.clientes = new Chart($('#g-clientes'), {
     type: 'bar',
     data: { labels: cli.map(c => corto(c[0])), datasets: [{ label: 'Registros', data: cli.map(c => c[1]), backgroundColor: COLOR.visita }] },
@@ -839,14 +924,32 @@ function tarjeta(r){
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
-  const parts = TC.participantesVista(null, r.participantes);
+  const n = TC.totalParticipantes(r), enCurso = TC.esBorrador(r);
   return `<div class="card">${del}
-    <span class="tag">${esc(r.kind === 'charla' ? 'Charla técnica' : r.tipo_act || 'Capacitación')}</span><b>${esc(r.nombre || 'Sin nombre')}</b>${autor}
+    ${enCurso ? '<span class="tag enc">En curso</span>' : ''}<span class="tag">${esc(r.kind === 'charla' ? 'Charla técnica' : r.tipo_act || 'Capacitación')}</span><b>${esc(r.nombre || 'Sin nombre')}</b>${autor}
     <p class="mute">${esc(r.cliente)} · ${esc(r.obra || '')} · ${fmtFecha(r.fecha)}</p>
-    <p>${parts.length} participantes · ${esc(r.duracion)} min · ${esc(r.relator || '—')}</p>
+    <p>${n} participantes · ${esc(r.duracion)} min · ${esc(r.relator || '—')}</p>
     ${r.observaciones ? `<p class="mute">${esc(r.observaciones)}</p>` : ''}
-    ${parts.length ? `<details class="mas"><summary>Ver participantes</summary>${parts.map(p => `<p>${esc(p.nombre)} <span class="mute">${esc([p.rut, p.cargo, p.email, p.fono].filter(Boolean).join(' · '))}${esPngFirma(p.firma) ? '' : p.firmo ? ' · firmó' : ''}</span>${esPngFirma(p.firma) ? ` <img class="firma-mini" alt="Firma de ${esc(p.nombre)}" src="${esc(p.firma)}">` : ''}</p>`).join('')}</details>` : ''}
+    ${n ? `<details class="mas" data-part="${esc(r.id)}"><summary>Ver participantes</summary><div class="part-lista"></div></details>` : ''}
+    ${enCurso ? `<p class="mute">La asistencia por QR sigue abierta.</p>${TC.puedeEditar(r, me) ? `<div class="acciones" style="margin-top:8px"><button class="btn ghost" data-a="cerrarBorrador" data-id="${esc(r.id)}">Cerrar asistencia</button></div>` : ''}` : ''}
   </div>`;
+}
+
+// Los participantes (con su firma) se piden al abrir "Ver participantes", no al cargar la lista.
+function itemParticipante(p){
+  return `<p>${esc(p.nombre)} <span class="mute">${esc([p.rut, p.cargo, p.email, p.fono].filter(Boolean).join(' · '))}${esPngFirma(p.firma) ? '' : p.firmo ? ' · firmó' : ''}</span>${esPngFirma(p.firma) ? ` <img class="firma-mini" alt="Firma de ${esc(p.nombre)}" src="${esc(p.firma)}">` : ''}</p>`;
+}
+async function cargarParticipantes(det){
+  const r = registros.find(x => x.id === det.dataset.part), cont = det.querySelector('.part-lista');
+  if (!r || !cont) return;
+  let filas = [];
+  if (r.nAsistencias > 0) {
+    cont.innerHTML = '<p class="mute">Cargando…</p>';
+    const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', r.id).order('created_at');
+    if (error) { cont.innerHTML = '<p class="mute">No se pudieron cargar los participantes.</p>'; return; }
+    filas = data || [];
+  }
+  cont.innerHTML = TC.participantesVista(filas, r.participantes).map(itemParticipante).join('');
 }
 
 function vistaRegistros(){
@@ -860,7 +963,7 @@ function vistaRegistros(){
     (filtro === 'mios' && r.autor === me?.id)
   );
   return `<div class="chips">${filtros.map(([k,l]) => `<button class="chip ${filtro === k ? 'on' : ''}" data-a="filtro" data-f="${k}">${l}</button>`).join('')}</div>
-    <div style="margin-top:12px">${lista.length ? lista.map(tarjeta).join('') : '<p class="mute">Sin registros todavía.</p>'}</div>`;
+    <div style="margin-top:12px">${lista.length ? TC.ordenarRegistros(lista).map(tarjeta).join('') : '<p class="mute">Sin registros todavía.</p>'}</div>`;
 }
 
 async function cargarFotos(){
@@ -894,7 +997,21 @@ async function cargarAccesos(){
 const acciones = {
   nav: b => { vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
   addPart: () => $('#partics').insertAdjacentHTML('beforeend', filaPart()),
-  delPart: b => b.closest('.part').remove(),
+  delPart: b => {
+    const row = b.closest('.part');
+    if (row.dataset.origen !== 'nuevo') quitados.add(row.dataset.id);   // se borra de la base al guardar
+    row.remove();
+  },
+  generarQR: b => generarQR(b),
+  ocultarQR: () => { $('#qr-box').hidden = true; detenerRefresco(); botonesAsistencia(); },
+  copiarQR: b => navigator.clipboard.writeText(b.dataset.url).then(() => toast('Enlace copiado'), () => toast('No se pudo copiar: selecciona el enlace y cópialo')),
+  actualizarPart: async b => {
+    b.disabled = true;
+    try { const n = await refrescarParticipantes(editandoId); toast(n ? `${n} participante(s) nuevo(s)` : 'No hay participantes nuevos'); }
+    catch(e){ toast('No se pudo actualizar la lista'); }
+    b.disabled = false;
+  },
+  cerrarBorrador: b => cerrarBorrador(b.dataset.id),
   firmar: b => firmarFila(b),
   guardar: b => guardar(b.dataset.t, b, editandoId),
   editar: b => editarRegistro(b.dataset.id),
@@ -916,6 +1033,7 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('input', e => {
+  const fp = e.target.closest('#partics .part'); if (fp) fp.dataset.sucia = '1';   // el refresco no pisa lo que se está escribiendo
   if (e.target.matches('[data-cli]')) {
     if (cliSel && norm(cliSel.nombre) !== norm(e.target.value)) { cliSel = null; infoCliente(); }
     buscarClientes(e.target);
@@ -943,6 +1061,9 @@ document.addEventListener('change', async e => {
   }
 });
 
+// 'toggle' no burbujea: se escucha en la fase de captura.
+document.addEventListener('toggle', e => { const d = e.target; if (d.matches && d.matches('details[data-part]') && d.open) cargarParticipantes(d); }, true);
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.sug').forEach(s => s.hidden = true);
 });
@@ -954,6 +1075,7 @@ sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); })
 
 /* ===================== Render ===================== */
 function render(){
+  detenerRefresco(); tokenQR = null; quitados = new Set(); partsViejo = false;   // la asistencia es del formulario que se cierra
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)));
   const vistas = {
     panel: vistaPanel,

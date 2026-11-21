@@ -141,6 +141,55 @@
     return repetido ? no('duplicado') : { ok: true };
   }
 
+  // ── QR de asistencia ──
+  const ASISTENCIA_URL = 'https://apps.grouptx.app/terreno-asistencia.html';
+  const enlaceAsistencia = (token) => ASISTENCIA_URL + '?t=' + encodeURIComponent(token);
+  // La base genera el token como 32 caracteres hexadecimales; cualquier otra cosa no merece ni una consulta.
+  const tokenValido = (t) => typeof t === 'string' && /^[a-f0-9]{32}$/i.test(t);
+  const esPngFirma = (f) => typeof f === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(f);
+
+  // Una actividad con la asistencia abierta es un borrador "en curso": no cuenta en las cifras del panel.
+  const esBorrador = (r) => !!(r && r.asistencia_abierta);
+  const sinBorradores = (registros) => (registros || []).filter((r) => !esBorrador(r));
+  const ordenarRegistros = (registros) => [...(registros || []).filter(esBorrador), ...sinBorradores(registros)];
+  // Las filas de la tabla mandan; sin ellas, los participantes que traía el registro viejo.
+  const totalParticipantes = (r) => (r && r.nAsistencias > 0 ? r.nAsistencias : ((r && r.participantes) || []).length);
+
+  // Qué hacer en la base con la lista que el PM tiene en pantalla.
+  // filas: { id, origenFila: 'tabla' | 'viejo' | 'nuevo', sucia, rut, nombre, cargo, email, fono, firma }
+  // 'viejo' = viene de datos.participantes de un registro anterior. Si el PM no toca esa lista se deja como está (así
+  // no se pierde el "firmó" sin imagen); si la toca, pasa entera a la tabla y datos.participantes deja de leerse.
+  function planParticipantes(filas, { quitados = [], viejo = false } = {}) {
+    const llena = (f) => !!(String(f.rut || '').trim() || String(f.nombre || '').trim());
+    const lista = filas || [];
+    if (viejo) {
+      const cambio = quitados.length > 0 || lista.some((f) => (f.origenFila === 'viejo' ? f.sucia : llena(f)));
+      return cambio ? { insertar: lista.filter(llena), actualizar: [], borrar: [], migrar: true }
+        : { insertar: [], actualizar: [], borrar: [], migrar: false };
+    }
+    return {
+      insertar: lista.filter((f) => f.origenFila === 'nuevo' && llena(f)),
+      actualizar: lista.filter((f) => f.origenFila === 'tabla' && f.sucia && llena(f)),
+      borrar: [...new Set([...quitados, ...lista.filter((f) => f.origenFila === 'tabla' && !llena(f)).map((f) => f.id)])],
+      migrar: false,
+    };
+  }
+
+  // Ids que llegaron en un refresco y todavía no están en pantalla (ni los quitó el PM).
+  const llegadasNuevas = (ids, enPantalla, quitados) => {
+    const ya = new Set([...(enPantalla || []), ...(quitados || [])]);
+    return (ids || []).filter((id) => !ya.has(id));
+  };
+
+  // Traduce la respuesta de rt_asistencia_agregar a algo que lea un participante. La base solo da dos textos
+  // (ya registrado / enlace no válido o cerrado) a propósito; todo lo demás es una falla de red o del servicio.
+  function mensajeAsistencia(error) {
+    const m = String((error && error.message) || '');
+    if (/ya estás registrado/i.test(m)) return { tipo: 'duplicado', texto: 'Ya estás registrado en esta actividad. No necesitas ingresar de nuevo.' };
+    if (/enlace no válido/i.test(m)) return { tipo: 'cerrado', texto: 'Este enlace ya no recibe registros: la actividad terminó, el enlace no es válido o se completó el cupo. Consulta con quien dirige la actividad.' };
+    return { tipo: 'red', texto: 'No pudimos enviar tus datos. Revisa tu conexión e inténtalo de nuevo; lo que escribiste sigue aquí.' };
+  }
+
   // ── Firma manuscrita ──
   // Los trazos son listas de puntos [[{x,y},…],…] en cualquier espacio de coordenadas (la ventana de firma
   // los guarda sin pixeles fijos para poder redibujarlos al girar la pantalla). Se recorta al contenido,
@@ -181,7 +230,7 @@
     return c.toDataURL('image/png');
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
