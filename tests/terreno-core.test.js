@@ -328,7 +328,7 @@ test('informeVisitaHtml: escapa el texto del usuario y no deja pasar imágenes q
 
 test('informeVisitaHtml: una foto con data URL inválido no se omite en silencio, falla con mensaje claro', () => {
   for (const mala of ['javascript:alert(1)', 'data:application/octet-stream;base64,AAAA', 'data:;base64,AAAA', '']) {
-    assert.throws(() => TC.informeVisitaHtml(regVisita(), { fotos: [JPG('a'), mala] }), /foto de la visita no se pudo incluir/);
+    assert.throws(() => TC.informeVisitaHtml(regVisita(), { fotos: [JPG('a'), mala] }), /fotografía 2 de la visita no se pudo incluir/i);
   }
 });
 
@@ -375,4 +375,14 @@ test('nombreInforme: archivo seguro con obra y fecha', () => {
   assert.equal(TC.nombreInforme({ obra: 'Edificio Alameda / Torre 2', fecha: '2026-11-18' }), 'Informe visita técnica - Edificio Alameda Torre 2 - 18-11-2026.pdf');
   assert.equal(TC.nombreInforme({ cliente: 'Cliente X', fecha: '2026-11-18' }), 'Informe visita técnica - Cliente X - 18-11-2026.pdf');
   assert.equal(TC.nombreInforme({}), 'Informe visita técnica.pdf');
+});
+
+test('tipoImagen: reconoce JPEG, PNG y WebP por sus bytes y rechaza HTML, texto o vacío', () => {
+  assert.equal(TC.tipoImagen([0xFF, 0xD8, 0xFF, 0xE0]), 'image/jpeg');
+  assert.equal(TC.tipoImagen([0x89, 0x50, 0x4E, 0x47, 0x0D]), 'image/png');
+  assert.equal(TC.tipoImagen([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]), 'image/webp');
+  const html = [...Buffer.from('<!DOCTYPE html><html>')];
+  const json = [...Buffer.from('{"error":"not found"}')];
+  const wav = [0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45];
+  for (const mal of [html, json, wav, [0xFF, 0xD8], [], null, undefined]) assert.equal(TC.tipoImagen(mal), null);
 });

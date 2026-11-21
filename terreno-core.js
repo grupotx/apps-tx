@@ -293,6 +293,15 @@
     + '.inf-firma b{display:block;margin-top:4px}.inf-firma span{display:block;font-size:11px;color:#555}'
     + '.inf-legal{margin-top:18px;font-size:9.5px;line-height:1.4;color:#555;text-align:justify;border-top:1px solid #ddd;padding-top:8px}';
 
+  // Tipo real de una imagen según sus primeros bytes (no se confía en el tipo que declare el servidor). null si no es JPEG, PNG ni WebP.
+  function tipoImagen(bytes) {
+    const b = bytes || [];
+    if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image/jpeg';
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return 'image/png';
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+    return null;
+  }
+
   // Las fotos van de a dos por fila; cada fila no se parte entre hojas.
   const filasDeFotos = (fotos) => { const filas = []; fotos.forEach((src, i) => { if (i % 2 === 0) filas.push([]); filas[filas.length - 1].push({ src, n: i + 1 }); }); return filas; };
 
@@ -303,7 +312,8 @@
     const cierre = cierreVisita(d.cierre) || {};
     const fotos = (o.fotos || []).filter((f) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f));
     // Una foto que no calza no se omite en silencio (el cliente notaría el hueco y el PM no): se corta la generación.
-    if (fotos.length !== (o.fotos || []).length) throw new Error('Una foto de la visita no se pudo incluir en el informe (formato no válido). Quítala y vuelve a elegirla.');
+    const mala = (o.fotos || []).findIndex((f) => !fotos.includes(f));
+    if (mala >= 0) throw new Error('La fotografía ' + (mala + 1) + ' de la visita no se pudo incluir en el informe (formato no válido). Quítala y vuelve a elegirla.');
     const celda = (k, v) => '<td>' + k + '</td><td>' + (v ? esc(v) : '&nbsp;') + '</td>';
     const seccion = (titulo, texto) => (texto && String(texto).trim() ? '<div class="inf-bloque"><h2>' + titulo + '</h2><p>' + esc(String(texto).trim()) + '</p></div>' : '');
     const firma = (png, rol, nombre, detalle) => '<div class="inf-firma"><div class="inf-firma-esp">' + (png ? '<img class="inf-firma-img" alt="Firma" src="' + png + '">' : '') + '</div>'
@@ -329,7 +339,7 @@
       + '<div class="inf-legal inf-bloque">' + esc(NOTA_LEGAL) + '</div></div>';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

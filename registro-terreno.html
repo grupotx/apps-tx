@@ -699,18 +699,27 @@ const blobADataUrl = blob => new Promise((res, rej) => { const fr = new FileRead
 
 // Foto ya subida: se lee igual que la ficha (Storage; si ya se archivó en Drive, por la función foto-archivada).
 // Ya viene reducida (1600 px, JPEG): se incrusta tal cual.
-// Una foto archivada puede volver sin tipo (o `application/octet-stream`): se fija a image/jpeg, que es como se subieron.
-const comoImagen = blob => /^image\//.test(blob.type) ? blob : new Blob([blob], { type: 'image/jpeg' });
-async function fotoGuardadaDataUrl(path){
+// El tipo lo decide el contenido, no lo que declare el servidor: un 404 o una página de error de Drive (a veces sin tipo)
+// no debe pasar por foto. Si los bytes no son de imagen, la foto se trata como no disponible y se avisa cuál.
+async function comoImagen(blob, n){
+  const tipo = TC.tipoImagen(new Uint8Array(await blob.slice(0, 12).arrayBuffer()));
+  if (!tipo) throw new Error(`La fotografía ${n} de la visita no está disponible (el archivo no es una imagen).`);
+  return blob.type === tipo ? blob : new Blob([blob], { type: tipo });
+}
+async function fotoGuardadaDataUrl(path, n){
   const { data } = await sb.storage.from(BUCKET).download(path);
-  if (data) return blobADataUrl(comoImagen(data));
-  if (window.fotoArchivada) { const u = await fotoArchivada(BUCKET, path); return blobADataUrl(comoImagen(await (await fetch(u)).blob())); }
-  throw new Error('no se pudo leer una foto de la visita');
+  if (data) return blobADataUrl(await comoImagen(data, n));
+  if (window.fotoArchivada) {
+    const u = await fotoArchivada(BUCKET, path), res = await fetch(u);
+    if (!res.ok) throw new Error(`La fotografía ${n} de la visita no está disponible (respuesta ${res.status}).`);
+    return blobADataUrl(await comoImagen(await res.blob(), n));
+  }
+  throw new Error(`La fotografía ${n} de la visita no está disponible.`);
 }
 
 // Fotos de la visita como data URL: las ya guardadas más las recién elegidas (reducidas igual que al subirlas).
 async function fotosComoDataUrl(rutas, archivos){
-  const guardadas = await Promise.all((rutas || []).map(fotoGuardadaDataUrl));
+  const guardadas = await Promise.all((rutas || []).map((p, i) => fotoGuardadaDataUrl(p, i + 1)));
   const nuevas = [];
   for (const f of archivos || []) nuevas.push(await blobADataUrl(await comprimir(f)));
   return [...guardadas, ...nuevas].slice(0, TC.MAX_FOTOS);
@@ -771,7 +780,7 @@ async function generarPdf(reg){
 }
 
 /* Vista previa: lo que ve el PM es el mismo `blob` que luego se adjuntará (Task 7 lee `ultimoInforme`). */
-let ultimoInforme = null;     // { blob, base64, nombre, huella } del último informe visto
+let ultimoInforme = null;     // { blob, base64, nombre, huella, registroId } del último informe visto (el envío valida registroId Y huella)
 let urlInforme = null;
 function cerrarInforme(){
   const ov = $('#informe-ov'); if (ov) ov.remove();
