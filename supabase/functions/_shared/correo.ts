@@ -23,7 +23,8 @@ export function validarSolicitud(b: unknown, ctx: ContextoVisita):
   const x = (b && typeof b === 'object' ? b : {}) as Record<string, unknown>;
   if (!correoValido(x.para)) return { ok: false, error: 'correo_invalido' };
   if (!correoValido(ctx.cierreEmail) || x.para.trim().toLowerCase() !== ctx.cierreEmail.trim().toLowerCase()) return { ok: false, error: 'correo_no_coincide' };
-  if (typeof x.asunto !== 'string' || !x.asunto.trim() || x.asunto.length > 200 || /[\r\n]/.test(x.asunto)) return { ok: false, error: 'solicitud_invalida' };
+  if (typeof x.asunto === 'string' && x.asunto.length > 200) return { ok: false, error: 'asunto_largo' };
+  if (typeof x.asunto !== 'string' || !x.asunto.trim() || /[\r\n]/.test(x.asunto)) return { ok: false, error: 'solicitud_invalida' };
   if (typeof x.cuerpo !== 'string' || !x.cuerpo.trim() || x.cuerpo.length > 20000) return { ok: false, error: 'solicitud_invalida' };
   if (!x.asunto.startsWith('Visita técnica ' + (ctx.obra || '') + ' – ')) return { ok: false, error: 'mensaje_no_corresponde' };
   if ((ctx.cliente && !x.cuerpo.includes(ctx.cliente)) || (ctx.obra && !x.cuerpo.includes(ctx.obra))) return { ok: false, error: 'mensaje_no_corresponde' };

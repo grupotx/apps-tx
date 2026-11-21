@@ -61,6 +61,6 @@ test('validarSolicitud: el mensaje debe corresponder a la visita (cliente y obra
 });
 
 test('validarSolicitud: topes de largo del asunto (200) y del cuerpo (20000)', () => {
-  assert.equal(validarSolicitud(ok({ asunto: 'Visita técnica Edificio Sur – ' + 'x'.repeat(200) }), ctx).ok, false);
+  assert.deepEqual(validarSolicitud(ok({ asunto: 'Visita técnica Edificio Sur – ' + 'x'.repeat(200) }), ctx), { ok: false, error: 'asunto_largo' });
   assert.equal(validarSolicitud(ok({ cuerpo: 'Ingevec Edificio Sur ' + 'x'.repeat(20000) }), ctx).ok, false);
 });

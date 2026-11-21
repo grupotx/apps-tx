@@ -484,3 +484,38 @@ test('lineaEnvio y botonEnvio ante un intento dudoso: dice que PUEDE haber salid
 test('textoErrorEnvio: mensaje_no_corresponde', () => {
   assert.match(TC.textoErrorEnvio('mensaje_no_corresponde'), /el mensaje no corresponde a esta visita/);
 });
+
+// ---- Salida del estado dudoso: el PM comprueba su bandeja y lo resuelve ----
+test('resolverDudoso "llego": deja el último intento como enviado conservando su fecha y anota quién y cuándo lo resolvió', () => {
+  const d = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'dudoso' }] };
+  const r = TC.resolverDudoso(d, 'llego', 'Luis', '2026-11-21T09:00:00Z');
+  assert.deepEqual(r.envios[0], { ...ENV, estado: 'enviada', resueltoPor: 'Luis', resueltoEn: '2026-11-21T09:00:00Z' });
+  assert.equal(d.envios[0].estado, 'dudoso');   // el original no se toca
+  assert.equal(TC.envioDudoso(r), false);
+  assert.equal(TC.botonEnvio(r), 'Reenviar copia');
+  assert.match(TC.lineaEnvio(r), /^Copia enviada a ana@obra\.cl el 20-11-2026 12:30 · confirmado por Luis/);
+});
+
+test('resolverDudoso "no_salio": retira el intento y el botón vuelve a ser el normal', () => {
+  const d = { cierre: { email: 'ana@obra.cl' }, envios: [{ ...ENV, estado: 'enviando' }] };
+  const r = TC.resolverDudoso(d, 'no_salio', 'Luis', '2026-11-21T09:00:00Z');
+  assert.equal(r.envios.length, 0);
+  assert.equal(TC.botonEnvio(r), 'Reintentar envío');
+  assert.equal(TC.lineaEnvio(r), '');
+});
+
+test('resolverDudoso: solo actúa sobre el ÚLTIMO intento y solo si está dudoso o en curso; con un envío ya confirmado no hace nada', () => {
+  const ok = { envios: [{ ...ENV, estado: 'enviada' }] };
+  assert.deepEqual(TC.resolverDudoso(ok, 'no_salio', 'Luis', 't'), ok);   // no se puede "des-enviar" un correo confirmado
+  assert.deepEqual(TC.resolverDudoso({}, 'llego', 'Luis', 't'), {});
+  const dos = { envios: [{ ...ENV, ts: '2026-11-19T10:00:00Z', estado: 'enviada' }, { ...ENV, estado: 'dudoso' }] };
+  const r = TC.resolverDudoso(dos, 'no_salio', 'Luis', 't');
+  assert.equal(r.envios.length, 1); assert.equal(r.envios[0].ts, '2026-11-19T10:00:00Z');
+  assert.throws(() => TC.resolverDudoso(dos, 'quizas', 'Luis', 't'), /resultado/);
+});
+
+test('textos de error: obra demasiado larga para el asunto y mensaje desfasado', () => {
+  assert.match(TC.textoErrorEnvio('asunto_largo'), /nombre de la obra es demasiado largo para el asunto/);
+  assert.match(TC.textoErrorEnvio('mensaje_no_corresponde'), /recarga la página o vuelve a guardar la visita/);
+  assert.equal(TC.envioNoSalio('asunto_largo'), true);
+});

@@ -924,6 +924,16 @@ async function anotarEnvio(r, datos){
   return true;
 }
 
+// El último intento quedó sin confirmar: el PM mira su bandeja (recibe copia) y dice si el correo llegó o no.
+async function resolverIntento(id, resultado){
+  const r = registros.find(x => x.id === id);
+  if (enviando || !r || !TC.puedeEditar(r, me) || !TC.envioDudoso(r._datos)) return;
+  if (resultado === 'no_salio' && !confirm('¿Confirmas que el correo NO llegó a tu bandeja? Después podrás enviarlo de nuevo.')) return;
+  const datos = TC.resolverDudoso(r._datos, resultado, me.nombre, new Date().toISOString());
+  toast(await anotarEnvio(r, datos) ? (resultado === 'llego' ? 'Listo: el envío quedó como enviado.' : 'Listo: el intento se retiró; puedes enviar de nuevo.') : 'No se pudo guardar el cambio. Inténtalo otra vez.');
+  if (vista === 'registros') render();
+}
+
 // Prepara el informe de una visita ya guardada, pide confirmación, lo envía y anota el envío en datos.envios.
 // Sirve para "Guardar y enviar" y para "Reintentar envío". El informe en memoria solo se reutiliza si es de esta visita
 // y de este mismo contenido (identidad + huella); si no, se genera de nuevo.
@@ -1255,6 +1265,7 @@ function tarjeta(r){
       ${r.fotos && r.fotos.length ? `<div class="fotos" data-fotos="${esc(r.id)}">${r.fotos.map(p => `<a target="_blank" rel="noopener" data-path="${esc(p)}"><img alt="Foto de la visita"></a>`).join('')}</div>` : ''}
       <div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button>${(TC.puedeEditar(r, me) && TC.botonEnvio(r._datos)) ? `<button class="btn ghost" data-a="enviarReg" data-id="${esc(r.id)}">${TC.botonEnvio(r._datos)}</button>` : ''}</div>
       ${TC.lineaEnvio(r._datos) ? `<p class="mute" data-envio="${esc(r.id)}">${esc(TC.lineaEnvio(r._datos))}</p>` : ''}
+      ${(TC.puedeEditar(r, me) && TC.envioDudoso(r._datos)) ? `<div class="acciones"><button class="btn ghost" data-a="confirmarLlego" data-id="${esc(r.id)}">Sí llegó</button><button class="btn ghost" data-a="confirmarNoSalio" data-id="${esc(r.id)}">No salió</button></div>` : ''}
       <div class="chips" style="margin-top:10px">${ESTADOS.map(e => `<button class="chip ${r.estado === e ? 'on' : ''}" data-a="estado" data-id="${esc(r.id)}" data-e="${e}">${e}</button>`).join('')}</div>
     </div>`;
   }
@@ -1361,6 +1372,8 @@ const acciones = {
     return guardar('visita', b, editandoId, true);
   },
   enviarReg: b => enviarRegistro(b.dataset.id),
+  confirmarLlego: b => resolverIntento(b.dataset.id, 'llego'),
+  confirmarNoSalio: b => resolverIntento(b.dataset.id, 'no_salio'),
   editar: b => editarRegistro(b.dataset.id),
   filtro: b => { filtro = b.dataset.f; render(); },
   estado: b => cambiarEstado(b.dataset.id, b.dataset.e),

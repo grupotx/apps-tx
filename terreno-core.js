@@ -364,7 +364,8 @@
     demasiado_grande: 'el informe supera los 8 MB que admite el envío por correo: reduce las fotos',
     solicitud_invalida: 'el pedido de envío está incompleto',
     archivo_invalido: 'el adjunto no es un PDF válido',
-    mensaje_no_corresponde: 'el mensaje no corresponde a esta visita (debe nombrar al cliente y la obra)',
+    mensaje_no_corresponde: 'el mensaje no corresponde a esta visita (debe nombrar al cliente y la obra); si cambió el cliente o la obra desde otra sesión, recarga la página o vuelve a guardar la visita',
+    asunto_largo: 'el nombre de la obra es demasiado largo para el asunto del correo: acórtalo',
     correo_invalido: 'el correo del cliente no es válido',
     correo_no_coincide: 'el correo del cliente guardado en la visita es otro: guarda la visita de nuevo',
     sin_acceso: 'tu cuenta no tiene acceso a Registro de Terreno',
@@ -383,10 +384,10 @@
 
   // Cambia el estado del intento `ts` ('enviando' | 'dudoso' | 'enviada'); con estado null lo quita (el correo seguro no salió).
   // Sin `estado` un envío cuenta como enviado (registros anteriores a esta versión).
-  const resolverEnvio = (datos, ts, estado) => ({ ...(datos || {}), envios: ((datos && datos.envios) || []).flatMap((e) => (e.ts !== ts ? [e] : estado ? [{ ...e, estado }] : [])) });
+  const resolverEnvio = (datos, ts, estado, extra) => ({ ...(datos || {}), envios: ((datos && datos.envios) || []).flatMap((e) => (e.ts !== ts ? [e] : estado ? [{ ...e, estado, ...(extra || {}) }] : [])) });
 
   // Errores tras los cuales el correo seguro NO salió (se rechazó antes de llegar al Apps Script). 'red' y 'apps_script' son dudosos.
-  const NO_SALIO = ['pendiente_publicar', 'sin_informe', 'sin_guardar', 'otra_visita', 'desactualizado', 'demasiado_grande', 'solicitud_invalida', 'archivo_invalido', 'correo_invalido', 'correo_no_coincide', 'mensaje_no_corresponde', 'sin_acceso', 'no_es_autor', 'registro_no_existe', 'no_autorizado'];
+  const NO_SALIO = ['pendiente_publicar', 'sin_informe', 'sin_guardar', 'otra_visita', 'desactualizado', 'demasiado_grande', 'solicitud_invalida', 'archivo_invalido', 'correo_invalido', 'correo_no_coincide', 'mensaje_no_corresponde', 'asunto_largo', 'sin_acceso', 'no_es_autor', 'registro_no_existe', 'no_autorizado'];
   const envioNoSalio = (codigo) => NO_SALIO.includes(codigo);
 
   const ultimoEnvio = (datos) => { const e = (datos && datos.envios) || []; return e.length ? e[e.length - 1] : null; };
@@ -407,8 +408,19 @@
     if (!envios.length) return '';
     const e = envios[envios.length - 1];
     if (envioDudoso(datos)) return 'Envío a ' + e.para + ' el ' + fechaHoraCL(e.ts) + ' sin confirmar: puede haber salido (revisa tu bandeja: recibirías una copia)';
+    const conf = e.resueltoPor ? ' · confirmado por ' + e.resueltoPor : '';
     const corregida = datos.editado && datos.editado.ts && new Date(datos.editado.ts) > new Date(e.ts);
-    return 'Copia enviada a ' + e.para + ' el ' + fechaHoraCL(e.ts) + (corregida ? ' · la visita se corrigió después del envío' : '');
+    return 'Copia enviada a ' + e.para + ' el ' + fechaHoraCL(e.ts) + conf + (corregida ? ' · la visita se corrigió después del envío' : '');
+  }
+
+  // El PM comprueba su bandeja (recibe copia de cada correo) y resuelve el último intento sin confirmar:
+  // 'llego' lo deja enviado (conserva su fecha; anota quién y cuándo lo confirmó); 'no_salio' lo retira. Solo actúa si el último
+  // intento está dudoso o en curso: un envío ya confirmado no se puede "des-enviar".
+  function resolverDudoso(datos, resultado, por, ts) {
+    if (resultado !== 'llego' && resultado !== 'no_salio') throw new Error('resultado inválido: ' + resultado);
+    if (!envioDudoso(datos)) return datos;
+    const e = ultimoEnvio(datos);
+    return resolverEnvio(datos, e.ts, resultado === 'llego' ? 'enviada' : null, resultado === 'llego' ? { resueltoPor: por, resueltoEn: ts } : null);
   }
 
   // Texto del botón de envío en la ficha, o null si la visita no tiene un correo de cliente válido.
@@ -419,7 +431,7 @@
     return (d.envios || []).length ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
