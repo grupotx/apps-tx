@@ -144,6 +144,8 @@ textarea{min-height:84px;resize:vertical}
 .fotos{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .fotos a{display:block;width:72px;height:72px;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--sunk)}
 .fotos img{width:100%;height:100%;object-fit:cover;display:block}
+.fotos a.sin-foto{display:flex;align-items:center;justify-content:center;padding:4px;text-align:center}
+.sin-foto-txt{font-size:11px;line-height:1.15;color:var(--mute)}
 details.mas summary{cursor:pointer;color:var(--brand);font-size:13px;font-weight:600;margin-top:8px}
 details.mas p{margin:6px 0}
 .acc{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
@@ -232,6 +234,7 @@ let refrescoQR = null;    // intervalo que trae los participantes que llegan por
 let refrescando = false;
 let quitados = new Set(); // ids de filas de la tabla que el PM quitó del formulario (se borran al guardar)
 let partsViejo = false;   // la lista del formulario viene de datos.participantes de un registro anterior
+let archivosElegidos = []; // todas las fotos que el PM eligió, incluso las que el cupo dejó fuera
 const urlCache = {};
 
 /* ===================== Utilidades ===================== */
@@ -586,13 +589,15 @@ const piesNuevos = () => [...document.querySelectorAll('#pies-nuevas .pie-foto')
 // El aviso del cupo se recalcula: tras quitar una foto, N no puede quedar mintiendo.
 function renderAvisoCupo(){
   const input = document.querySelector('#form [name="fotos"]'); if (!input) return;
-  if (!$('#aviso-cupo')) input.insertAdjacentHTML('afterend', '<p class="mute" id="aviso-cupo"></p>');
+  // Va debajo de las miniaturas ya guardadas, no entre el selector y ellas.
+  if (!$('#aviso-cupo')) ($('#fotos-guardadas') || input).insertAdjacentHTML('afterend', '<p class="mute" id="aviso-cupo"></p>');
   const p = $('#aviso-cupo'), n = fotosGuardadasVivas().length;
   p.hidden = !n;
   p.textContent = `Ya tiene ${n} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).`;
 }
 
-// Tras quitar: renumera las guardadas, recalcula el aviso y los pies de las nuevas.
+// Tras quitar: renumera las guardadas, recalcula el aviso y los pies de las nuevas, y
+// recupera las que el cupo había dejado fuera (devuelve cuántas volvieron a entrar).
 function refrescarFotosGuardadas(){
   document.querySelectorAll('#form .fg').forEach((d, i) => {
     const l = d.querySelector('label'), sm = d.querySelector('small'), img = d.querySelector('img');
@@ -601,7 +606,25 @@ function refrescarFotosGuardadas(){
     if (img) img.alt = `Foto ${i + 1} ya guardada`;
   });
   renderAvisoCupo();
+  const recuperadas = aplicarCupoArchivos(document.querySelector('#form [name="fotos"]'), false);
   renderPiesNuevos();
+  return recuperadas;
+}
+
+// Deja en el selector tantas de las fotos elegidas como quepan ahora. La lista completa se
+// recuerda en archivosElegidos porque el navegador no permite reabrir el selector con lo que
+// ya se eligió: si no, quitar una foto guardada obligaría a elegir los archivos otra vez.
+// Devuelve cuántas volvieron a entrar, para que quien quitó la foto lo sepa en un solo aviso.
+function aplicarCupoArchivos(input, avisar){
+  if (!input || !archivosElegidos.length) return 0;
+  const { admitidas, sobran } = TC.cupoFotos(fotosGuardadasVivas().length, archivosElegidos.length);
+  const antes = input.files.length;
+  if (antes === admitidas) return 0;
+  const dt = new DataTransfer();
+  archivosElegidos.slice(0, admitidas).forEach(x => dt.items.add(x));
+  input.files = dt.files;
+  if (avisar && sobran) toast(`Máximo ${TC.MAX_FOTOS} fotos por ${input.closest('#form').dataset.kind === 'adherencia' ? 'ensayo' : 'visita'}: se tomaron las primeras ${admitidas}.`);
+  return Math.max(0, admitidas - antes);
 }
 
 const leerPies = () => [...document.querySelectorAll('#form .pie-foto')].map(i => i.value.trim());
@@ -1621,7 +1644,20 @@ async function cargarFotos(){
     await Promise.all(faltan.filter(p => !urlCache[p] && window.fotoArchivada)
       .map(p => fotoArchivada(BUCKET, p).then(u => { urlCache[p] = u; }).catch(() => {})));
   }
-  links.forEach(a => { const u = urlCache[a.dataset.path]; if (u) { a.href = u; a.querySelector('img').src = u; } });
+  links.forEach(a => {
+    const u = urlCache[a.dataset.path], img = a.querySelector('img');
+    if (!u || !img) return marcarSinFoto(a);
+    img.onerror = () => marcarSinFoto(a);
+    a.href = u; img.src = u;
+  });
+}
+
+// Una foto que ya no está en Supabase ni en Drive dejaba un cuadrado gris sin explicación.
+function marcarSinFoto(a){
+  if (a.classList.contains('sin-foto')) return;
+  a.classList.add('sin-foto');
+  a.removeAttribute('href'); a.removeAttribute('target');
+  a.innerHTML = '<span class="sin-foto-txt">Imagen no disponible</span>';
 }
 
 /* ===================== Accesos (solo administradores) ===================== */
@@ -1668,8 +1704,9 @@ const acciones = {
   quitarFoto: b => {   // reversible hasta guardar: no pide confirmación
     const fila = b.closest('.fg'); if (!fila) return;
     fila.remove();
-    refrescarFotosGuardadas();
-    toast('Se quitará al guardar. Si cancelas, la foto queda.');
+    const recuperadas = refrescarFotosGuardadas();
+    toast('Se quitará al guardar. Si cancelas, la foto queda.'
+      + (recuperadas ? ` Volvieron a entrar ${recuperadas} foto(s) que habías elegido.` : ''));
   },
   mpaAuto: b => { b.closest('.ens-fila').dataset.manual = ''; actualizarEnsayo(); },
   conclusionBase: () => { $('#conclusion').dataset.editada = ''; actualizarEnsayo(); },
@@ -1734,13 +1771,8 @@ document.addEventListener('change', async e => {
     return;
   }
   if (t.matches('#form [name="fotos"]')) {   // el tope de fotos se avisa al elegirlas, no al guardar
-    const { admitidas, sobran } = TC.cupoFotos(fotosGuardadasVivas().length, t.files.length);
-    if (sobran) {
-      const dt = new DataTransfer();
-      [...t.files].slice(0, admitidas).forEach(f => dt.items.add(f));
-      t.files = dt.files;
-      toast(`Máximo ${TC.MAX_FOTOS} fotos por ${t.closest('#form').dataset.kind === 'adherencia' ? 'ensayo' : 'visita'}: se tomaron las primeras ${admitidas}.`);
-    }
+    archivosElegidos = [...t.files];
+    aplicarCupoArchivos(t, true);
     renderPiesNuevos();
     return;
   }
@@ -1769,7 +1801,7 @@ sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); })
 /* ===================== Render ===================== */
 function render(){
   cerrarInforme();   // la vista previa (blob y capa) no sobrevive a una pantalla nueva
-  detenerRefresco(); tokenQR = null; quitados = new Set(); partsViejo = false;   // la asistencia es del formulario que se cierra
+  detenerRefresco(); tokenQR = null; quitados = new Set(); partsViejo = false; archivosElegidos = [];   // la asistencia es del formulario que se cierra
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)));
   const vistas = {
     panel: vistaPanel,
