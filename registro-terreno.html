@@ -574,9 +574,14 @@ function filaFotoGuardadaHtml(path, i, pie){
     + '<button type="button" class="btn ghost" data-a="quitarFoto">Quitar</button></div>';
 }
 
-// Las rutas guardadas que siguen en el formulario, y las que el PM quitó (se aplican al guardar).
-const fotosGuardadasVivas = () => [...document.querySelectorAll('#form .fg[data-path]')].map(d => d.dataset.path);
-const fotosQuitadas = (previo) => { const vivas = new Set(fotosGuardadasVivas()); return ((previo && previo.fotos) || []).filter(p => !vivas.has(p)); };
+// Las fotos guardadas que siguen en el formulario, cada una con su pie, en una sola pasada:
+// leer las rutas y los pies por separado permitiría que quedaran desalineados.
+const fotosGuardadasConPie = () => [...document.querySelectorAll('#form .fg[data-path]')].map(d => {
+  const pie = d.querySelector('.pie-foto');
+  return { ruta: d.dataset.path, pie: pie ? pie.value : '' };
+});
+const fotosGuardadasVivas = () => fotosGuardadasConPie().map(x => x.ruta);
+const piesNuevos = () => [...document.querySelectorAll('#pies-nuevas .pie-foto')].map(i => i.value);
 
 // El aviso del cupo se recalcula: tras quitar una foto, N no puede quedar mintiendo.
 function renderAvisoCupo(){
@@ -646,7 +651,7 @@ function cargarEnsayoEnFormulario(r){
   $('#act-titulo').textContent = 'Corregir ensayo de adherencia';
   $('#ens-filas').innerHTML = (r.filas || []).map(f => filaEnsayoHtml(f)).join('');
   $('#conclusion').dataset.editada = (r.conclusion || '') === TC.conclusionBase(r.filas || []) ? '' : '1';
-  $('#pies-guardadas').innerHTML = (r.fotos || []).map((p, i) => filaFotoGuardadaHtml(p, i, (r.pies || [])[i] || '')).join('');
+  $('#pies-guardadas').innerHTML = [...new Set(r.fotos || [])].map((p, i) => filaFotoGuardadaHtml(p, i, (r.pies || [])[i] || '')).join('');   // sin repetir: una fila por ruta
   renderAvisoCupo();
   cargarFotos();
   actualizarEnsayo();
@@ -810,7 +815,10 @@ async function persistir(kind, d, registroId, btn){
   }
 
   const previo = registroId ? registros.find(x => x.id === registroId) : null;
-  const quitadas = fotosQuitadas(previo);   // se leen del DOM ahora, antes de subir las nuevas
+  // Una sola lectura del formulario, ANTES de subir nada: las fotos que sobreviven con su pie, los
+  // pies de las nuevas y la tabla del ensayo. Entre medio hay un await por cada foto que se sube;
+  // leer unas antes y otras después dejaría un pie describiendo la imagen equivocada.
+  const guardadas = fotosGuardadasConPie(), piesDeLasNuevas = piesNuevos(), filasEns = kind === 'adherencia' ? leerFilasEnsayo() : null;
   if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
   const id = registroId || crypto.randomUUID();
   const fotos = [];
@@ -825,6 +833,10 @@ async function persistir(kind, d, registroId, btn){
     }
   }
 
+  // Lo que queda tras la corrección: las guardadas que sobrevivieron (con su pie) más las recién
+  // subidas (con el suyo). Una sola regla decide las fotos y sus pies, así que no pueden divergir.
+  const fotosDeLaCorreccion = TC.fotosYPies(guardadas, fotos.map((ruta, i) => ({ ruta, pie: piesDeLasNuevas[i] })));
+
   const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
   if (kind === 'visita') {
     Object.assign(datos, datosVisita(d));
@@ -832,7 +844,7 @@ async function persistir(kind, d, registroId, btn){
     const cierre = cierreDeCampos(d);
     if (cierre) datos.cierre = cierre; else delete datos.cierre;
   } else if (kind === 'adherencia') {
-    Object.assign(datos, TC.datosEnsayo(d, leerFilasEnsayo(), leerPies()));
+    Object.assign(datos, TC.datosEnsayo(d, filasEns, fotosDeLaCorreccion.pies));
   } else {
     // Los participantes ya no viajan en datos: viven en rt_asistencias.
     Object.assign(datos, {
@@ -856,7 +868,7 @@ async function persistir(kind, d, registroId, btn){
     // autor no se toca; las fotos previas se suman a las nuevas menos las que el PM quitó.
     const ahora = new Date().toISOString();
     const datosFinal = TC.esBorrador(previo) ? datos : TC.marcarEdicion(datos, me.nombre, ahora);
-    const fotosFinal = TC.fotosEditadas(previo.fotos, fotos, quitadas);
+    const fotosFinal = esInforme(kind) ? fotosDeLaCorreccion.fotos : TC.fotosEditadas(previo.fotos, fotos);
     const { data, error } = await sb.from('registros').update({ ...fila, datos: datosFinal, fotos: fotosFinal, updated_at: ahora }).eq('id', registroId).select('id');
     if (error) throw error;
     if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
@@ -885,6 +897,10 @@ async function guardar(kind, btn, registroId, enviar){
   if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
+  // Subir las fotos toma segundos: mientras tanto, nada que cambie la lista queda al alcance del dedo.
+  const bloqueados = [...document.querySelectorAll('#form [data-a="quitarFoto"], #form [name="fotos"], #form [data-a="guardar"], #form [data-a="guardarEnviar"]')];
+  bloqueados.forEach(el => { el.disabled = true; });
+  const desbloquear = () => bloqueados.forEach(el => { el.disabled = false; });
   let guardadoId = null;
   try {
     const eraBorrador = TC.esBorrador(registros.find(x => x.id === registroId));
@@ -906,7 +922,7 @@ async function guardar(kind, btn, registroId, enviar){
     guardadoId = id;
     if (!enviar) cargar();
   } catch(e){
-    btn.disabled = false; btn.textContent = txt;
+    desbloquear(); btn.disabled = false; btn.textContent = txt;
     if (e && e.registroGuardado) return toast('La actividad quedó guardada, pero no se pudo guardar la lista de participantes: ' + (e.message || e.code || 'error') + '. Toca Guardar otra vez para completarla.');
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
@@ -1364,7 +1380,7 @@ async function editarRegistro(id){
   } else {
     f.querySelector('h2').textContent = 'Corregir visita por reclamo';
     refrescarFirmasCierre();
-    f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<div id="fotos-guardadas">${r.fotos.map((p, i) => filaFotoGuardadaHtml(p, i, null)).join('')}</div>`);
+    f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<div id="fotos-guardadas">${[...new Set(r.fotos)].map((p, i) => filaFotoGuardadaHtml(p, i, null)).join('')}</div>`);
     renderAvisoCupo();
     cargarFotos();
   }

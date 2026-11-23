@@ -202,11 +202,22 @@
   // Huella de la corrección: quién y cuándo. No muta los datos originales.
   const marcarEdicion = (datos, por, ts) => ({ ...(datos || {}), editado: { ts, por } });
 
-  // Fotos de una visita al corregirla: las que ya tenía más las nuevas, sin repetir,
-  // menos las que se quitaron en el formulario (quitar gana sobre volver a subir).
-  const fotosEditadas = (existentes, nuevas, quitadas) => {
-    const fuera = new Set(quitadas || []);
-    return [...new Set([...(existentes || []), ...(nuevas || [])])].filter((p) => !fuera.has(p));
+  // Fotos de una actividad al corregirla: las que ya tenía más las nuevas, sin repetir.
+  // Al corregir una visita o un ensayo las decide fotosYPies, que además alinea los pies.
+  const fotosEditadas = (existentes, nuevas) => [...new Set([...(existentes || []), ...(nuevas || [])])];
+
+  // Fotos y pies de una corrección, a partir de UNA sola lectura del formulario: cada foto
+  // guardada viaja con su propio pie y las nuevas se agregan al final con el suyo, así que
+  // pies[i] siempre describe a fotos[i]. Una ruta repetida se conserva una vez, con el pie de
+  // su primera aparición, sin correr a las que siguen.
+  const fotosYPies = (guardadas, nuevas) => {
+    const fotos = [], pies = [], vistas = new Set();
+    [...(guardadas || []), ...(nuevas || [])].forEach((x) => {
+      const ruta = x && x.ruta;
+      if (!ruta || vistas.has(ruta)) return;
+      vistas.add(ruta); fotos.push(ruta); pies.push(String((x && x.pie) || '').trim());
+    });
+    return { fotos, pies };
   };
 
   // ── Validación del envío por QR (la RPC de la base refleja estas reglas) ──
@@ -601,7 +612,7 @@
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, fotosYPies, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

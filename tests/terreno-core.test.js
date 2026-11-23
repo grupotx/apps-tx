@@ -176,16 +176,20 @@ test('fotosEditadas: conserva las existentes, agrega las nuevas y no duplica', (
   assert.deepEqual(TC.fotosEditadas(null, undefined), []);
 });
 
-test('fotosEditadas: las quitadas salen del resultado', () => {
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/2.jpg', 'a/3.jpg'], [], ['a/2.jpg']), ['a/1.jpg', 'a/3.jpg']);
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/2.jpg'], ['a/1.jpg']), ['a/2.jpg']);
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/2.jpg'], [], ['a/1.jpg', 'a/2.jpg']), []);
+
+test('fotosYPies: cada pie viaja con su foto, también después de quitar una del medio', () => {
+  const guardadas = [{ ruta: 'a/1.jpg', pie: 'pie 1' }, { ruta: 'a/3.jpg', pie: 'pie 3' }];
+  assert.deepEqual(TC.fotosYPies(guardadas, [{ ruta: 'a/4.jpg', pie: 'nueva' }]),
+    { fotos: ['a/1.jpg', 'a/3.jpg', 'a/4.jpg'], pies: ['pie 1', 'pie 3', 'nueva'] });
+  assert.deepEqual(TC.fotosYPies([], []), { fotos: [], pies: [] });
+  assert.deepEqual(TC.fotosYPies(null, undefined), { fotos: [], pies: [] });
 });
 
-test('fotosEditadas: quitar una ruta la saca aunque venga repetida o entre las nuevas', () => {
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/1.jpg', 'a/2.jpg'], [], ['a/1.jpg']), ['a/2.jpg']);
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/1.jpg'], ['a/1.jpg']), []);
-  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/2.jpg'], null), ['a/1.jpg', 'a/2.jpg']);
+test('fotosYPies: una ruta repetida se conserva una vez, con su pie, sin correr los demás', () => {
+  const guardadas = [{ ruta: 'a/1.jpg', pie: 'pie 1' }, { ruta: 'a/1.jpg', pie: 'repetida' }, { ruta: 'a/2.jpg', pie: 'pie 2' }];
+  assert.deepEqual(TC.fotosYPies(guardadas, []), { fotos: ['a/1.jpg', 'a/2.jpg'], pies: ['pie 1', 'pie 2'] });
+  assert.deepEqual(TC.fotosYPies([{ ruta: 'a/1.jpg', pie: '  con espacios  ' }], []), { fotos: ['a/1.jpg'], pies: ['con espacios'] });
+  assert.deepEqual(TC.fotosYPies([{ ruta: '', pie: 'x' }, { ruta: 'a/2.jpg' }], []), { fotos: ['a/2.jpg'], pies: [''] });
 });
 
 // ── QR de asistencia: enlace, borradores y participantes en la tabla ──
