@@ -202,8 +202,12 @@
   // Huella de la corrección: quién y cuándo. No muta los datos originales.
   const marcarEdicion = (datos, por, ts) => ({ ...(datos || {}), editado: { ts, por } });
 
-  // Fotos de una visita al corregirla: las que ya tenía más las nuevas, sin repetir.
-  const fotosEditadas = (existentes, nuevas) => [...new Set([...(existentes || []), ...(nuevas || [])])];
+  // Fotos de una visita al corregirla: las que ya tenía más las nuevas, sin repetir,
+  // menos las que se quitaron en el formulario (quitar gana sobre volver a subir).
+  const fotosEditadas = (existentes, nuevas, quitadas) => {
+    const fuera = new Set(quitadas || []);
+    return [...new Set([...(existentes || []), ...(nuevas || [])])].filter((p) => !fuera.has(p));
+  };
 
   // ── Validación del envío por QR (la RPC de la base refleja estas reglas) ──
   const MAX_NOMBRE = 120, MAX_FIRMA = 60 * 1024, MAX_ACTIVIDAD = 80;

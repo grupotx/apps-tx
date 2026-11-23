@@ -176,6 +176,18 @@ test('fotosEditadas: conserva las existentes, agrega las nuevas y no duplica', (
   assert.deepEqual(TC.fotosEditadas(null, undefined), []);
 });
 
+test('fotosEditadas: las quitadas salen del resultado', () => {
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/2.jpg', 'a/3.jpg'], [], ['a/2.jpg']), ['a/1.jpg', 'a/3.jpg']);
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/2.jpg'], ['a/1.jpg']), ['a/2.jpg']);
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/2.jpg'], [], ['a/1.jpg', 'a/2.jpg']), []);
+});
+
+test('fotosEditadas: quitar una ruta la saca aunque venga repetida o entre las nuevas', () => {
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg', 'a/1.jpg', 'a/2.jpg'], [], ['a/1.jpg']), ['a/2.jpg']);
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/1.jpg'], ['a/1.jpg']), []);
+  assert.deepEqual(TC.fotosEditadas(['a/1.jpg'], ['a/2.jpg'], null), ['a/1.jpg', 'a/2.jpg']);
+});
+
 // ── QR de asistencia: enlace, borradores y participantes en la tabla ──
 test('enlaceAsistencia: apunta a la página pública con el token en ?t=', () => {
   assert.equal(TC.enlaceAsistencia('abc123'), 'https://apps.grouptx.app/terreno-asistencia.html?t=abc123');
