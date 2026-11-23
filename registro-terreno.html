@@ -98,6 +98,9 @@ textarea{min-height:84px;resize:vertical}
 .ens-apoyo p{margin:4px 0 0}
 .ens-apoyo .aviso{margin:6px 0 0}
 .pies label{margin-top:10px}
+.fg{align-items:center;margin-top:10px}
+.fg-txt{flex:1 1 160px;min-width:0}
+.fg-txt label{margin-top:0}
 .informe-ov{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px}
 .informe-dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(900px,100%);max-height:100%;display:flex;flex-direction:column;overflow:auto}
 .informe-dlg h2{margin:0 0 2px}
@@ -560,6 +563,42 @@ const leerFilasEnsayo = () => [...document.querySelectorAll('#ens-filas .ens-fil
   ancho: row.querySelector('.e-ancho').value, alto: row.querySelector('.e-alto').value,
   mpa: row.dataset.manual ? row.querySelector('.e-mpa').value : '', falla: row.querySelector('.e-falla').value
 }));
+// Una foto ya guardada, dentro del formulario: miniatura, pie (solo en el ensayo) y «Quitar».
+// La miniatura reusa el marcado de .fotos para que cargarFotos() le resuelva la URL firmada,
+// y el data-path de la fila es la única fuente de las rutas que sobreviven.
+function filaFotoGuardadaHtml(path, i, pie){
+  return `<div class="fotos fg" data-path="${esc(path)}">`
+    + `<a target="_blank" rel="noopener" data-path="${esc(path)}"><img alt="Foto ${i + 1} ya guardada"></a>`
+    + `<div class="fg-txt">${pie == null ? `<small class="mute">Imagen ${i + 1} (ya guardada)</small>`
+      : `<label>Pie de la imagen ${i + 1} (ya guardada)</label><input class="pie-foto" value="${esc(pie)}">`}</div>`
+    + '<button type="button" class="btn ghost" data-a="quitarFoto">Quitar</button></div>';
+}
+
+// Las rutas guardadas que siguen en el formulario, y las que el PM quitó (se aplican al guardar).
+const fotosGuardadasVivas = () => [...document.querySelectorAll('#form .fg[data-path]')].map(d => d.dataset.path);
+const fotosQuitadas = (previo) => { const vivas = new Set(fotosGuardadasVivas()); return ((previo && previo.fotos) || []).filter(p => !vivas.has(p)); };
+
+// El aviso del cupo se recalcula: tras quitar una foto, N no puede quedar mintiendo.
+function renderAvisoCupo(){
+  const input = document.querySelector('#form [name="fotos"]'); if (!input) return;
+  if (!$('#aviso-cupo')) input.insertAdjacentHTML('afterend', '<p class="mute" id="aviso-cupo"></p>');
+  const p = $('#aviso-cupo'), n = fotosGuardadasVivas().length;
+  p.hidden = !n;
+  p.textContent = `Ya tiene ${n} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).`;
+}
+
+// Tras quitar: renumera las guardadas, recalcula el aviso y los pies de las nuevas.
+function refrescarFotosGuardadas(){
+  document.querySelectorAll('#form .fg').forEach((d, i) => {
+    const l = d.querySelector('label'), sm = d.querySelector('small'), img = d.querySelector('img');
+    if (l) l.textContent = `Pie de la imagen ${i + 1} (ya guardada)`;
+    if (sm) sm.textContent = `Imagen ${i + 1} (ya guardada)`;
+    if (img) img.alt = `Foto ${i + 1} ya guardada`;
+  });
+  renderAvisoCupo();
+  renderPiesNuevos();
+}
+
 const leerPies = () => [...document.querySelectorAll('#form .pie-foto')].map(i => i.value.trim());
 
 // Recalcula lo que depende de la tabla: numeración, MPa calculado, indicadores de apoyo (solo pantalla) y texto base de la conclusión.
@@ -607,8 +646,9 @@ function cargarEnsayoEnFormulario(r){
   $('#act-titulo').textContent = 'Corregir ensayo de adherencia';
   $('#ens-filas').innerHTML = (r.filas || []).map(f => filaEnsayoHtml(f)).join('');
   $('#conclusion').dataset.editada = (r.conclusion || '') === TC.conclusionBase(r.filas || []) ? '' : '1';
-  $('#pies-guardadas').innerHTML = (r.fotos || []).map((p, i) => `<label>Pie de la imagen ${i + 1} (ya guardada)</label><input class="pie-foto" value="${esc((r.pies || [])[i] || '')}">`).join('');
-  if ((r.fotos || []).length) document.querySelector('#form [name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).</p>`);
+  $('#pies-guardadas').innerHTML = (r.fotos || []).map((p, i) => filaFotoGuardadaHtml(p, i, (r.pies || [])[i] || '')).join('');
+  renderAvisoCupo();
+  cargarFotos();
   actualizarEnsayo();
 }
 
@@ -770,6 +810,7 @@ async function persistir(kind, d, registroId, btn){
   }
 
   const previo = registroId ? registros.find(x => x.id === registroId) : null;
+  const quitadas = fotosQuitadas(previo);   // se leen del DOM ahora, antes de subir las nuevas
   if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
   const id = registroId || crypto.randomUUID();
   const fotos = [];
@@ -812,10 +853,10 @@ async function persistir(kind, d, registroId, btn){
     if (plan) await aplicarPlan(registroId, plan);
     if (plan && plan.migrar) delete datos.participantes;
     // Corrección: huella de quién y cuándo (un borrador que aún no se ha cerrado no es una corrección);
-    // autor y fotos previas no se tocan (se suman las nuevas).
+    // autor no se toca; las fotos previas se suman a las nuevas menos las que el PM quitó.
     const ahora = new Date().toISOString();
     const datosFinal = TC.esBorrador(previo) ? datos : TC.marcarEdicion(datos, me.nombre, ahora);
-    const fotosFinal = TC.fotosEditadas(previo.fotos, fotos);
+    const fotosFinal = TC.fotosEditadas(previo.fotos, fotos, quitadas);
     const { data, error } = await sb.from('registros').update({ ...fila, datos: datosFinal, fotos: fotosFinal, updated_at: ahora }).eq('id', registroId).select('id');
     if (error) throw error;
     if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
@@ -840,7 +881,7 @@ async function persistir(kind, d, registroId, btn){
 async function guardar(kind, btn, registroId, enviar){
   const d = leerCampos();
   if (!esInforme(kind)) kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
-  const falta = validarCampos(kind, d, esInforme(kind) && registroId ? (registros.find(x => x.id === registroId)?.fotos || []).length : 0);
+  const falta = validarCampos(kind, d, esInforme(kind) && registroId ? fotosGuardadasVivas().length : 0);
   if (falta) return toast(falta);
 
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
@@ -1323,7 +1364,9 @@ async function editarRegistro(id){
   } else {
     f.querySelector('h2').textContent = 'Corregir visita por reclamo';
     refrescarFirmasCierre();
-    if (r.fotos.length) f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<p class="mute">Ya tiene ${r.fotos.length} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).</p>`);
+    f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<div id="fotos-guardadas">${r.fotos.map((p, i) => filaFotoGuardadaHtml(p, i, null)).join('')}</div>`);
+    renderAvisoCupo();
+    cargarFotos();
   }
   f.querySelector('[data-a="guardar"]').textContent = 'Guardar cambios';
   const cancelar = f.querySelector('.acciones [data-a="nav"]'); if (cancelar) cancelar.dataset.v = 'registros';
@@ -1606,14 +1649,19 @@ const acciones = {
   firmarCierre: b => firmarCierre(b),
   addFilaEns: () => { $('#ens-filas').insertAdjacentHTML('beforeend', filaEnsayoHtml()); actualizarEnsayo(); },
   delFilaEns: b => { b.closest('.ens-fila').remove(); actualizarEnsayo(); },
+  quitarFoto: b => {   // reversible hasta guardar: no pide confirmación
+    const fila = b.closest('.fg'); if (!fila) return;
+    fila.remove();
+    refrescarFotosGuardadas();
+    toast('Se quitará al guardar. Si cancelas, la foto queda.');
+  },
   mpaAuto: b => { b.closest('.ens-fila').dataset.manual = ''; actualizarEnsayo(); },
   conclusionBase: () => { $('#conclusion').dataset.editada = ''; actualizarEnsayo(); },
   crearEnsayo: b => crearEnsayoDeVisita(b.dataset.id),
   verInforme: b => verInforme(() => {
     const kind = $('#form').dataset.kind, d = leerCampos(), falta = validarCampos(kind, d);
     if (falta) throw new Error(falta);
-    const previo = editandoId ? registros.find(x => x.id === editandoId) : null;
-    return { reg: regDesdeFormulario(kind), rutas: previo ? previo.fotos || [] : [], archivos: d.fotos };
+    return { reg: regDesdeFormulario(kind), rutas: fotosGuardadasVivas(), archivos: d.fotos };
   }, b),
   verInformeReg: b => verInformeRegistro(b),
   cerrarInforme: () => cerrarInforme(),
@@ -1670,8 +1718,7 @@ document.addEventListener('change', async e => {
     return;
   }
   if (t.matches('#form [name="fotos"]')) {   // el tope de fotos se avisa al elegirlas, no al guardar
-    const previo = editandoId ? registros.find(x => x.id === editandoId) : null;
-    const { admitidas, sobran } = TC.cupoFotos(previo ? (previo.fotos || []).length : 0, t.files.length);
+    const { admitidas, sobran } = TC.cupoFotos(fotosGuardadasVivas().length, t.files.length);
     if (sobran) {
       const dt = new DataTransfer();
       [...t.files].slice(0, admitidas).forEach(f => dt.items.add(f));
