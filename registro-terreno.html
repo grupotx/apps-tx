@@ -451,7 +451,7 @@ function formVisita(){
       <div><label>¿Requiere ensayo en laboratorio?</label><select name="lab"><option>No</option><option>Sí</option></select></div>
       <div><label>Estado</label><select name="estado">${ESTADOS.map(e => `<option>${e}</option>`).join('')}</select></div>
     </div>
-    <label>Fotos (máximo ${TC.MAX_FOTOS} por visita)</label>
+    <label>Fotos (máximo ${TC.topeFotos('visita')} por visita)</label>
     <input type="file" name="fotos" accept="image/*" multiple capture="environment">
     <div class="cierre">
       <h3>Cierre con el cliente</h3>
@@ -535,7 +535,7 @@ function formEnsayo(){
     <button type="button" class="btn ghost" data-a="addFilaEns">+ Agregar extracción</button>
     <div class="ens-apoyo" id="ens-apoyo" aria-live="polite"></div>
     <h3>Imágenes</h3>
-    <label style="margin-top:0">Fotos (máximo ${TC.MAX_FOTOS} por ensayo)</label>
+    <label style="margin-top:0">Fotos (máximo ${TC.topeFotos('adherencia')} por ensayo)</label>
     <input type="file" name="fotos" accept="image/*" multiple capture="environment">
     <div class="pies"><div id="pies-guardadas"></div><div id="pies-nuevas"></div></div>
     <h3>Conclusión</h3>
@@ -593,7 +593,8 @@ function renderAvisoCupo(){
   if (!$('#aviso-cupo')) ($('#fotos-guardadas') || input).insertAdjacentHTML('afterend', '<p class="mute" id="aviso-cupo"></p>');
   const p = $('#aviso-cupo'), n = fotosGuardadasVivas().length;
   p.hidden = !n;
-  p.textContent = `Ya tiene ${n} foto(s); las que elijas se agregan (máximo ${TC.MAX_FOTOS} en total).`;
+  const tope = TC.topeFotos(input.closest('#form').dataset.kind);
+  p.textContent = `Ya tiene ${n} foto(s); las que elijas se agregan (máximo ${tope} en total).`;
 }
 
 // Tras quitar: renumera las guardadas, recalcula el aviso y los pies de las nuevas, y
@@ -617,13 +618,14 @@ function refrescarFotosGuardadas(){
 // Devuelve cuántas volvieron a entrar, para que quien quitó la foto lo sepa en un solo aviso.
 function aplicarCupoArchivos(input, avisar){
   if (!input || !archivosElegidos.length) return 0;
-  const { admitidas, sobran } = TC.cupoFotos(fotosGuardadasVivas().length, archivosElegidos.length);
+  const kind = input.closest('#form').dataset.kind, tope = TC.topeFotos(kind);
+  const { admitidas, sobran } = TC.cupoFotos(fotosGuardadasVivas().length, archivosElegidos.length, tope);
   const antes = input.files.length;
   if (antes === admitidas) return 0;
   const dt = new DataTransfer();
   archivosElegidos.slice(0, admitidas).forEach(x => dt.items.add(x));
   input.files = dt.files;
-  if (avisar && sobran) toast(`Máximo ${TC.MAX_FOTOS} fotos por ${input.closest('#form').dataset.kind === 'adherencia' ? 'ensayo' : 'visita'}: se tomaron las primeras ${admitidas}.`);
+  if (avisar && sobran) toast(`Máximo ${tope} fotos por ${kind === 'adherencia' ? 'ensayo' : 'visita'}: se tomaron las primeras ${admitidas}.`);
   return Math.max(0, admitidas - antes);
 }
 
@@ -795,15 +797,15 @@ function validarCampos(kind, d, fotosPrevias = 0){
   if (kind === 'adherencia') {
     const falta = TC.validarEnsayo(d, TC.normalizarFilas(leerFilasEnsayo()));
     if (falta) return falta;
-    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length);
-    return sobran ? `Máximo ${TC.MAX_FOTOS} fotos por ensayo: quita ${sobran}` : '';
+    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length, TC.topeFotos('adherencia'));
+    return sobran ? `Máximo ${TC.topeFotos('adherencia')} fotos por ensayo: quita ${sobran}` : '';
   }
   if (!d.fecha) return 'Falta la fecha';
   if (!d.cliente) return 'Indica el cliente';
   if (kind === 'visita') {
     if (!d.motivo) return 'Describe el motivo del reclamo';
-    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length);
-    return sobran ? `Máximo ${TC.MAX_FOTOS} fotos por visita: quita ${sobran}` : '';
+    const { sobran } = TC.cupoFotos(fotosPrevias, (d.fotos || []).length, TC.topeFotos('visita'));
+    return sobran ? `Máximo ${TC.topeFotos('visita')} fotos por visita: quita ${sobran}` : '';
   }
   return d.nombre ? '' : 'Falta el nombre de la actividad';
 }
@@ -988,12 +990,13 @@ async function fotoGuardadaDataUrl(path, n){
   throw new Error(`La fotografía ${n} no está disponible.`);
 }
 
-// Fotos de la visita como data URL: las ya guardadas más las recién elegidas (reducidas igual que al subirlas).
-async function fotosComoDataUrl(rutas, archivos){
+// Fotos del informe como data URL: las ya guardadas más las recién elegidas (reducidas igual que al subirlas).
+// `kind` decide el tope (el ensayo de adherencia admite más que una visita).
+async function fotosComoDataUrl(rutas, archivos, kind){
   const guardadas = await Promise.all((rutas || []).map((p, i) => fotoGuardadaDataUrl(p, i + 1)));
   const nuevas = [];
   for (const f of archivos || []) nuevas.push(await blobADataUrl(await comprimir(f)));
-  return [...guardadas, ...nuevas].slice(0, TC.MAX_FOTOS);
+  return [...guardadas, ...nuevas].slice(0, TC.topeFotos(kind));
 }
 
 // Registro tal como lo consume el informe. `datos` ya incluye `cierre` (quien recibe y las dos firmas).
@@ -1084,9 +1087,10 @@ async function verInforme(armar, btn){
   const txt = btn.textContent; btn.disabled = true; btn.textContent = 'Generando informe…';
   try {
     const { reg, rutas, archivos } = armar();
-    const sobran = TC.cupoFotos(rutas.length, archivos.length).sobran;
-    if (sobran) throw new Error(`Máximo ${TC.MAX_FOTOS} fotos por ${reg.kind === 'adherencia' ? 'ensayo' : 'visita'}: quita ${sobran}.`);
-    reg.fotos = await fotosComoDataUrl(rutas, archivos);
+    const tope = TC.topeFotos(reg.kind);
+    const sobran = TC.cupoFotos(rutas.length, archivos.length, tope).sobran;
+    if (sobran) throw new Error(`Máximo ${tope} fotos por ${reg.kind === 'adherencia' ? 'ensayo' : 'visita'}: quita ${sobran}.`);
+    reg.fotos = await fotosComoDataUrl(rutas, archivos, reg.kind);
     ultimoInforme = await generarPdf(reg);
     mostrarInforme(ultimoInforme, reg.kind);
   } catch(e){
@@ -1227,7 +1231,7 @@ async function enviarRegistro(id){
     let informe, envio;
     const fin = mostrarOcupado('Preparando el informe');
     try {
-      const reg = regParaInforme(r, await fotosComoDataUrl(r.fotos, []));
+      const reg = regParaInforme(r, await fotosComoDataUrl(r.fotos, [], r.kind));
       const huella = huellaTexto(informeHtml(reg));
       informe = TC.puedeEnviar(ultimoInforme, { id: r.id, huella }).ok ? ultimoInforme : (ultimoInforme = await generarPdf(reg));
       const { asunto, cuerpo } = (r.kind === 'adherencia' ? TC.correoEnsayo : TC.correoVisita)({ fecha: r.fecha, cliente: r.cliente, obra: r.obra, datos: r._datos });

@@ -379,6 +379,22 @@ test('cupoFotos: tope de 8 por visita contando las que ya tenía', () => {
   assert.deepEqual(TC.cupoFotos(undefined, 0), { admitidas: 0, sobran: 0 });
 });
 
+test('cupoFotos: con un tope propio (el ensayo de adherencia admite 12)', () => {
+  assert.equal(TC.MAX_FOTOS_ENSAYO, 12);
+  assert.deepEqual(TC.cupoFotos(0, 12, TC.MAX_FOTOS_ENSAYO), { admitidas: 12, sobran: 0 });
+  assert.deepEqual(TC.cupoFotos(0, 13, TC.MAX_FOTOS_ENSAYO), { admitidas: 12, sobran: 1 });
+  assert.deepEqual(TC.cupoFotos(10, 4, TC.MAX_FOTOS_ENSAYO), { admitidas: 2, sobran: 2 });
+  // sin tercer argumento sigue usando MAX_FOTOS (8), como antes: no rompe a quien ya llamaba cupoFotos así.
+  assert.deepEqual(TC.cupoFotos(0, 9), { admitidas: 8, sobran: 1 });
+});
+
+test('topeFotos: la adherencia admite 12, el resto de los informes sigue en 8', () => {
+  assert.equal(TC.topeFotos('adherencia'), 12);
+  assert.equal(TC.topeFotos('visita'), 8);
+  assert.equal(TC.topeFotos('charla'), 8);
+  assert.equal(TC.topeFotos(undefined), 8);
+});
+
 test('tamanoInforme: texto legible y aviso sobre el límite de envío de 8 MB', () => {
   assert.deepEqual(TC.tamanoInforme(1572864), { texto: '1,5 MB', excede: false });
   assert.deepEqual(TC.tamanoInforme(512000), { texto: '500 KB', excede: false });

@@ -341,13 +341,19 @@
   // El informe reusa el marco institucional (logo, banda, nota legal) pero NO la identidad del documento controlado
   // de adherencia: no lleva código, versión ni fecha de creación.
   const MAX_FOTOS = 8;
+  // El ensayo de adherencia admite más: los asesores suben hasta 12 fotos por ensayo en terreno.
+  const MAX_FOTOS_ENSAYO = 12;
   const LIMITE_ENVIO_BYTES = 8 * 1024 * 1024;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // Cuántas fotos nuevas caben contando las que la visita ya tiene.
-  function cupoFotos(existentes, elegidas) {
+  // El tope según el tipo de informe: solo el ensayo de adherencia tiene uno distinto.
+  const topeFotos = (kind) => kind === 'adherencia' ? MAX_FOTOS_ENSAYO : MAX_FOTOS;
+
+  // Cuántas fotos nuevas caben contando las que la visita (o el ensayo) ya tiene. Sin `tope`,
+  // sigue siendo el de la visita (8), como antes de que el ensayo admitiera más.
+  function cupoFotos(existentes, elegidas, tope = MAX_FOTOS) {
     const hay = Math.max(0, Number(existentes) || 0), n = Math.max(0, Number(elegidas) || 0);
-    const admitidas = Math.min(n, Math.max(0, MAX_FOTOS - hay));
+    const admitidas = Math.min(n, Math.max(0, tope - hay));
     return { admitidas, sobran: n - admitidas };
   }
 
@@ -612,7 +618,7 @@
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, fotosYPies, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, fotosYPies, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, MAX_FOTOS_ENSAYO, topeFotos, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
