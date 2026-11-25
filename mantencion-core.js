@@ -95,12 +95,18 @@
       const id = d.docId || d.id;
       const clave = claveDoc(coleccion, id);
       // Si ya hay un problema en este documento se deja ese: es la única entrada con Reintentar
-      // y Descartar, y una pendiente posterior no debe taparlo.
+      // y Descartar, y una pendiente posterior no debe taparlo. Mismo criterio que filaDeDoc en
+      // mantencion.html (la PRIMERA entrada con problema, la causa raíz de la cadena, nunca una hija
+      // más reciente que solo heredó "Depende de un registro con problema"): se unificó así (y no al
+      // revés) porque `verMiVersionOt`/`bandaFilaOt` necesitan el entradaId de la causa raíz para leer
+      // su `error` real (p. ej. distinguir NO_EXISTE de CONFLICTO) sin tener que trepar la cadena de
+      // nuevo — causaCadena ya devuelve el mismo texto desde cualquier punto de la cadena, pero el
+      // entradaId sí cambia según cuál se elija.
       let marca = { entradaId: e.id, estado: e.estado, error: e.estado === 'problema' ? causaCadena(entradas, e) : (e.error || null) };
       let lugar = lista, idx = lista.findIndex((r) => r && claveDoc(r.coleccion, r.id) === clave);
       if (idx < 0) { lugar = nuevas; idx = nuevas.findIndex((r) => r && claveDoc(r.coleccion, r.id) === clave); }
       const previo = idx >= 0 ? lugar[idx] : { id, coleccion };
-      if (previo._fila && previo._fila.estado === 'problema' && e.estado !== 'problema') marca = previo._fila;
+      if (previo._fila && previo._fila.estado === 'problema') marca = previo._fila;
       // La base para mezclar es `_datos` si la fila ya pasó por aquí antes (otra entrada pendiente
       // del mismo documento), o `data` si es la fila tal como la trajo el servidor la primera vez.
       const data = { ...(previo._datos || previo.data || {}), ...(d.data || {}) };

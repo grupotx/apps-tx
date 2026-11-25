@@ -15,12 +15,12 @@
   // Es la unica entrada cuyo "Ver mi version" puede reabrir con seguridad el formulario completo
   // (vendedor, cliente, RUT, obra, direccion): ese formulario no tiene el permiso ni los campos de
   // Instalar/Retirar, asi que una entrada de esas nunca debe poder reabrirlo (ver bandaFilaSol).
-  const entradaSolicitud = ({ id, fila, datos, fotos, base, baseFresca, registroId, clienteNuevo, hechoEn, manual }) => ({
+  const entradaSolicitud = ({ id, fila, datos, fotos, base, registroId, clienteNuevo, hechoEn, manual }) => ({
     tipo: 'silos.solicitud',
     datos: {
       id, registroId: registroId || null, fila: fila || {}, datos: datos || {},
       fotosGuardadas: [], nFotosNuevas: Number(fotos) || 0,
-      base: base || null, baseFresca: !!baseFresca, clienteNuevo: clienteNuevo || null, hechoEn,
+      base: base || null, clienteNuevo: clienteNuevo || null, hechoEn,
       manual: !!manual,
     },
   });

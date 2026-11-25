@@ -3711,8 +3711,11 @@ function resumenOt(data){
 // incluye lo que de verdad dependa de ella, p. ej. una corrección posterior del mismo documento que
 // quedó "Depende de un registro con problema"; nunca al revés) y deja que subirCambios() vuelva a
 // encolar desde `db.ots` — que ya tiene todo lo que el técnico marcó, confirmado o no — con la base
-// fresca. No se reconstruye el documento a mano: lo que se ve en la fila de OT en este momento YA ES
-// "mi versión".
+// fresca. No se reconstruye el documento a mano: subirCambios() vuelve a leer `db.ots[x]` tal cual
+// está en este momento, y lo que viaje en la entrada nueva (el manejador 'mantencion.doc' recibe los
+// datos ya CLONADOS al pasar por la fila/IndexedDB, nunca la misma referencia de objeto JS que
+// `db.ots[x]`) va a coincidir con "mi versión" igual, porque nada más muta `db.ots[x]` en la ventana
+// entre descartar la entrada vieja y que subirCambios() vuelva a encolar.
 async function reintentarOtConBaseFresca(entradaId, otId, baseFresca){
   let ents = [];
   try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch(_) {}

@@ -1034,10 +1034,24 @@ function openSilo(id){
       { eyebrow:'Ficha del silo', refresh:() => { const st = $('#sheet').scrollTop; draw(); $('#sheet').scrollTop = st; } });
     $('#fx-reg', sh)?.addEventListener('click', () => { closeSheet(); go('registrar', { siloId:s.id }); });
     $('#fx-edit', sh)?.addEventListener('click', () => formSilo(s));
-    sh.querySelectorAll('[data-del-ev]').forEach(b => b.onclick = async () => {
-      if(b.dataset.ok!=='1'){ b.dataset.ok = '1'; b.textContent = 'Confirmar: eliminar'; return; }
-      b.disabled = true;
-      try{ await S.db.doc('eventos/' + b.dataset.delEv).delete(); toast('Registro eliminado'); }catch(err){ b.disabled = false; toast('No se pudo eliminar'); }
+    // Eliminar registro escribe DIRECTO (sin cola offline, a propósito, igual que Anular solicitud: el
+    // diseño no permite encolar borrados) y había quedado fuera del alcance de exigeSenal (Tarea 7): sin
+    // señal fallaba con un error técnico crudo. exigeSenal deshabilita cada botón con un motivo honesto;
+    // aplicarExigeSenal los reevalúa en los eventos online/offline (busca por [data-del-ev], puede haber
+    // varios en la misma ficha).
+    sh.querySelectorAll('[data-del-ev]').forEach(b => {
+      const motivo = 'Necesitas señal para eliminar este registro.';
+      exigeSenal(b, motivo);
+      b.onclick = async () => {
+        if(b.dataset.ok!=='1'){ b.dataset.ok = '1'; b.textContent = 'Confirmar: eliminar'; return; }
+        b.disabled = true;
+        // Mismo patrón que el .then(() => exigeSenal(...)) de si-save (formSilo): el catch reactiva el
+        // botón a ciegas (igual que el finally de submitting()), pero exigeSenal es quien tiene la última
+        // palabra justo después — si la señal se perdió durante este mismo await, lo vuelve a deshabilitar
+        // con su motivo en vez de dejarlo operable por el reset incondicional de arriba.
+        try{ await S.db.doc('eventos/' + b.dataset.delEv).delete(); toast('Registro eliminado'); }catch(err){ b.disabled = false; toast('No se pudo eliminar'); }
+        exigeSenal(b, motivo);
+      };
     });
   };
   draw();
@@ -1091,6 +1105,13 @@ function openSol(id){
           if(an.dataset.ok!=='1'){ an.dataset.ok = '1'; an.textContent = 'Confirmar anulación'; return; }
           try{ await S.db.doc('solicitudes/' + s.id).update({ estado:'Anulada' }); toast('Solicitud anulada'); }catch(e){ toast('No se pudo anular'); }
         });
+        an.id = 'sol-anular';
+        // Anular solicitud escribe DIRECTO (sin cola offline, a propósito: el diseño no permite encolar
+        // anulaciones/borrados) y, a diferencia de guardar un silo (exigeSenal en formSilo, Tarea 7), había
+        // quedado fuera de ese alcance: sin señal fallaba con un error técnico crudo en vez de avisar.
+        // Mismo patrón que si-save: exigeSenal deshabilita el botón con un motivo honesto en vez de dejar
+        // que se intente y falle; aplicarExigeSenal lo reevalúa en los eventos online/offline de más abajo.
+        exigeSenal(an, 'Necesitas señal para anular esta solicitud.');
         B('Editar', '', () => formSolicitud(s));
       }
       if(s.estado==='Solicitada' && can('eval')) B(I.doc + 'Evaluar prefactibilidad', 'primary', () => formPrefact(s));
@@ -1377,7 +1398,7 @@ function formSolicitud(s, ver){
         // `manual:true` (Critical de la revisión): marca esta entrada como la ÚNICA cuyo "Ver mi versión"
         // puede reabrir con seguridad el formulario completo (bandaFilaSol la distingue de Instalar/
         // Evaluar/Retirar, que corrigen la solicitud pero no deben poder reabrir este formulario).
-        const ent = SC.entradaSolicitud({ id, registroId:s.id, base:baseEditando, baseFresca:!!reemplazaEntrada,
+        const ent = SC.entradaSolicitud({ id, registroId:s.id, base:baseEditando,
           fila:{}, datos, fotos:0, hechoEn:new Date().toISOString(), manual:true });
         const reemplazada = reemplazaEntrada;
         await TXOffline.encolar(ent.tipo, ent.datos);
@@ -1413,8 +1434,10 @@ function formSolicitud(s, ver){
 // "Ver mi versión" (Tarea 6): la corrección quedó con problema (CONFLICTO o NO_EXISTE) y hay que decidir
 // sin perder lo que se escribió. Reabre formSolicitud con lo que quedó en ESA entrada de la fila (fila/
 // datos) — nunca con lo que haya en el servidor, que es justo lo que se muestra en la ficha para comparar
-// — y, con señal, pide la versión ACTUAL de la solicitud para fijar una base fresca que NUNCA se reemplaza
-// por la de una madre (SC.entradaSolicitud/baseFresca). Sin señal no hay con qué comparar: se avisa, pero
+// — y, con señal, pide la versión ACTUAL de la solicitud para fijar una base fresca que viaja tal cual a
+// sil_guardar_solicitud: a diferencia de Terreno, aquí no hay un concepto de entrada "madre" que pueda
+// pisarla (silos-core.js no tiene equivalente de TC.baseCorreccion), así que no hace falta protegerla de
+// eso. Sin señal no hay con qué comparar: se avisa, pero
 // la base tampoco queda en null a ciegas (eso pisaría sin aviso si alguien más corrigió mientras tanto) —
 // se usa la última versión conocida de la copia ya sincronizada. Guardar desde aquí REEMPLAZA esta
 // entrada (se descarta al guardar) en vez de encolarse en paralelo. Mismo patrón que verMiVersion en
@@ -1494,7 +1517,7 @@ function formPrefact(s){
       const estadoNuevo = res==='Rechazada' ? 'Rechazada' : 'Aprobada';
       const prefact = { fecha:val('fp-fecha',sh), evaluador:val('fp-eval',sh), acceso:val('fp-acceso',sh), terreno:val('fp-terreno',sh), espacio:val('fp-espacio',sh), energia:val('fp-energia',sh), agua:val('fp-agua',sh), distancia:val('fp-dist',sh), resultado:res, condiciones:val('fp-cond',sh), fotos, autorId:S.uid||null };
       const datos = { ...datosDeSolicitud(s), prefact, estado:estadoNuevo };
-      const ent = SC.entradaSolicitud({ id, registroId:s.id, base:s.updated_at, baseFresca:false,
+      const ent = SC.entradaSolicitud({ id, registroId:s.id, base:s.updated_at,
         fila:{ estado:estadoNuevo }, datos, fotos:Object.keys(archivos).length, hechoEn:new Date().toISOString() });
       ent.datos.uid = uid;
       await TXOffline.encolar(ent.tipo, ent.datos, { archivos });
@@ -1571,7 +1594,7 @@ function formInstalar(s){
         const entradaId = await TXOffline.encolar(ent.tipo, ent.datos, { archivos:k===0 ? archivosFoto : {}, dependeDe:k===0 ? null : primero });
         if(k===0) primero = entradaId;
       }
-      const entSol = SC.entradaSolicitud({ id:crypto.randomUUID(), registroId:s.id, base:s.updated_at, baseFresca:false,
+      const entSol = SC.entradaSolicitud({ id:crypto.randomUUID(), registroId:s.id, base:s.updated_at,
         fila:{ estado:'Instalada' }, datos:{ ...datosDeSolicitud(s), ...upd }, fotos:0, hechoEn:ahora });
       await TXOffline.encolar(entSol.tipo, entSol.datos, { dependeDe:primero });
       toast(`${ids.map(siloCode).join(', ')} instalado${ids.length > 1 ? 's' : ''} en ${s.obra}: pendiente de enviar`); openSol(s.id);
@@ -1621,7 +1644,7 @@ function formRetiro(s){
         const entradaId = await TXOffline.encolar(ent.tipo, ent.datos, { archivos:k===0 ? archivosFoto : {}, dependeDe:k===0 ? null : primero });
         if(k===0) primero = entradaId;
       }
-      const entSol = SC.entradaSolicitud({ id:crypto.randomUUID(), registroId:s.id, base:s.updated_at, baseFresca:false,
+      const entSol = SC.entradaSolicitud({ id:crypto.randomUUID(), registroId:s.id, base:s.updated_at,
         fila:{ estado:'Finalizada' }, datos:{ ...datosDeSolicitud(s), ...cambios }, fotos:0, hechoEn:ahora });
       await TXOffline.encolar(entSol.tipo, entSol.datos, { dependeDe:primero });
       toast(`${ids.map(siloCode).join(', ')} vuelve${ids.length > 1 ? 'n' : ''} a planta: pendiente de enviar`); openSol(s.id);
@@ -2359,6 +2382,14 @@ async function renderUsuarios(){
     <td><select data-u-rol="${esc(u.id)}" aria-label="Perfil de ${esc(u.nombre)}" ${u.id===S.uid ? 'disabled' : ''} style="min-width:150px">${Object.keys(ROLES).map(k => `<option value="${k}"${k===u.rol?' selected':''}>${ROL_CORTO[k]}</option>`).join('')}</select></td>
     <td>${u.id===S.uid ? '<span class="chip ok">Activo</span>' : `<button class="btn sm ${u.activo ? '' : 'danger'}" data-u-act="${esc(u.id)}">${u.activo ? 'Activo' : 'Bloqueado'}</button>`}</td>
     <td class="r sub">${fmtD((u.created_at||'').slice(0,10))}</td></tr>`).join('')}</tbody></table>`;
+  // El gate de arriba (sinSenalReal → "Necesitas señal" en vez de la tabla) se evalúa ANTES del await a
+  // sb.from('profiles'): si navigator.onLine cambia a false justo durante esa espera, ese gate ya pasó y
+  // no lo detecta, y la tabla se dibuja igual. Estos controles también escriben DIRECTO (sb.from) sin cola
+  // offline, como Anular solicitud/Eliminar registro: mismo exigeSenal, con motivo honesto, para cerrar
+  // ese hueco puntual (no por soloCopia, que aquí solo puede pasar de true a false, nunca al revés,
+  // mientras la vista ya está dibujada).
+  $$('[data-u-rol]').forEach(s => exigeSenal(s, 'Necesitas señal para cambiar el perfil de este usuario.'));
+  $$('[data-u-act]').forEach(b => exigeSenal(b, 'Necesitas señal para bloquear o activar este usuario.'));
   $$('[data-u-rol]').forEach(s => s.onchange = async () => {
     const { error } = await sb.from('profiles').update({ rol:s.value }).eq('id', s.dataset.uRol);
     if(error){ toast('No se pudo cambiar el perfil'); } else { const u = S.users.find(x => x.id===s.dataset.uRol); u.rol = s.value; toast(`${u.nombre}: ${ROL_CORTO[s.value]}`); updateBadges(); renderUsuarios(); }
@@ -2376,26 +2407,35 @@ function updateBadges(){
 
 /* ================= Lo que exige señal (Tarea 7) ================= */
 // A diferencia de lo que las Tareas 1-6 ya dejan en cola sin conexión (crear/corregir solicitudes y
-// eventos), estos controles escriben DIRECTO al servidor (S.db / sb.from), sin ninguna ruta offline:
-// guardar/editar un silo del inventario (maestro, no eventos — ver formSilo) y la vista Usuarios entera
-// (gestión de perfiles y roles, ver renderUsuarios). Mismo patrón que registro-terreno.html: cada botón
+// eventos), estos controles escriben DIRECTO al servidor (S.db / sb.from), sin ninguna ruta offline —
+// y, a propósito, sin cola: el diseño de la app no permite encolar anulaciones ni borrados para enviar
+// después. Son: guardar/editar un silo del inventario (maestro, no eventos — ver formSilo), Anular
+// solicitud y Eliminar registro (ver openSol/openSilo) y la vista Usuarios entera, perfil y bloqueo
+// incluidos (gestión de roles, ver renderUsuarios). Mismo patrón que registro-terreno.html: cada botón
 // dice qué necesita en su `title` (nunca un "sin conexión" genérico) y convive con otras razones de
 // deshabilitado — si el botón ya está deshabilitado por otra razón (title propio, no vacío, distinto del
 // nuestro) no se toca. exigeSenal es la única fuente de verdad sobre si un botón debe quedar habilitado:
 // nunca se reactiva a ciegas en un `finally` solo porque la llamada terminó (ver el .then() en formSilo).
 // Mira sinSenalReal() (más arriba, junto a soloCopia), no solo navigator.onLine: soloCopia puede estar en
 // true con el navegador reportando "online" (Supabase caído/colgado sin que se caiga el wifi), y ese
-// escenario tampoco tiene ruta en vivo para estos dos controles.
+// escenario tampoco tiene ruta en vivo para estos controles.
 function exigeSenal(btn, motivo){
   if(!btn || (btn.disabled && btn.title && btn.title !== motivo)) return;
   if(sinSenalReal()){ btn.disabled = true; btn.title = motivo; }
   else if(btn.title === motivo){ btn.disabled = false; btn.title = ''; }
 }
 // Reaplica exigeSenal a los controles ya dibujados: se llama al final de cada render() (incluye el botón
-// de guardar silo, si su hoja está abierta) y, además, al vuelo en los eventos online/offline de más abajo,
-// sin esperar al siguiente render().
+// de guardar silo, Anular solicitud y Eliminar registro, si su hoja está abierta, y los controles de
+// Usuarios, si esa vista está dibujada) y, además, al vuelo en los eventos online/offline de más abajo,
+// sin esperar al siguiente render(). $ /$$ buscan en todo el documento, así que encuentran estos
+// controles aunque vivan dentro de una hoja (#sheet) en vez del render principal; si no hay ninguno
+// abierto, exigeSenal/$$ simplemente no encuentran nada que tocar.
 function aplicarExigeSenal(){
   exigeSenal($('#si-save'), 'Necesitas señal para guardar el silo: los datos del inventario no se guardan sin conexión.');
+  exigeSenal($('#sol-anular'), 'Necesitas señal para anular esta solicitud.');
+  $$('[data-del-ev]').forEach(b => exigeSenal(b, 'Necesitas señal para eliminar este registro.'));
+  $$('[data-u-rol]').forEach(s => exigeSenal(s, 'Necesitas señal para cambiar el perfil de este usuario.'));
+  $$('[data-u-act]').forEach(b => exigeSenal(b, 'Necesitas señal para bloquear o activar este usuario.'));
 }
 // La vista Usuarios entera (no un botón suelto) depende de señal: lista y cambia perfiles con llamadas en
 // vivo a `profiles` sin cola offline. Si la pestaña está abierta cuando cambia la señal, se repinta sola sin

@@ -28,7 +28,7 @@ test('esSinPermiso distingue el rechazo de permiso (Tarea 6, Important de la rev
 
 test('entradaSolicitud guarda la hora real y la version base', () => {
   const e = SC.entradaSolicitud({ id: 'e1', fila: { codigo: 'SOL-0001' }, datos: {}, fotos: 1,
-    base: '2026-11-24T10:00:00Z', baseFresca: false, registroId: null, clienteNuevo: null, hechoEn: '2026-11-24T12:00:00Z' });
+    base: '2026-11-24T10:00:00Z', registroId: null, clienteNuevo: null, hechoEn: '2026-11-24T12:00:00Z' });
   assert.equal(e.tipo, 'silos.solicitud');
   assert.equal(e.datos.base, '2026-11-24T10:00:00Z');
   assert.equal(e.datos.hechoEn, '2026-11-24T12:00:00Z');
@@ -38,7 +38,7 @@ test('entradaSolicitud guarda la hora real y la version base', () => {
 // de una corrección de cambio de estado (Instalar/Evaluar/Retirar) — solo la primera puede reabrir con
 // seguridad el formulario completo vía "Ver mi versión" (bandaFilaSol en silos-tx/index.html).
 test('entradaSolicitud: manual por defecto es false; se puede marcar true', () => {
-  const base = { id: 'e1', fila: {}, datos: {}, fotos: 0, base: null, baseFresca: false, registroId: 's1', clienteNuevo: null, hechoEn: 'h' };
+  const base = { id: 'e1', fila: {}, datos: {}, fotos: 0, base: null, registroId: 's1', clienteNuevo: null, hechoEn: 'h' };
   assert.equal(SC.entradaSolicitud(base).datos.manual, false);
   assert.equal(SC.entradaSolicitud({ ...base, manual: true }).datos.manual, true);
 });

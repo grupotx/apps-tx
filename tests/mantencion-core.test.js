@@ -117,6 +117,15 @@ test('aplicarFilaDocs: con dos entradas del mismo documento, un problema no qued
   assert.deepEqual(out[0]._fila, { entradaId: 'e1', estado: 'problema', error: 'CONFLICTO: x' });
 });
 
+test('aplicarFilaDocs: con dos problemas encadenados del mismo documento, se queda con la causa raíz (la primera), no con la hija más reciente (mismo criterio que filaDeDoc en mantencion.html)', () => {
+  const madre = { id: 'e1', estado: 'problema', error: 'CONFLICTO: x', dependeDe: null, tipo: 'mantencion.doc', datos: { id: 'e1', coleccion: 'ots', docId: 'o1', data: { v: 'e1' } } };
+  const hija = { id: 'e2', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'e1', tipo: 'mantencion.doc', datos: { id: 'e2', coleccion: 'ots', docId: 'o1', data: { v: 'e2' } } };
+  const out = MC.aplicarFilaDocs([{ coleccion: 'ots', id: 'o1', data: { v: 'servidor' } }], [madre, hija]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].data.v, 'e2', 'el contenido mostrado sigue siendo el de la corrección más reciente');
+  assert.deepEqual(out[0]._fila, { entradaId: 'e1', estado: 'problema', error: 'CONFLICTO: x' }, 'la marca usa la entrada causante (la raíz), no la hija que solo heredó el problema');
+});
+
 test('aplicarFilaDocs: ignora entradas de otro tipo o sin datos', () => {
   const out = MC.aplicarFilaDocs([{ coleccion: 'chk', id: 'c1', data: {} }], [{ id: 'e1', tipo: 'otra.cosa', datos: {} }, { id: 'e2', tipo: 'mantencion.doc' }, null]);
   assert.equal(out.length, 1);
