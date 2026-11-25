@@ -2995,9 +2995,24 @@ function registrarTiposFila(){
   if(!window.TXOffline) return;
   for(const [t, fn] of Object.entries(TIPOS_FILA)) TXOffline.registrarTipo(t, fn);
 }
+const AUTH_KEY = 'sb-' + new URL(SB_URL).hostname.split('.')[0] + '-auth-token';
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+const esRedMantencion = e => !!window.TXOfflineCore && TXOfflineCore.clasificarError(e) === 'red';
+function usuarioGuardado(){ try { const s = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); return (s && s.user) || null; } catch(_) { return null; } }
+// Arranque: una carrera corta contra getSession() en vez de esperarla completa (sin señal y con el
+// token vencido puede tardar mucho en resolver, dejando la app entera "colgada" antes de pintar nada —
+// confirmado en un teléfono real, no solo en la simulación de offline de esta sesión, que siempre falla
+// rápido y nunca había reproducido este cuelgue). Mismo patrón ya probado en Registro de Terreno, Silos
+// y CRM: si no llega a tiempo por red, se abre igual con el último usuario guardado en este equipo (la
+// fila renueva la sesión real al volver la señal).
 async function arrancar(){
   estadoSync('Conectando…');
-  const { data:{ session } } = await sb.auth.getSession();
+  const r0 = await Promise.race([sb.auth.getSession().catch(error => ({ data:{ session:null }, error })), esperar(5000).then(() => null)]);
+  let session = (r0 && r0.data && r0.data.session) || null;
+  if(!session && (!r0 || (r0.error && esRedMantencion(r0.error)))){
+    const u = usuarioGuardado();
+    if(u) session = { user: u };
+  }
   if(!session) return pantallaLogin();
   // Los tipos de la fila se registran ANTES de iniciar, porque iniciar() envía de inmediato lo que haya
   // quedado pendiente de una sesión anterior. La copia local va por usuario (TXOffline.iniciar abre/crea
@@ -3005,10 +3020,35 @@ async function arrancar(){
   registrarTiposFila();
   try{ await TXOffline.iniciar({ app:'mantencion', sb, usuarioId: session.user.id }); }
   catch(e){ console.warn('[Mantencion] sin copia local:', e); }
-  const [rol, prof] = await Promise.all([ sb.rpc('mtto_mi_rol'), sb.from('profiles').select('nombre,email').eq('id', session.user.id).maybeSingle() ]);
-  const pr = prof.data || {};
-  ME = { id: session.user.id, email: session.user.email, nombre: pr.nombre || session.user.user_metadata?.nombre || session.user.email.split('@')[0], editor: rol.data === 'editor' };
-  if(rol.error || !rol.data){
+  // Mismo problema que getSession() arriba, un paso más adelante: sin esta carrera, una red que no
+  // responde (no solo que falla rápido) deja la app colgada aquí para siempre aunque la sesión ya se
+  // haya resuelto con la copia guardada. Se cachea el último rol/perfil conocido de este usuario en
+  // este teléfono (TXOffline.guardarLocal, misma base IndexedDB que el resto de la fila) para poder
+  // abrir con eso si la red no contesta a tiempo.
+  const cacheAcceso = 'mi-acceso:' + session.user.id;
+  let acceso = null;
+  const r1 = await Promise.race([
+    (async () => {
+      const [rol, prof] = await Promise.all([ sb.rpc('mtto_mi_rol'), sb.from('profiles').select('nombre,email').eq('id', session.user.id).maybeSingle() ]);
+      return { rolData: rol.data, rolError: rol.error, profData: prof.data };
+    })().catch(error => ({ error })),
+    esperar(8000).then(() => null)
+  ]);
+  if (r1 && !r1.error){
+    acceso = r1;
+    if (window.TXOffline){ try { await TXOffline.guardarLocal(cacheAcceso, acceso); } catch(_){} }
+  } else if (window.TXOffline){
+    try { acceso = await TXOffline.leerLocal(cacheAcceso); } catch(_){}
+  }
+  if (!acceso){
+    estadoSync('Sin conexión');
+    document.getElementById('nav').hidden = true;
+    document.getElementById('app').innerHTML = `<div id="gate"><div class="card"><h2>Sin conexión</h2><p class="muted">Necesitas abrir Mantención con señal al menos una vez en este teléfono para poder usarla después sin conexión.</p></div></div>`;
+    return;
+  }
+  const pr = acceso.profData || {};
+  ME = { id: session.user.id, email: session.user.email, nombre: pr.nombre || session.user.user_metadata?.nombre || session.user.email.split('@')[0], editor: acceso.rolData === 'editor' };
+  if(acceso.rolError || !acceso.rolData){
     document.getElementById('nav').hidden = true; estadoSync('');
     document.getElementById('app').innerHTML = `<div id="gate"><div class="card"><h2>Sin acceso a Mantención</h2><p class="muted">Tu cuenta (${esc(ME.email)}) aún no tiene acceso a este módulo. Pídele al administrador que te habilite en Usuarios y accesos.</p>
       <button class="btn gh" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
