@@ -1,0 +1,13 @@
+-- Silos sin conexion: ajuste urgente (ronda de correcciones 1, C-1).
+-- El frontend de Silos en produccion hoy sigue generando el codigo SOL-NNNN en el telefono sin
+-- pasar por sil_reservar_codigos (eso lo hace la tarea 5, que todavia no existe). El disparador
+-- sil_solicitudes_codigo_trg (creado en 20261127c_silos_offline.sql) exige que el codigo venga
+-- reservado, y esta rechazando TODAS las solicitudes nuevas en produccion con el error
+-- "Codigo de solicitud no reservado" desde que se aplico esa migracion.
+-- Se desactivo aqui de inmediato (aplicado primero, antes del resto de esta ronda de ajustes).
+-- La tarea 8 (publicacion) debe reactivarlo
+-- (alter table public.solicitudes enable trigger sil_solicitudes_codigo_trg;) en la MISMA
+-- ventana en que se publique el frontend de la tarea 5 que si reserva codigos. No activarlo
+-- antes de eso: volveria a romper la creacion de solicitudes en produccion.
+-- Aplicada en produccion con apply_migration (nombre: silos_offline_desactivar_codigo_trg).
+alter table public.solicitudes disable trigger sil_solicitudes_codigo_trg;

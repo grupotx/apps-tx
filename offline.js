@@ -202,14 +202,17 @@
     return id;
   }
 
-  async function consultar(clave, fn) {
+  // `opciones.tope` (ms): para una consulta que de por sí tarda más que el tope por defecto (p. ej.
+  // una paginada de varias vueltas). Opcional: sin él, se comporta exactamente igual que antes.
+  async function consultar(clave, fn, opciones) {
     // Sin función no hay nada que consultar: antes se guardaba su resultado (undefined) y la copia
     // local quedaba vacía, dejando la app sin datos sin señal.
     if (typeof fn !== 'function') throw new TypeError('TXOffline.consultar necesita una función');
+    const topeMs = (opciones && opciones.tope) || TOPE_CONSULTA_MS;
     let timer;
     try {
       const tope = new Promise((_, mal) => {
-        timer = setTimeout(() => { const e = new Error('Tiempo de espera agotado'); e.name = 'AbortError'; mal(e); }, TOPE_CONSULTA_MS);
+        timer = setTimeout(() => { const e = new Error('Tiempo de espera agotado'); e.name = 'AbortError'; mal(e); }, topeMs);
       });
       const datos = await Promise.race([Promise.resolve().then(fn), tope]);
       const guardadoEn = new Date().toISOString();
