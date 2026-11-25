@@ -136,7 +136,7 @@
       enviar: async e => {
         const h = handlers[e.tipo];
         if (!h) throw new Error('Tipo de envío no registrado: ' + e.tipo);
-        await h(e.datos, await cargarArchivos(e), { id: e.id, intentos: e.intentos });
+        await h(e.datos, await cargarArchivos(e), { id: e.id, intentos: e.intentos, dependeDe: e.dependeDe });
       },
     });
     await limpiar();

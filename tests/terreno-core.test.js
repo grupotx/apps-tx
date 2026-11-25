@@ -869,3 +869,367 @@ test('la nota legal de ambos informes deja ~6 pt de margen derecho para no sobre
 test('mensajeAsistencia: el enlace cerrado menciona que caduca a las 48 horas', () => {
   assert.match(TC.mensajeAsistencia({ message: 'enlace no válido o actividad cerrada' }).texto, /48 horas/);
 });
+
+// ── Terreno sin conexión: lógica pura de la fila ──
+test('rutaFoto: la ruta solo depende de la entrada y el índice', () => {
+  assert.equal(TC.rutaFoto('e1', 0), 'e1/1.jpg');
+  assert.equal(TC.rutaFoto('e1', 7), 'e1/8.jpg');
+});
+
+test('aplicarFilaTerreno: lo pendiente se ve, y una corrección no duplica el registro', () => {
+  const regs = [{ id: 'r1', cliente: 'A', fotos: [] }];
+  const ents = [
+    { id: 'e1', estado: 'pendiente', error: null, tipo: 'terreno.registro', datos: { id: 'e1', registroId: 'r1', fila: { cliente: 'A2' }, datos: {}, fotosGuardadas: [] } },
+    { id: 'e2', estado: 'problema', error: 'CONFLICTO: el registro cambió en el servidor', tipo: 'terreno.registro', datos: { id: 'e2', registroId: null, fila: { cliente: 'B' }, datos: {}, fotosGuardadas: [] } },
+  ];
+  const out = TC.aplicarFilaTerreno(regs, ents);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].cliente, 'B');
+  assert.equal(out[0]._fila.estado, 'problema');
+  assert.equal(out[1].id, 'r1');
+  assert.equal(out[1].cliente, 'A2');
+  assert.equal(out[1]._fila.estado, 'pendiente');
+});
+
+test('esConflicto y noExiste distinguen los rechazos del servidor', () => {
+  assert.equal(TC.esConflicto({ message: 'CONFLICTO: el registro cambió en el servidor' }), true);
+  assert.equal(TC.esConflicto({ message: 'sin permiso' }), false);
+  assert.equal(TC.noExiste({ message: 'NO_EXISTE: el registro ya no está' }), true);
+});
+
+test('entradaRegistro guarda la hora real y la versión base', () => {
+  const e = TC.entradaRegistro({ kind: 'visita', fila: { cliente: 'A' }, datos: { motivo: 'm' }, fotos: 2,
+    base: '2026-11-23T10:00:00Z', registroId: 'r1', clienteNuevo: null, id: 'e1', hechoEn: '2026-11-23T12:00:00Z' });
+  assert.equal(e.tipo, 'terreno.registro');
+  assert.equal(e.datos.base, '2026-11-23T10:00:00Z');
+  assert.equal(e.datos.hechoEn, '2026-11-23T12:00:00Z');
+  assert.equal(e.datos.nFotosNuevas, 2);
+  assert.equal(e.datos.baseFresca, false, 'por defecto la base no es fresca (se capturó al abrir el formulario)');
+});
+
+// Ronda 2 de la tarea 6 (R1): "Ver mi versión" marca la base como fresca explícitamente, no se infiere de nada.
+test('entradaRegistro: baseFresca viaja tal cual (true cuando la base se acaba de pedir, en "Ver mi versión")', () => {
+  const e = TC.entradaRegistro({ kind: 'visita', fila: {}, datos: {}, fotos: 0,
+    base: '2026-11-24T10:00:00Z', baseFresca: true, registroId: 'r1', clienteNuevo: null, id: 'e1', hechoEn: '2026-11-24T10:00:00Z' });
+  assert.equal(e.datos.baseFresca, true);
+});
+
+test('aplicarFilaTerreno: pinta igual que un registro del servidor (datos esparcidos, _datos y fotos)', () => {
+  const regs = [{ id: 'r1', kind: 'visita', cliente: 'A', motivo: 'viejo', fotos: ['r1/1.jpg'], _datos: { motivo: 'viejo', otro: 'x' } }];
+  const ents = [
+    { id: 'e1', estado: 'pendiente', error: null, tipo: 'terreno.registro', datos: { id: 'e1', kind: 'visita', registroId: 'r1', fila: { cliente: 'A' }, datos: { motivo: 'nuevo' }, fotosGuardadas: [{ ruta: 'r1/1.jpg', pie: 'p' }] } },
+    { id: 'e2', estado: 'pendiente', error: null, tipo: 'terreno.registro', datos: { id: 'e2', kind: 'visita', registroId: null, fila: { cliente: 'B' }, datos: { motivo: 'm2' }, fotosGuardadas: [] } },
+  ];
+  const [nuevo, corr] = TC.aplicarFilaTerreno(regs, ents);
+  assert.equal(corr.motivo, 'nuevo');
+  assert.deepEqual(corr._datos, { motivo: 'nuevo', otro: 'x' });
+  assert.deepEqual(corr.fotos, ['r1/1.jpg']);
+  assert.equal(nuevo.motivo, 'm2');
+  assert.deepEqual(nuevo._datos, { motivo: 'm2' });
+  assert.equal(nuevo.kind, 'visita');
+  assert.deepEqual(nuevo.fotos, []);
+  assert.equal(regs[0].motivo, 'viejo', 'no muta lo recibido');
+});
+
+test('aplicarFilaTerreno: si el registro corregido no está en la lista, conserva el id del registro (no el de la entrada)', () => {
+  const ents = [{ id: 'e1', estado: 'pendiente', error: null, tipo: 'terreno.registro', datos: { id: 'e1', kind: 'visita', registroId: 'r9', fila: { cliente: 'A' }, datos: {}, fotosGuardadas: [] } }];
+  const out = TC.aplicarFilaTerreno([], ents);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].id, 'r9');
+  assert.equal(out[0]._fila.entradaId, 'e1');
+});
+
+test('aplicarFilaTerreno: con varias entradas del mismo registro, un problema no queda tapado por una pendiente', () => {
+  const mk = (id, estado, error) => ({ id, estado, error, tipo: 'terreno.registro', datos: { id, kind: 'visita', registroId: 'r1', fila: { cliente: id }, datos: {}, fotosGuardadas: [] } });
+  const out = TC.aplicarFilaTerreno([{ id: 'r1', cliente: 'A' }], [mk('e1', 'problema', 'CONFLICTO: x'), mk('e2', 'pendiente', null)]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].cliente, 'e2', 'lo último sigue viéndose');
+  assert.deepEqual(out[0]._fila, { entradaId: 'e1', estado: 'problema', error: 'CONFLICTO: x' });
+});
+
+// IMP-1 / IMP-3 (revisión de la tarea 4): una corrección que depende del alta (misma u otra cadena) no
+// debe mostrar el genérico "Depende de un registro con problema": debe subir hasta la causa real.
+test('causaCadena: sube hasta la entrada con el error propio (cliente -> registro)', () => {
+  const cliente = { id: 'c1', estado: 'problema', error: 'duplicate key value violates unique constraint', dependeDe: null };
+  const registro = { id: 'r1', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'c1' };
+  assert.equal(TC.causaCadena([cliente, registro], registro), cliente.error);
+});
+
+test('causaCadena: cadena de dos correcciones del mismo registro sube hasta el alta rechazada (AJENO)', () => {
+  const alta = { id: 'e1', estado: 'problema', error: 'AJENO: ese id ya es de un registro de otra persona', dependeDe: null };
+  const correccion = { id: 'e2', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'e1' };
+  assert.equal(TC.causaCadena([alta, correccion], correccion), alta.error);
+});
+
+test('causaCadena: sin el mensaje genérico, devuelve el error propio tal cual', () => {
+  const e = { id: 'e1', estado: 'problema', error: 'CONFLICTO: el registro cambió en el servidor', dependeDe: 'otro' };
+  assert.equal(TC.causaCadena([e], e), e.error);
+});
+
+test('causaCadena: la entrada madre no está en la lista (se descartó o aún no llegó): se queda con el genérico', () => {
+  const huerfana = { id: 'e2', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'no-existe' };
+  assert.equal(TC.causaCadena([huerfana], huerfana), 'Depende de un registro con problema');
+});
+
+test('cadenaCompleta: une ancestros y descendientes transitivos, en cualquier sentido', () => {
+  const entradas = [{ id: 'a' }, { id: 'b', dependeDe: 'a' }, { id: 'c', dependeDe: 'b' }, { id: 'x' }];
+  for (const id of ['a', 'b', 'c']) {
+    assert.deepEqual(new Set(TC.cadenaCompleta(entradas, id)), new Set(['a', 'b', 'c']));
+  }
+  assert.deepEqual(TC.cadenaCompleta(entradas, 'x'), ['x']);
+});
+
+// I-2 (revisión final, causado por el propio arreglo de N6): al reemplazar una entrada con problema ("Ver mi
+// versión") y descartarla, cualquier otra que dependiera de ella (p. ej. un cliente nuevo encolado a la vez)
+// queda huérfana: su `dependeDe` apunta a un id que ya no existe, y como `procesarFila` solo reprocesa entradas
+// 'pendiente' (nunca 'problema'), una vez en 'problema' se queda así para siempre, sin tarjeta propia (las
+// entradas que no son 'terreno.registro' nunca tienen una) y bloqueando cerrar sesión. `descendientes` es la
+// mitad de `cadenaCompleta` que mira solo hacia abajo (nunca hacia los ancestros de `id`), para limpiarlos junto
+// con la entrada que se descarta, sin tocar de qué dependía ella.
+test('descendientes: solo lo que depende de la entrada, nunca de quién depende ella', () => {
+  const entradas = [{ id: 'a' }, { id: 'b', dependeDe: 'a' }, { id: 'c', dependeDe: 'b' }, { id: 'x' }];
+  assert.deepEqual(new Set(TC.descendientes(entradas, 'a')), new Set(['b', 'c']));
+  assert.deepEqual(new Set(TC.descendientes(entradas, 'b')), new Set(['c']));
+  assert.deepEqual(TC.descendientes(entradas, 'c'), []);
+  assert.deepEqual(TC.descendientes(entradas, 'x'), []);
+});
+// I-2a/I-2b (revisión final, dos regresiones seguidas del arreglo de I-2): descartar CUALQUIER cliente
+// descendiente de la entrada que se reemplaza era demasiado. El primer intento (I-2a) excluía los clientes
+// 'pendiente', confiando en que un cliente 'problema' siempre estaba atascado para siempre — pero eso también
+// es una aproximación (I-2b): si vuelve la señal MIENTRAS el formulario de "Ver mi versión" sigue abierto, el
+// cliente y la corrección que lo necesita pueden pasar a 'problema' en cascada ANTES de guardar, y entonces el
+// cliente se ve igual de "atascado" aunque la corrección que lo necesita siga viva y vaya a sobrevivir. El
+// criterio correcto no es el estado del cliente: es si alguna OTRA entrada de la fila (que no sea la que se va
+// a descartar) todavía depende de él. Si nadie más lo necesita, es huérfano de verdad y no importa en qué
+// estado esté; si alguien lo necesita, se deja tal cual, sea cual sea su estado.
+test('clientesHuerfanos: huérfano de verdad (nada más depende de él), sea cual sea su estado', () => {
+  const problema = { id: 'c-problema', tipo: 'terreno.cliente', estado: 'problema', dependeDe: 'madre' };
+  const pendiente = { id: 'c-pendiente', tipo: 'terreno.cliente', estado: 'pendiente', dependeDe: 'madre' };
+  assert.deepEqual(new Set(TC.clientesHuerfanos([problema, pendiente], 'madre')), new Set(['c-problema', 'c-pendiente']));
+});
+test('clientesHuerfanos: NO descarta un cliente si otra entrada SOBREVIVIENTE sigue dependiendo de él (I-2b)', () => {
+  // El cliente YA está 'problema' (como el de I-2a), pero esta vez la corrección que lo necesita (B) también
+  // pasó a 'problema' en cascada antes de guardar — y sin embargo B sigue viva: no se va a descartar, así que
+  // el cliente tampoco debe descartarse, aunque los dos estén en el mismo estado que el escenario de I-2.
+  const cliente = { id: 'c', tipo: 'terreno.cliente', estado: 'problema', dependeDe: 'madre' };
+  const correccionViva = { id: 'b', tipo: 'terreno.registro', estado: 'problema', dependeDe: 'c', datos: { registroId: 'r1' } };
+  assert.deepEqual(TC.clientesHuerfanos([cliente, correccionViva], 'madre'), []);
+});
+test('clientesHuerfanos: ignora un descendiente que no es cliente (otra corrección real, nunca se descarta)', () => {
+  const madre = { id: 'madre', tipo: 'terreno.registro', estado: 'problema', dependeDe: null };
+  const otraCorreccion = { id: 'b', tipo: 'terreno.registro', estado: 'problema', dependeDe: 'madre', datos: { registroId: 'r1' } };
+  assert.deepEqual(TC.clientesHuerfanos([madre, otraCorreccion], 'madre'), []);
+});
+
+test('descendientes: no entra en bucle si hay un ciclo (no debería pasar, pero no debe colgarse)', () => {
+  // Un ciclo real (a depende de b, b depende de a) no debería ocurrir nunca, pero si ocurriera, lo único que
+  // importa es que termine: con un ciclo, 'a' transitivamente depende de sí mismo, así que el conjunto correcto
+  // incluye a los dos, no solo a uno.
+  const entradas = [{ id: 'a', dependeDe: 'b' }, { id: 'b', dependeDe: 'a' }];
+  assert.deepEqual(new Set(TC.descendientes(entradas, 'a')), new Set(['a', 'b']));
+});
+
+// R-1 (ronda de correcciones 2): cuando una corrección tiene madre (alta aún sin enviar) Y cliente nuevo a la
+// vez, la cadena se arma en serie (madre -> cliente -> corrección) para que un `dependeDe` por entrada baste:
+// nadie queda huérfano y la causa real sube hasta el PM sin importar dónde falle.
+test('cadenaCompleta/causaCadena: cadena madre -> cliente -> corrección, la causa real del alta llega hasta la corrección', () => {
+  const alta = { id: 'madre', estado: 'problema', error: 'AJENO: ese id ya es de un registro de otra persona', dependeDe: null };
+  const cliente = { id: 'cliente', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'madre' };
+  const correccion = { id: 'correccion', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'cliente' };
+  const entradas = [alta, cliente, correccion];
+  for (const e of entradas) assert.deepEqual(new Set(TC.cadenaCompleta(entradas, e.id)), new Set(['madre', 'cliente', 'correccion']), e.id);
+  assert.equal(TC.causaCadena(entradas, cliente), alta.error);
+  assert.equal(TC.causaCadena(entradas, correccion), alta.error);
+});
+
+test('aplicarFilaTerreno: la corrección de un alta aún no enviada depende de ella y muestra la causa real, no el genérico', () => {
+  const alta = { id: 'e1', estado: 'problema', error: 'AJENO: ese id ya es de un registro de otra persona', dependeDe: null,
+    tipo: 'terreno.registro', datos: { id: 'r1', kind: 'visita', registroId: null, fila: { cliente: 'Original' }, datos: {}, fotosGuardadas: [] } };
+  const correccion = { id: 'e2', estado: 'problema', error: 'Depende de un registro con problema', dependeDe: 'e1',
+    tipo: 'terreno.registro', datos: { id: 'u-corr', kind: 'visita', registroId: 'r1', fila: { cliente: 'Corregido' }, datos: {}, fotosGuardadas: [] } };
+  const out = TC.aplicarFilaTerreno([], [alta, correccion]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].cliente, 'Corregido', 'se ve lo último escrito');
+  assert.equal(out[0]._fila.error, alta.error, 'la causa real del alta, no el genérico de la corrección');
+  // Reintentar/Descartar deben poder actuar sobre la cadena completa a partir de cualquiera de los dos eslabones.
+  assert.deepEqual(new Set(TC.cadenaCompleta([alta, correccion], out[0]._fila.entradaId)), new Set(['e1', 'e2']));
+});
+
+// I3: una pasada de sincronización sin nada nuevo que pintar no debe repintar Panel/Registros.
+test('firmaFila: cambia con el estado o el error, igual si no cambia nada', () => {
+  const ent = (id, estado, error) => ({ id, tipo: 'terreno.registro', estado, error: error || null, datos: {} });
+  const a = [ent('1', 'pendiente'), ent('2', 'problema', 'AJENO: ese id ya es de un registro de otra persona')];
+  assert.equal(TC.firmaFila(a), '1:pendiente:|2:problema:AJENO: ese id ya es de un registro de otra persona');
+  assert.equal(TC.firmaFila([]), '');
+  assert.equal(TC.firmaFila(undefined), '');
+  assert.notEqual(TC.firmaFila(a), TC.firmaFila([a[0], { ...a[1], estado: 'enviando' }]));
+  assert.notEqual(TC.firmaFila(a), TC.firmaFila([a[0], { ...a[1], error: 'otro error' }]));
+});
+
+// Ronda de correcciones 1 de la tarea 6 (C1): "Ver mi versión" reemplaza la entrada con problema (la descarta al
+// guardar de nuevo), así que la corrección nueva nunca debe depender de la que va a desaparecer — se queda huérfana
+// de dependencia (null) si la vieja no dependía de nada, o hereda lo que la vieja tenía (un cliente nuevo, u otra
+// madre) para no perder esa cadena.
+// Ronda 2 (C1 reabierto / R1): heredar solo vale si esa dependencia sigue siendo un motivo real para esperar
+// (esperaValida): un cliente nuevo sin crear, o un alta de este registro sin enviar. Una corrección hermana del
+// mismo registro — resuelta o no — nunca es un motivo válido: "Ver mi versión" ya leyó la verdad del servidor.
+
+test('esperaValida: un cliente nuevo todavía pendiente/con problema sigue siendo un motivo para esperar', () => {
+  const cliente = { id: 'cli1', tipo: 'terreno.cliente', datos: {} };
+  assert.equal(TC.esperaValida([cliente], 'cli1'), true);
+});
+test('esperaValida: un alta de este registro sin enviar (sin registroId) sigue siendo un motivo para esperar', () => {
+  const alta = { id: 'alta1', tipo: 'terreno.registro', datos: { registroId: null } };
+  assert.equal(TC.esperaValida([alta], 'alta1'), true);
+});
+test('esperaValida: una corrección del mismo registro (tiene registroId) nunca es un motivo válido', () => {
+  const correccion = { id: 'corr1', tipo: 'terreno.registro', datos: { registroId: 'r1' } };
+  assert.equal(TC.esperaValida([correccion], 'corr1'), false);
+});
+test('esperaValida: ya no está en la fila (se resolvió: alta, corrección o cliente, no importa cuál): no hace falta esperar', () => {
+  assert.equal(TC.esperaValida([], 'ya-resuelta'), false);
+});
+
+// N6 (revisión final): un cliente nuevo que a su vez depende de una corrección hermana (madre→cliente→corrección)
+// solo es un motivo válido si ESA dependencia también lo es. Si la madre es una corrección real en conflicto, el
+// cliente nunca se va a crear por sí solo (procesarFila lo deja 'problema' para siempre detrás de ella): esperarlo
+// es, en el fondo, esperar a la madre, que nunca es válido.
+test('esperaValida: un cliente que depende de una corrección hermana en conflicto NO es un motivo válido (N6)', () => {
+  const madre = { id: 'madre', tipo: 'terreno.registro', datos: { registroId: 'r1' } };
+  const cliente = { id: 'cli1', tipo: 'terreno.cliente', datos: {}, dependeDe: 'madre' };
+  assert.equal(TC.esperaValida([madre, cliente], 'cli1'), false);
+});
+test('esperaValida: un cliente que depende de un alta sin enviar SIGUE siendo un motivo válido (sin cambios)', () => {
+  const alta = { id: 'alta1', tipo: 'terreno.registro', datos: { registroId: null } };
+  const cliente = { id: 'cli1', tipo: 'terreno.cliente', datos: {}, dependeDe: 'alta1' };
+  assert.equal(TC.esperaValida([alta, cliente], 'cli1'), true);
+});
+test('esperaValida: un cliente sin dependencia propia sigue siendo válido (caso simple, sin cambios)', () => {
+  const cliente = { id: 'cli1', tipo: 'terreno.cliente', datos: {} };
+  assert.equal(TC.esperaValida([cliente], 'cli1'), true);
+});
+
+test('dependeDeCorreccion: al reemplazar, hereda el dependeDe de un cliente nuevo todavía sin crear', () => {
+  const cliente = { id: 'cliente-nuevo', tipo: 'terreno.cliente', datos: {} };
+  const vieja = { id: 'conflicto', estado: 'problema', dependeDe: 'cliente-nuevo' };
+  assert.equal(TC.dependeDeCorreccion([vieja, cliente], { reemplazaEntrada: 'conflicto' }), 'cliente-nuevo');
+});
+
+// R1 (ronda 2): la entrada que depende de una corrección HERMANA del mismo registro (ya enviada con éxito, o
+// todavía con problema ella misma) no debe heredar esa dependencia: antes volvía a CONFLICTO sin salida (R1) o
+// quedaba bloqueada otra vez por `procesarFila` (C1 reabierto).
+test('dependeDeCorreccion: al reemplazar, NO hereda el dependeDe hacia una corrección hermana ya enviada', () => {
+  // La hermana ya se envió: no aparece en `entradas` (TXOffline.entradas() solo trae pendiente/problema).
+  const vieja = { id: 'conflicto', estado: 'problema', dependeDe: 'hermana-enviada' };
+  assert.equal(TC.dependeDeCorreccion([vieja], { reemplazaEntrada: 'conflicto' }), null);
+});
+test('dependeDeCorreccion: al reemplazar, NO hereda el dependeDe hacia una corrección hermana que sigue con problema', () => {
+  const hermana = { id: 'hermana', tipo: 'terreno.registro', estado: 'problema', datos: { registroId: 'r1' } };
+  const vieja = { id: 'conflicto', estado: 'problema', dependeDe: 'hermana' };
+  assert.equal(TC.dependeDeCorreccion([vieja, hermana], { reemplazaEntrada: 'conflicto' }), null);
+});
+
+// N6 (revisión final): escenario reproducido — dos correcciones propias del mismo registro (A, con conflicto
+// real) donde la segunda (B) además estrena un cliente nuevo: cliente C depende de A (R1), B depende de C. Antes
+// de este arreglo, "Ver mi versión" sobre B volvía a heredar el dependeDe hacia C (un cliente, siempre "válido"
+// antes), y C nunca se resuelve: queda detrás de A para siempre. Ahora, al no ser C un motivo válido (depende de
+// A, una corrección real), la nueva entrada no hereda nada: queda libre para mandar su propio cliente, sin
+// esperar a la cadena rota.
+test('dependeDeCorreccion: al reemplazar, NO hereda hacia un cliente que a su vez depende de una corrección hermana en conflicto (N6)', () => {
+  const madre = { id: 'A', tipo: 'terreno.registro', estado: 'problema', datos: { registroId: 'r1' } };
+  const cliente = { id: 'C', tipo: 'terreno.cliente', datos: {}, dependeDe: 'A' };
+  const vieja = { id: 'B', estado: 'problema', dependeDe: 'C' };
+  assert.equal(TC.dependeDeCorreccion([madre, cliente, vieja], { reemplazaEntrada: 'B' }), null);
+});
+
+test('dependeDeCorreccion: al reemplazar una entrada sin madre, no depende de nada', () => {
+  const vieja = { id: 'conflicto', estado: 'problema', dependeDe: null };
+  assert.equal(TC.dependeDeCorreccion([vieja], { reemplazaEntrada: 'conflicto' }), null);
+});
+
+test('dependeDeCorreccion: la entrada a reemplazar ya no está en la fila (se descartó aparte): no depende de nada', () => {
+  assert.equal(TC.dependeDeCorreccion([], { reemplazaEntrada: 'ya-no-esta' }), null);
+});
+
+// C2: sin reemplazo, el comportamiento de siempre — depender de la entrada pendiente/con problema que ya hubiera
+// para este registro (la marca `_fila` que deja aplicarFilaTerreno), para no adelantarse a ella.
+test('dependeDeCorreccion: sin reemplazo, depende de la entrada pendiente del mismo registro si la hay', () => {
+  assert.equal(TC.dependeDeCorreccion([], { filaPrevia: { entradaId: 'pendiente-1' } }), 'pendiente-1');
+  assert.equal(TC.dependeDeCorreccion([], {}), null);
+});
+
+// C2: la base de una corrección encadenada a OTRA corrección (o alta) del mismo registro debe ser la versión que
+// esa entrada madre dejó al enviarse con éxito, no la capturada al abrir el formulario (que para entonces ya está
+// vieja) — así no se marca CONFLICTO acusando a "otra persona" cuando en realidad fue el propio PM, en la entrada
+// anterior de la misma cadena.
+test('baseCorreccion: con una versión de la madre, se usa esa y no la capturada al abrir', () => {
+  assert.equal(TC.baseCorreccion('T0', 'T1'), 'T1');
+});
+test('baseCorreccion: sin versión de una madre (dependía de un cliente nuevo, o no dependía de nada), se usa la capturada', () => {
+  assert.equal(TC.baseCorreccion('T0', null), 'T0');
+  assert.equal(TC.baseCorreccion('T0', undefined), 'T0');
+});
+test('baseCorreccion: sin ninguna de las dos, null (el manejador pedirá la versión del servidor)', () => {
+  assert.equal(TC.baseCorreccion(null, null), null);
+});
+// R1 (ronda 2): una base fresca (recién pedida al servidor, o de la copia local, al reemplazar una entrada con
+// problema) nunca se reemplaza por la de una madre, exista o no — ya es de fiar por sí misma. Antes, por esto,
+// "Ver mi versión" sobre una corrección encadenada daba CONFLICTO en cada intento (R1).
+test('baseCorreccion: una base fresca nunca se reemplaza por la de una madre, aunque exista', () => {
+  assert.equal(TC.baseCorreccion('FRESCA', 'T1', true), 'FRESCA');
+  assert.equal(TC.baseCorreccion('FRESCA', null, true), 'FRESCA');
+  assert.equal(TC.baseCorreccion(null, 'T1', true), null);
+});
+
+// m1 (diferido con I4): cadena madre->cliente->corrección. `datos.madre` (guardado al encolar) debe primar
+// sobre `dependeDe`, que en esa cadena apunta al cliente nuevo, no a la madre real (ver registro-terreno.html).
+test('madreParaVersion: con datos.madre, se usa esa y no dependeDe (cadena madre->cliente->correccion)', () => {
+  assert.equal(TC.madreParaVersion({ madre: 'madre1' }, 'cliente1'), 'madre1');
+});
+test('madreParaVersion: sin datos.madre, se usa dependeDe (correccion encadenada sin cliente nuevo de por medio)', () => {
+  assert.equal(TC.madreParaVersion({}, 'madre1'), 'madre1');
+  assert.equal(TC.madreParaVersion(null, 'madre1'), 'madre1');
+});
+test('madreParaVersion: sin ninguna de las dos, null', () => {
+  assert.equal(TC.madreParaVersion({}, null), null);
+  assert.equal(TC.madreParaVersion(null, null), null);
+});
+
+// I4: una corrección aplicada cuya respuesta se perdió no debe quedar "con problema" contra uno mismo.
+// jsonb no conserva el orden de las llaves de un objeto: igualProfundo debe ignorarlo (los arreglos sí
+// comparan por orden).
+test('igualProfundo: objetos iguales con llaves en otro orden (como los deja jsonb)', () => {
+  assert.equal(TC.igualProfundo({ a: 1, b: 2 }, { b: 2, a: 1 }), true);
+});
+test('igualProfundo: arreglos iguales en el mismo orden; distinto orden no es igual', () => {
+  assert.equal(TC.igualProfundo([1, 2], [1, 2]), true);
+  assert.equal(TC.igualProfundo([1, 2], [2, 1]), false);
+});
+test('igualProfundo: anidado (objeto dentro de arreglo dentro de objeto)', () => {
+  assert.equal(TC.igualProfundo({ x: [{ a: 1 }] }, { x: [{ a: 1 }] }), true);
+  assert.equal(TC.igualProfundo({ x: [{ a: 1 }] }, { x: [{ a: 2 }] }), false);
+});
+test('igualProfundo: distinta cantidad de llaves o de largo no es igual', () => {
+  assert.equal(TC.igualProfundo({ a: 1 }, { a: 1, b: 2 }), false);
+  assert.equal(TC.igualProfundo([1], [1, 2]), false);
+});
+test('igualProfundo: null/undefined', () => {
+  assert.equal(TC.igualProfundo(null, null), true);
+  assert.equal(TC.igualProfundo(null, {}), false);
+  assert.equal(TC.igualProfundo(undefined, undefined), true);
+});
+
+test('mismoContenido: mismo contenido con las llaves de datos en otro orden -> true (ya se aplico, no es conflicto)', () => {
+  const fila = { kind: 'visita', fecha: '2026-11-24', cliente: 'Cliente Test', cliente_id: 'c1', obra: 'Obra', estado: 'Abierto', datos: { motivo: 'x', editado: { por: 'PM Test', ts: 't1' } }, fotos: ['a.jpg'] };
+  const cuerpo = { kind: 'visita', fecha: '2026-11-24', cliente: 'Cliente Test', cliente_id: 'c1', obra: 'Obra', estado: 'Abierto', datos: { editado: { ts: 't1', por: 'PM Test' }, motivo: 'x' }, fotos: ['a.jpg'] };
+  assert.equal(TC.mismoContenido(fila, cuerpo), true);
+});
+test('mismoContenido: un campo de datos distinto -> false (conflicto real, otra persona si corrigio)', () => {
+  const fila = { kind: 'visita', fecha: '2026-11-24', cliente: 'Cliente Test', cliente_id: 'c1', obra: 'Obra', estado: 'Abierto', datos: { motivo: 'x' }, fotos: [] };
+  const otro = { ...fila, datos: { motivo: 'y' } };
+  assert.equal(TC.mismoContenido(fila, otro), false);
+});
+test('mismoContenido: sin fila o sin cuerpo -> false', () => {
+  assert.equal(TC.mismoContenido(null, {}), false);
+  assert.equal(TC.mismoContenido({}, null), false);
+});

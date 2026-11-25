@@ -220,6 +220,220 @@
     return { fotos, pies };
   };
 
+  // ── Terreno sin conexión ──
+  // Lógica pura de lo que se registró sin señal. Aquí nunca se tocan blobs: las fotos nuevas
+  // viajan aparte, en los archivos de la fila, y acá solo se cuenta cuántas son.
+
+  // La ruta depende solo de la entrada y del índice, así un reintento sobrescribe la misma
+  // foto en vez de dejar copias huérfanas en el almacenamiento.
+  const rutaFoto = (entradaId, i) => `${entradaId}/${i + 1}.jpg`;
+
+  // Lo que se encola al guardar sin conexión. `id` lo pone quien llama (es el de la entrada de
+  // la fila) y `hechoEn` es la hora real del registro: al sincronizar horas después, el servidor
+  // debe saber cuándo ocurrió, no cuándo llegó. `base` es la versión que se estaba corrigiendo,
+  // para detectar si otra persona la cambió mientras tanto. `fotos` es solo la cantidad de nuevas.
+  // `baseFresca`: true cuando `base` se acaba de pedir (o leer de la copia local) al reemplazar una entrada con
+  // problema ("Ver mi versión"), no cuando se capturó al abrir el formulario y podría quedar vieja si hay una
+  // corrección pendiente del mismo registro por delante. El manejador nunca debe reemplazar una base fresca por
+  // la que dejó una entrada madre (baseCorreccion), aunque dependa de ella por otro motivo.
+  const entradaRegistro = ({ id, kind, fila, datos, fotos, base, baseFresca, registroId, clienteNuevo, hechoEn }) => ({
+    tipo: 'terreno.registro',
+    datos: {
+      id, kind, registroId: registroId || null, fila: fila || {}, datos: datos || {},
+      fotosGuardadas: [], nFotosNuevas: Number(fotos) || 0,
+      base: base || null, baseFresca: !!baseFresca, clienteNuevo: clienteNuevo || null, hechoEn,
+    },
+  });
+
+  // Mezcla lo pendiente con los registros ya cargados, sin mutar ninguna de las dos listas.
+  // Cada fila queda con la misma forma que un registro del servidor (columnas, campos de `datos`
+  // esparcidos arriba y `_datos` completo) para que se pinte y se abra el informe igual.
+  // Una entrada que corrige un registro lo reemplaza en su sitio (así no se ve doble); si el
+  // registro no está en la lista conserva su propio id, para que reeditarla apunte al registro
+  // y no a la entrada. Las filas sin sincronizar van al principio, en el orden en que llegaron.
+  // Mensaje literal que offline-core.js (procesarFila) pone en una entrada cuando la que debía ir antes
+  // (dependeDe) terminó con problema: no dice la causa, solo que depende de otra. Antes de mostrarlo se
+  // sube por la cadena (cliente -> registro, o registro -> su corrección) hasta la entrada cuyo error es
+  // el propio, para que el PM vea la causa real (p. ej. el rechazo de la base) y no el genérico.
+  const MSG_DEPENDE = 'Depende de un registro con problema';
+  const causaCadena = (entradas, entrada) => {
+    const porId = new Map((entradas || []).map((e) => [e.id, e]));
+    let actual = entrada; const vistos = new Set();
+    while (actual && actual.error === MSG_DEPENDE && actual.dependeDe && !vistos.has(actual.id)) {
+      vistos.add(actual.id);
+      actual = porId.get(actual.dependeDe) || null;
+    }
+    return (actual && actual.error) || entrada.error;
+  };
+
+  // Todas las entradas unidas a `id` por `dependeDe`, en cualquier sentido (de quien depende de ella y de
+  // quien ella depende): Reintentar y Descartar actúan sobre la cadena completa, nunca sobre un solo eslabón
+  // (si no, uno queda huérfano: con problema sin botones, o enviándose antes que su dependencia).
+  const cadenaCompleta = (entradas, id) => {
+    const todas = entradas || [];
+    const vistos = new Set([id]), cola = [id];
+    while (cola.length) {
+      const x = cola.shift();
+      const e = todas.find((y) => y.id === x);
+      if (e && e.dependeDe && !vistos.has(e.dependeDe)) { vistos.add(e.dependeDe); cola.push(e.dependeDe); }
+      todas.forEach((y) => { if (y.dependeDe === x && !vistos.has(y.id)) { vistos.add(y.id); cola.push(y.id); } });
+    }
+    return [...vistos];
+  };
+
+  // Solo lo que depende de `id`, directa o transitivamente (nunca de qué depende `id`): la mitad de abajo de
+  // `cadenaCompleta`. Al descartar una entrada que se reemplaza ("Ver mi versión"), esto es lo que hay que
+  // descartar junto con ella para no dejar huérfanos (I-2, revisión final): una entrada que dependía de la que
+  // se fue queda con un `dependeDe` apuntando a nada, y como `procesarFila` solo reprocesa 'pendiente' (nunca
+  // 'problema'), si ya estaba 'problema' se queda así para siempre, sin tarjeta ni botones.
+  const descendientes = (entradas, id) => {
+    const todas = entradas || [];
+    const vistos = new Set(), cola = [id];
+    while (cola.length) {
+      const x = cola.shift();
+      todas.forEach((y) => { if (y.dependeDe === x && !vistos.has(y.id)) { vistos.add(y.id); cola.push(y.id); } });
+    }
+    return [...vistos];
+  };
+
+  // Los descendientes de `id` que de verdad quedarían huérfanos para siempre si `id` se descarta: solo clientes
+  // nuevos (`terreno.cliente`) de los que YA NO depende nadie más. El estado del cliente (pendiente o problema)
+  // no decide nada por sí solo: un cliente 'pendiente' puede quedar sin nada que lo necesite igual que uno
+  // 'problema' (I-2a), y uno 'problema' puede seguir haciendo falta si la corrección que depende de él también
+  // cayó en 'problema' en cascada ANTES de guardar, sin que por eso vaya a descartarse (I-2b: vuelve la señal
+  // mientras el formulario de "Ver mi versión" sigue abierto). Lo único que importa es si alguna otra entrada de
+  // la fila —que no sea `id`, la que se va a descartar de todos modos— todavía apunta su `dependeDe` a este
+  // cliente: si la hay, el cliente sigue sirviendo y se deja tal cual; si no la hay, no le sirve a nadie y es
+  // huérfano de verdad. Otra `terreno.registro` descendiente nunca se incluye entre lo que se descarta: es
+  // contenido real del PM, no un cliente que se pueda recrear solo.
+  const clientesHuerfanos = (entradas, id) => {
+    const todas = entradas || [];
+    return descendientes(todas, id).filter((hid) => {
+      const e = todas.find((x) => x.id === hid);
+      if (!e || e.tipo !== 'terreno.cliente') return false;
+      return !todas.some((y) => y.id !== id && y.dependeDe === hid);
+    });
+  };
+
+  const aplicarFilaTerreno = (registros, entradas) => {
+    const lista = (registros || []).slice();
+    const nuevas = [];
+    const rutaDe = (x) => (x && typeof x === 'object' ? x.ruta : x);
+    (entradas || []).forEach((e) => {
+      if (!e || e.tipo !== 'terreno.registro' || !e.datos) return;
+      const d = e.datos;
+      const id = d.registroId || d.id || e.id;
+      // Si ya hay un problema en este registro se deja ese: es la única entrada con Reintentar
+      // y Descartar, y una pendiente posterior no debe taparlo.
+      let marca = { entradaId: e.id, estado: e.estado, error: e.estado === 'problema' ? causaCadena(entradas, e) : (e.error || null) };
+      let lugar = lista, idx = lista.findIndex((r) => r && r.id === id);
+      if (idx < 0) { lugar = nuevas; idx = nuevas.findIndex((r) => r.id === id); }
+      const previo = idx >= 0 ? lugar[idx] : { id, kind: d.kind };
+      if (previo._fila && previo._fila.estado === 'problema' && e.estado !== 'problema') marca = previo._fila;
+      const datos = { ...(previo._datos || {}), ...(d.datos || {}) };
+      const fila = { ...previo, ...datos, ...(d.fila || {}), id, _datos: datos,
+        fotos: (d.fotosGuardadas || []).map(rutaDe).filter(Boolean), _fila: marca };
+      if (idx >= 0) lugar[idx] = fila; else nuevas.push(fila);
+    });
+    return [...nuevas, ...lista];
+  };
+
+  // Firma de la fila (ids + estado + error, como CO.firmaFila del CRM): cambia solo si hay algo nuevo que pintar
+  // (una entrada nueva, resuelta, o un error distinto). Una pasada de sincronización sin nada de esto no debe
+  // redibujar Panel/Registros: se lleva por delante la vista previa del informe y los <details> abiertos (I3).
+  const firmaFila = (entradas) => (entradas || []).map((e) => e.id + ':' + e.estado + ':' + (e.error || '')).join('|');
+
+  // La base responde con mensajes que empiezan con CONFLICTO: o NO_EXISTE:; se distinguen por
+  // el prefijo porque el cliente no recibe un código aparte.
+  const msgDe = (error) => String((error && error.message) || error || '');
+  const esConflicto = (error) => msgDe(error).startsWith('CONFLICTO:');
+  const noExiste = (error) => msgDe(error).startsWith('NO_EXISTE:');
+  const MSG_CONFLICTO = 'Otra persona corrigió este registro mientras no tenías señal. Revisa tu versión antes de volver a guardarla.';
+
+  // Si el objetivo de una dependencia heredada ("Ver mi versión" reemplazando una entrada con problema) sigue
+  // siendo un motivo válido para esperar: un cliente nuevo que todavía no se creó, o un alta de ESTE registro que
+  // todavía no llegó al servidor. Ninguno de los dos aparece ya en `entradas` (TXOffline.entradas() solo trae
+  // pendientes/con problema) una vez que se resolvió. Una corrección (tiene `registroId`) NUNCA es un motivo
+  // válido, se haya resuelto ya o siga con problema: la entrada que la reemplaza acaba de leer la verdad actual
+  // del servidor (o, sin señal, la mejor copia local que hay), así que no necesita esperarla — y si igual quedara
+  // dependiendo de una corrección hermana con problema, `procesarFila` (offline-core.js) la bloquearía de nuevo
+  // sin motivo real, el mismo callejón sin salida que esto reemplaza.
+  // N6 (revisión final): un cliente es válido de esperar solo si SU PROPIA dependencia (si tiene una) también lo
+  // es. Una cadena madre→cliente→corrección encadena el cliente a la corrección vieja (R1); si esa madre es una
+  // corrección real en conflicto, el cliente nunca se va a crear por sí solo (queda 'problema' detrás de ella para
+  // siempre): esperarlo es, en el fondo, esperar a la madre, que nunca es válido. Recorre `vistos` para no
+  // entrar en un ciclo si dos entradas llegaran a depender una de la otra.
+  const esperaValida = (entradas, id, vistos) => {
+    const objetivo = (entradas || []).find((e) => e.id === id);
+    if (!objetivo || !objetivo.datos) return false;
+    if (objetivo.tipo === 'terreno.cliente') {
+      if (!objetivo.dependeDe) return true;
+      const vis = vistos || new Set();
+      if (vis.has(id)) return false;
+      vis.add(id);
+      return esperaValida(entradas, objetivo.dependeDe, vis);
+    }
+    return objetivo.tipo === 'terreno.registro' && !objetivo.datos.registroId;
+  };
+
+  // De qué entrada debe depender una corrección nueva, para no adelantarse a otra pendiente del mismo registro ni
+  // quedar huérfana. Si reemplaza una entrada con problema (reemplazaEntrada: el PM la reabrió con "Ver mi versión"
+  // y la va a descartar al guardar), hereda el dependeDe que esa tenía SOLO si sigue siendo necesario (esperaValida);
+  // nunca depende de la entrada que reemplaza, porque se descarta al mismo tiempo que esta se encola. Si no
+  // reemplaza nada, depende de la entrada pendiente/con problema que ya hubiera para este registro (filaPrevia, la
+  // marca `_fila` que deja aplicarFilaTerreno), si la hay.
+  const dependeDeCorreccion = (entradas, { reemplazaEntrada, filaPrevia } = {}) => {
+    if (reemplazaEntrada) {
+      const vieja = (entradas || []).find((e) => e.id === reemplazaEntrada);
+      const dep = vieja && vieja.dependeDe;
+      return (dep && esperaValida(entradas, dep)) ? dep : null;
+    }
+    return (filaPrevia && filaPrevia.entradaId) || null;
+  };
+
+  // La base que debe viajar en p_base al corregir: si esta entrada depende de otra que ya corrigió el MISMO
+  // registro (una alta o corrección anterior, encadenada porque estaba pendiente cuando se abrió este formulario),
+  // la base capturada al abrir quedó vieja en cuanto esa entrada madre se envió con éxito: se usa la versión que
+  // dejó (versionMadre), no la capturada. Si no hay versión de una madre (dependía de un cliente nuevo, o no
+  // dependía de nada), se usa la base capturada tal cual. EXCEPCIÓN: si la base es `baseFresca` (se acaba de pedir
+  // o leer de la copia local al reemplazar una entrada con problema, no capturada al abrir el formulario), nunca
+  // se reemplaza por la de una madre, aunque haya una: ya es de fiar por sí misma.
+  const baseCorreccion = (baseCapturada, versionMadre, baseFresca) =>
+    baseFresca ? (baseCapturada || null) : (versionMadre || baseCapturada || null);
+
+  // Qué id hay que mirar para buscar 'version-de:<id>' (la versión que dejó la madre al enviarse con éxito).
+  // `datosEntrada.madre` (guardado al encolar, si la hay) es la madre REAL de esta corrección/alta aunque
+  // `dependeDe` apunte a un cliente nuevo de por medio (cadena madre→cliente→corrección): sin esto, cuando la
+  // corrección también crea un cliente, `dependeDe` es el cliente (para el orden de envío) y la versión de la
+  // madre quedaba sin encontrar: se usaba la base capturada, ya vieja → CONFLICTO falso (m1, diferido con I4).
+  const madreParaVersion = (datosEntrada, dependeDe) => (datosEntrada && datosEntrada.madre) || dependeDe || null;
+
+  // Igualdad profunda sin importar el orden de las llaves (jsonb no conserva el orden de inserción de un
+  // objeto, así que comparar con JSON.stringify fallaría aunque el contenido sea el mismo). Los arreglos sí
+  // comparan por orden: fotos y participantes son listas, no conjuntos.
+  const igualProfundo = (a, b) => {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => igualProfundo(v, b[i]));
+    }
+    if (typeof a === 'object' && typeof b === 'object') {
+      const ka = Object.keys(a), kb = Object.keys(b);
+      return ka.length === kb.length && ka.every((k) => igualProfundo(a[k], b[k]));
+    }
+    return false;
+  };
+
+  // Si lo que el servidor tiene AHORA para este registro es exactamente lo que esta entrada estaba por mandar
+  // (I4): una respuesta perdida justo después de aplicarse con éxito hace que el reintento choque con su propia
+  // versión nueva (CONFLICTO). `datos.editado.ts` (TC.marcarEdicion) hace única cada corrección, así que si todo
+  // lo demás coincide, es el mismo envío, no uno de otra persona.
+  const CAMPOS_CONTENIDO = ['kind', 'fecha', 'cliente', 'cliente_id', 'obra', 'estado'];
+  const mismoContenido = (fila, cuerpo) => !!fila && !!cuerpo
+    && CAMPOS_CONTENIDO.every((k) => (fila[k] ?? null) === (cuerpo[k] ?? null))
+    && igualProfundo(fila.datos || {}, cuerpo.datos || {})
+    && igualProfundo(fila.fotos || [], cuerpo.fotos || []);
+
   // ── Validación del envío por QR (la RPC de la base refleja estas reglas) ──
   const MAX_NOMBRE = 120, MAX_FIRMA = 60 * 1024, MAX_ACTIVIDAD = 80;
   const normNombre = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
@@ -618,7 +832,7 @@
     return ultimoEnvio(d) ? 'Reenviar copia' : 'Reintentar envío';
   }
 
-  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, fotosYPies, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, MAX_FOTOS_ENSAYO, topeFotos, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
+  const API = { CONCLUSION_BASE, DESARROLLO_DEFECTO, NOTA_LEGAL, PIE, DOC_META, mpa, mpaDeFila, esManual, numero, fmtNum, fmtMpa, filaEnBlanco, normalizarFilas, validarEnsayo, datosEnsayo, firmanteInicial, encabezadoInforme, dibujarEncabezado, informeAdherenciaHtml, correoCliente, resumenEnsayo, conclusionBase, correoVisita, correoEnsayo, validarCuerpoCorreo, participantesVista, mezclarParticipantes, puedeEditar, marcarEdicion, fotosEditadas, fotosYPies, rutaFoto, entradaRegistro, aplicarFilaTerreno, firmaFila, causaCadena, cadenaCompleta, descendientes, clientesHuerfanos, esConflicto, noExiste, MSG_CONFLICTO, esperaValida, dependeDeCorreccion, baseCorreccion, madreParaVersion, igualProfundo, mismoContenido, validarAsistencia, trazoAPng, ASISTENCIA_URL, enlaceAsistencia, tokenValido, esPngFirma, esBorrador, sinBorradores, ordenarRegistros, totalParticipantes, planParticipantes, llegadasNuevas, mensajeAsistencia, conteoAsistencias, MAX_FOTOS, MAX_FOTOS_ENSAYO, topeFotos, LIMITE_ENVIO_BYTES, cupoFotos, tipoImagen, cierreVisita, tamanoInforme, nombreInforme, informeVisitaHtml, correoValido, puedeEnviar, textoErrorEnvio, registrarEnvio, resolverEnvio, resolverDudoso, historialNoSalio, envioNoSalio, envioDudoso, fechaHoraCL, lineaEnvio, botonEnvio };
   if (typeof window !== 'undefined') g.TC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

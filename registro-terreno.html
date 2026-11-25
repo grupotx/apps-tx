@@ -7,6 +7,8 @@
 <title>Grupo TX · Registro de Terreno</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="foto-archivada.js"></script>
+<script src="offline-core.js"></script>
+<script src="offline.js"></script>
 <script src="terreno-core.js"></script>
 <script src="terreno-firma.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" integrity="sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k" crossorigin="anonymous"></script>
@@ -31,7 +33,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .uchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:4px 12px 4px 4px;color:var(--ink);text-decoration:none;font-size:13px}
 .uchip .av{width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:11.5px;font-weight:700}
 .uchip .un{display:grid;line-height:1.15}.uchip .un b{font-size:12.5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uchip .un small{font-size:10.5px;color:var(--mute)}
-#estado-conexion{font-size:12px;color:var(--mute)}
+#estado-conexion,#copia-ind,#fila-ind{font-size:12px;color:var(--mute)}
+#btn-salir{padding:6px 12px;font-size:12px}
 nav{display:flex;gap:6px;padding:0 20px 10px;overflow-x:auto;max-width:1100px;margin:0 auto;scrollbar-width:none}
 nav button{flex:none;border:1px solid transparent;background:transparent;color:var(--mute);padding:8px 14px;border-radius:10px;font-weight:600;font-size:13.5px;cursor:pointer}
 nav button:hover{color:var(--ink);background:var(--sunk)}
@@ -174,7 +177,10 @@ details.mas p{margin:6px 0}
   <div class="topin">
     <span class="txmark" aria-label="Grupo TX"><svg role="img" aria-label="Grupo TX" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1181.46 500"><g><g><path d="M36.39,34.79h35.41v30.74c-3.77,4.13-8.31,7.35-13.63,9.67-5.32,2.32-10.99,3.48-17,3.48-12.02,0-21.89-3.62-29.6-10.86C3.86,60.57,0,51.09,0,39.36c0-11.08,3.67-20.4,11.02-27.97C18.37,3.82,27.81.04,39.32.04c6.52,0,12.6,1.25,18.25,3.75,5.65,2.5,9.81,5.81,12.49,9.94l-11.62,10.43c-4.63-5.21-10.79-7.82-18.46-7.82-6.95,0-12.44,2.04-16.46,6.14-4.02,4.09-6.03,9.72-6.03,16.89s2.19,12.89,6.57,16.94c4.38,4.05,10.12,6.08,17.22,6.08,5.58,0,10.35-1.45,14.34-4.34v-8.04h-19.23v-15.21Z" fill="currentColor" stroke-width="0"></path><path d="M586.76,44.59c0,4.75-.63,9.06-1.89,12.92-1.26,3.86-2.93,7.09-5.01,9.69-2.08,2.6-4.55,4.79-7.4,6.57-2.86,1.78-5.85,3.06-8.96,3.84-3.12.78-6.38,1.17-9.8,1.17-9.87,0-18.15-3.04-24.83-9.13-6.68-6.09-10.02-14.66-10.02-25.72V.05h17.26v41.87c0,6.31,1.52,11.34,4.56,15.09,3.04,3.75,7.39,5.62,13.03,5.62,10.54,0,15.81-6.76,15.81-20.27V.05h17.26v44.54Z" fill="currentColor" stroke-width="0"></path><path d="M778.01,78.5V.21h32.43c6.34,0,11.78.78,16.33,2.35,4.55,1.57,8,3.69,10.35,6.37,2.35,2.68,4.03,5.52,5.03,8.5,1.01,2.98,1.51,6.23,1.51,9.73,0,7.46-2.68,13.78-8.05,18.96-5.37,5.18-13.76,7.77-25.16,7.77h-15.1v24.61h-17.34ZM795.34,16.43v21.25h14.88c10.29,0,15.43-3.54,15.43-10.63s-4.92-10.63-14.76-10.63h-15.55Z" fill="currentColor" stroke-width="0"></path><path d="M1041.89,11.44c7.57-7.6,16.85-11.41,27.86-11.41s20.18,3.75,27.75,11.24c7.57,7.49,11.35,16.85,11.35,28.08s-3.78,20.49-11.35,28.02c-7.57,7.53-16.82,11.3-27.75,11.3s-20.2-3.75-27.81-11.24c-7.6-7.49-11.4-16.85-11.4-28.08s3.78-20.31,11.35-27.91ZM1054.38,55.97c4.24,4.27,9.36,6.41,15.37,6.41s11.3-2.12,15.42-6.35c4.13-4.24,6.19-9.79,6.19-16.67s-2.15-12.35-6.46-16.62c-4.31-4.27-9.36-6.41-15.15-6.41s-11.13,2.14-15.37,6.41c-4.24,4.27-6.35,9.81-6.35,16.62s2.12,12.35,6.35,16.62Z" fill="currentColor" stroke-width="0"></path><path d="M259.83,78.38V0h31.69c5.97,0,11.1.71,15.4,2.13,4.29,1.42,7.58,3.38,9.85,5.88,2.28,2.5,3.92,5.17,4.93,8.01,1.01,2.84,1.51,6.01,1.51,9.52,0,5.08-1.38,9.7-4.14,13.88-2.76,4.18-6.49,7.2-11.2,9.07l21.83,29.9h-20.94l-19.15-26.76h-12.43v26.76h-17.35ZM277.18,16.23v19.15h14.67c4.25,0,7.54-.86,9.85-2.57,2.31-1.72,3.47-4.14,3.47-7.28s-1.03-5.38-3.08-6.94c-2.05-1.57-5.69-2.35-10.92-2.35h-14Z" fill="currentColor" stroke-width="0"></path></g><g><g><path d="M.23,109.3v177.41h177.41V109.3H.23ZM126.95,236.02H50.92v-76.03h76.03v76.03ZM.23,312.05v177.41h177.41v-177.41H.23ZM126.95,438.78H50.92v-76.03h76.03v76.03ZM202.98,109.3v177.41h177.41V109.3h-177.41ZM329.7,236.02h-76.03v-76.03h76.03v76.03ZM202.98,312.05v177.41h177.41v-177.41h-177.41ZM329.7,438.78h-76.03v-76.03h76.03v76.03Z" fill="var(--brand)" stroke-width="0"></path><g><polygon points="405.22 108.59 405.22 108.67 405.22 181.44 405.22 190.44 520.89 190.44 520.89 488.81 606.7 488.81 606.7 190.44 722.91 190.44 722.91 181.44 722.91 108.67 722.91 108.59 405.22 108.59" fill="currentColor" stroke-width="0"></polygon><polygon points="731.4 488.81 841.74 488.81 921.4 375.87 1002.35 488.81 1108.73 488.81 975.08 299.76 1109.39 108.59 999.75 108.59 919.27 223.04 837.13 108.59 729.14 108.59 865.99 298.58 731.4 488.81" fill="currentColor" stroke-width="0"></polygon></g></g><path d="M1135.63,443.2c5.24-5.17,11.61-7.75,19.1-7.75s13.63,2.6,18.87,7.81c5.24,5.2,7.86,11.44,7.86,18.7s-2.62,13.84-7.86,19.04c-5.24,5.2-11.53,7.81-18.87,7.81s-13.85-2.6-19.1-7.81c-5.24-5.2-7.87-11.55-7.87-19.04s2.62-13.59,7.87-18.76ZM1138.94,477.69c4.31,4.27,9.53,6.4,15.67,6.4s11.27-2.17,15.61-6.51c4.34-4.35,6.52-9.51,6.52-15.5s-2.17-11.25-6.52-15.56c-4.34-4.31-9.55-6.46-15.61-6.46s-11.27,2.15-15.61,6.46c-4.34,4.3-6.51,9.49-6.51,15.56s2.15,11.35,6.46,15.61ZM1143.94,477.57v-31.79h10c8.16,0,12.24,3.22,12.24,9.66,0,2.17-.64,4.06-1.91,5.67s-2.96,2.75-5.06,3.43l9.21,13.03h-6.29l-8.09-11.68h-4.83v11.68h-5.28ZM1158.77,451.45c-1.12-.86-2.81-1.29-5.06-1.29h-4.49v11.23h4.94c1.57,0,3.02-.49,4.33-1.46,1.31-.97,1.97-2.28,1.97-3.93,0-2.17-.56-3.69-1.69-4.55Z" fill="currentColor" stroke-width="0"></path></g></g><g><path d="M4.21,666.74c2.67-4.83,6.38-8.59,11.15-11.28,4.77-2.69,10.17-4.04,16.21-4.04,7.4,0,13.74,1.96,19.01,5.86,5.27,3.91,8.8,9.24,10.57,15.99h-16.7c-1.24-2.61-3.01-4.59-5.29-5.95-2.28-1.36-4.87-2.04-7.77-2.04-4.68,0-8.47,1.63-11.37,4.89-2.9,3.26-4.35,7.61-4.35,13.06s1.45,9.8,4.35,13.06c2.9,3.26,6.69,4.89,11.37,4.89,2.9,0,5.49-.68,7.77-2.04,2.28-1.36,4.04-3.35,5.29-5.95h16.7c-1.78,6.75-5.3,12.07-10.57,15.95-5.27,3.88-11.61,5.82-19.01,5.82-6.04,0-11.45-1.35-16.21-4.04-4.77-2.69-8.48-6.44-11.15-11.24s-4-10.28-4-16.44,1.33-11.65,4-16.48Z" fill="currentColor" stroke-width="0"></path><path d="M83.85,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM111.93,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path><path d="M196.11,714.5h-15.19l-25.41-38.47v38.47h-15.19v-62.37h15.19l25.41,38.65v-38.65h15.19v62.37Z" fill="currentColor" stroke-width="0"></path><path d="M217.43,712.9c-3.61-1.48-6.5-3.67-8.66-6.57-2.16-2.9-3.3-6.4-3.42-10.48h16.17c.24,2.31,1.04,4.07,2.4,5.29,1.36,1.21,3.14,1.82,5.33,1.82s4.03-.52,5.33-1.55c1.3-1.04,1.95-2.47,1.95-4.31,0-1.54-.52-2.81-1.55-3.82-1.04-1.01-2.31-1.83-3.82-2.49-1.51-.65-3.66-1.39-6.44-2.22-4.03-1.24-7.32-2.49-9.86-3.73-2.55-1.24-4.74-3.08-6.57-5.51-1.84-2.43-2.75-5.6-2.75-9.51,0-5.8,2.1-10.35,6.31-13.64,4.21-3.29,9.68-4.93,16.44-4.93s12.41,1.64,16.61,4.93c4.21,3.29,6.46,7.86,6.75,13.73h-16.44c-.12-2.01-.86-3.6-2.22-4.75-1.36-1.16-3.11-1.73-5.24-1.73-1.84,0-3.32.49-4.44,1.47-1.13.98-1.69,2.38-1.69,4.22,0,2.01.95,3.58,2.84,4.71,1.89,1.13,4.86,2.34,8.88,3.64,4.03,1.36,7.3,2.67,9.82,3.91,2.52,1.24,4.69,3.05,6.53,5.42,1.83,2.37,2.75,5.42,2.75,9.15s-.9,6.78-2.71,9.68c-1.81,2.9-4.43,5.21-7.86,6.93-3.44,1.72-7.49,2.58-12.17,2.58s-8.65-.74-12.26-2.22Z" fill="currentColor" stroke-width="0"></path><path d="M306.63,652.13v12.17h-16.52v50.2h-15.19v-50.2h-16.53v-12.17h48.24Z" fill="currentColor" stroke-width="0"></path><path d="M346.07,714.5l-12.97-23.54h-3.64v23.54h-15.19v-62.37h25.5c4.92,0,9.11.86,12.57,2.58s6.06,4.07,7.77,7.06c1.72,2.99,2.58,6.32,2.58,10,0,4.15-1.17,7.85-3.51,11.11-2.34,3.26-5.79,5.57-10.35,6.93l14.39,24.7h-17.15ZM329.46,680.2h9.42c2.78,0,4.87-.68,6.26-2.04,1.39-1.36,2.09-3.29,2.09-5.77s-.7-4.23-2.09-5.6c-1.39-1.36-3.48-2.04-6.26-2.04h-9.42v15.46Z" fill="currentColor" stroke-width="0"></path><path d="M387.12,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M488.31,652.13l-21.59,41.76v20.61h-15.19v-20.61l-21.59-41.76h17.24l12.08,26.12,11.99-26.12h17.06Z" fill="currentColor" stroke-width="0"></path><path d="M509.63,664.3v12.62h20.35v11.73h-20.35v13.68h23.01v12.17h-38.2v-62.37h38.2v12.17h-23.01Z" fill="currentColor" stroke-width="0"></path><path d="M598.29,714.5h-15.19l-25.41-38.47v38.47h-15.19v-62.37h15.19l25.41,38.65v-38.65h15.19v62.37Z" fill="currentColor" stroke-width="0"></path><path d="M649.91,656.04c4.92,2.61,8.72,6.26,11.42,10.97,2.69,4.71,4.04,10.14,4.04,16.3s-1.35,11.52-4.04,16.26c-2.7,4.74-6.52,8.41-11.46,11.02-4.95,2.61-10.68,3.91-17.19,3.91h-23.37v-62.37h23.37c6.57,0,12.32,1.3,17.24,3.91ZM645.12,696.64c3.2-3.14,4.8-7.58,4.8-13.33s-1.6-10.22-4.8-13.42c-3.2-3.2-7.67-4.8-13.42-4.8h-7.2v36.25h7.2c5.74,0,10.22-1.57,13.42-4.71Z" fill="currentColor" stroke-width="0"></path><path d="M687.27,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM715.34,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path><path d="M803.16,652.13v12.17h-25.41v13.15h19.01v11.82h-19.01v25.23h-15.19v-62.37h40.6Z" fill="currentColor" stroke-width="0"></path><path d="M826.09,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M918.66,652.13v12.17h-16.52v50.2h-15.19v-50.2h-16.53v-12.17h48.24Z" fill="currentColor" stroke-width="0"></path><path d="M941.22,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M1020.74,714.5l-12.97-23.54h-3.64v23.54h-15.19v-62.37h25.5c4.92,0,9.11.86,12.57,2.58s6.06,4.07,7.77,7.06c1.72,2.99,2.58,6.32,2.58,10,0,4.15-1.17,7.85-3.51,11.11-2.34,3.26-5.79,5.57-10.35,6.93l14.39,24.7h-17.15ZM1004.12,680.2h9.42c2.78,0,4.87-.68,6.26-2.04,1.39-1.36,2.09-3.29,2.09-5.77s-.7-4.23-2.09-5.6c-1.39-1.36-3.48-2.04-6.26-2.04h-9.42v15.46Z" fill="currentColor" stroke-width="0"></path><path d="M1060.23,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM1088.3,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path></g></svg> </span>
     <div class="ttl"><small>Registro de Terreno</small><h1 id="view-title">Panel</h1></div>
+    <span id="copia-ind" hidden></span>
+    <span id="fila-ind" hidden></span>
     <span id="estado-conexion">Conectando…</span>
+    <button class="btn ghost" id="btn-salir" type="button" hidden>Salir</button>
   </div>
   <nav id="nav" hidden>
     <button data-a="nav" data-v="panel">Panel</button>
@@ -226,6 +232,25 @@ let cliSel = null;        // cliente elegido de la base única { id, nombre, rut
 let cliNuevo = false;     // el usuario eligió "crear cliente nuevo"
 let accesos = [];
 let editandoId = null;    // id del registro que se está corrigiendo (null = registro nuevo)
+// `updated_at` tal cual lo entregó la base cuando se abrió el formulario de editandoId (con sus microsegundos:
+// no pasa por new Date().toISOString(), que los trunca y haría fallar CONFLICTO con cualquier base). persistir()
+// lo manda como `base` de la corrección; tomarlo de aquí y no de `registros.find(...)` en el momento de guardar
+// importa porque la lista puede refrescarse (otra persona corrigió, o llegó señal) mientras el formulario estaba
+// abierto, y para la base lo que vale es la versión que el PM tenía a la vista al escribir, no la más reciente.
+let baseEditando = null;
+// Entrada con problema (CONFLICTO o NO_EXISTE) que el formulario abierto va a reemplazar: la dejó "Ver mi versión".
+// persistir() la descarta DESPUÉS de encolar con éxito la corrección nueva (nunca antes: si algo falla, el PM no
+// pierde lo que tenía). null = este formulario no reemplaza nada (alta normal, o corrección por "Editar").
+let reemplazaEntrada = null;
+// false = esta ficha de actividad (charla/capacitación) se abrió sin poder traer los participantes reales (sin
+// señal, o porque viene de "Ver mi versión"): persistir() no debe tocar rt_asistencias para esta corrección, para
+// no reemplazar la lista real del servidor con una vacía o a medias.
+let participantesDisponibles = true;
+// El plan de participantes (altas/bajas en rt_asistencias) que traía la entrada con problema que "Ver mi versión"
+// está reemplazando, para una actividad: viaja TAL CUAL a la corrección nueva (no se recalcula desde el
+// formulario, que no tiene la lista real sin señal) para no perder esos cambios. null si no hay nada que
+// heredar (no es una actividad, o la vieja no tenía cambios de participantes).
+let planReemplazado = null;
 let catalogo = [];
 let ultimaCarga = 0;
 // Asistencia del formulario abierto (se reinician en render()):
@@ -277,14 +302,54 @@ function pantallaLogin(msg){
   };
 }
 
+// Usuario de la sesión guardada en el equipo (para abrir sin señal cuando supabase no puede renovar el token).
+const AUTH_KEY = 'sb-' + new URL(SB_URL).hostname.split('.')[0] + '-auth-token';
+function usuarioGuardado(){ try { const s = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); return (s && s.user) || null; } catch (_) { return null; } }
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+const esRed = e => !!window.TXOfflineCore && TXOfflineCore.clasificarError(e) === 'red';
+let soloCopia = false;   // la primera carga va directo a la copia cuando no hay sesión viva por falta de red
+
 async function iniciar(){
   setConexion('Conectando…');
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return pantallaLogin();
-  const [acc, prof] = await Promise.all([
-    sb.rpc('rt_tengo_acceso'),
-    sb.from('profiles').select('nombre,email,rol,activo').eq('id', session.user.id).maybeSingle()
-  ]);
+  // Sin señal y con el token vencido, supabase reintenta renovarlo ~30 s: no se espera tanto,
+  // se abre con el usuario guardado en el equipo (la fila renueva la sesión al volver la señal).
+  const r0 = await Promise.race([sb.auth.getSession().catch(error => ({ data: { session: null }, error })), esperar(5000).then(() => null)]);
+  let user = (r0 && r0.data && r0.data.session && r0.data.session.user) || null;
+  soloCopia = !user && ((r0 && r0.error && esRed(r0.error)) || navigator.onLine === false);
+  if (!user && (!r0 || (r0.error && esRed(r0.error)))) user = usuarioGuardado();
+  if (!user) return pantallaLogin();
+  const session = { user };
+  // La copia local va por usuario: se abre en cuanto se sabe quién es, antes de consultar nada.
+  // Los tipos de la fila se registran ANTES de iniciar, porque iniciar envía de inmediato lo que haya en la fila.
+  registrarTiposFila();
+  try { await TXOffline.iniciar({ app: 'terreno', sb, usuarioId: session.user.id }); }
+  catch (e) { console.warn('[Terreno] sin copia local:', e); }
+  let acc, prof;
+  try {
+    const r = await consultarTerreno('terreno.perfil', async () => {
+      const [a, pr] = await Promise.all([
+        sb.rpc('rt_tengo_acceso'),
+        sb.from('profiles').select('nombre,email,rol,activo').eq('id', session.user.id).maybeSingle()
+      ]);
+      if (a.error) throw a.error;
+      if (pr.error) throw pr.error;
+      return { acceso: a.data, perfil: pr.data };
+    });
+    acc = { data: r.datos.acceso }; prof = { data: r.datos.perfil };
+    mostrarCopia(r);
+  } catch (e) {
+    console.warn('[Terreno] no se pudo verificar el acceso:', e);
+    if (esRed(e)) {   // sin señal y sin copia: no es falta de acceso, es que aún no se puede abrir
+      $('#nav').hidden = true;
+      setConexion('');
+      $('#app').innerHTML = `<div class="card gate"><h2>Sin conexión</h2>
+        <p>Necesitas señal para abrir Registro de Terreno por primera vez en este equipo.</p>
+        <div class="acciones"><button class="btn" onclick="location.reload()">Reintentar</button>
+        <button class="btn ghost" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
+      return;
+    }
+    acc = { error: e }; prof = {};
+  }
   const p = prof.data || {};
   me = { id: session.user.id, email: session.user.email,
          nombre: p.nombre || session.user.user_metadata?.nombre || session.user.email.split('@')[0],
@@ -295,28 +360,156 @@ async function iniciar(){
     $('#app').innerHTML = `<div class="card gate"><h2>Sin acceso a Registro de Terreno</h2>
       <p>Tu cuenta (${esc(me.email)}) todavía no tiene acceso a este módulo. Pídele al administrador que te habilite en la pestaña <b>Accesos</b>.</p>
       <div class="acciones">${EN_PORTAL ? '' : '<a class="btn" href="./">Volver al portal</a>'}
-      <button class="btn ghost" onclick="sb.auth.signOut().then(()=>location.reload())">Cerrar sesión</button></div></div>`;
+      <button class="btn ghost" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
     return;
   }
   $('#nav').hidden = false;
   $('#nav-accesos').hidden = !me.admin;
+  $('#btn-salir').hidden = false;
   setConexion(`<a class="uchip" ${EN_PORTAL ? '' : 'href="./" title="Volver al portal"'}><span class="av">${esc(iniciales(me.nombre))}</span><span class="un"><b>${esc(me.nombre)}</b><small>${me.admin ? 'Administrador' : 'Product Manager'}</small></span></a>`);
   render();
   await cargar();
-  sb.rpc('rt_productos').then(({ data }) => { if (data && data.length) catalogo = data; });
+  soloCopia = false;
+  consultarTerreno('terreno.catalogo', async () => {
+    const { data, error } = await sb.rpc('rt_productos');
+    if (error) throw error;
+    return data;
+  }).then(r => { if (r.datos && r.datos.length) catalogo = r.datos; }).catch(() => {});
+}
+
+/* ===================== Sin conexión ===================== */
+// Consulta con copia local: sin red conocida (navigator.onLine) va directo a la copia.
+// Si no se pudo abrir la copia (TXOffline ausente o sin iniciar), la consulta sigue funcionando con señal.
+function consultarTerreno(clave, fn) {
+  const traer = () => { if (navigator.onLine === false || soloCopia) throw new TypeError('Failed to fetch'); return fn(); };
+  if (!window.TXOffline) return traer().then(datos => ({ datos, desdeCache: false, guardadoEn: null }));
+  return TXOffline.consultar(clave, traer).catch(e => {
+    if (e && /no está iniciado/i.test(e.message || '')) return traer().then(datos => ({ datos, desdeCache: false, guardadoEn: null }));
+    throw e;
+  });
+}
+// Muestra de dónde vienen los datos: solo cuando salen de la copia guardada en este equipo.
+function mostrarCopia(r) {
+  const el = $('#copia-ind'); if (!el) return;
+  const c = !!(r && r.desdeCache);
+  el.textContent = c ? (navigator.onLine === false ? 'Sin conexión' : 'Sin respuesta del servidor') + ' · datos del ' + (TC.fechaHoraCL(r.guardadoEn) || 'último guardado') : '';
+  el.title = c ? 'Se muestran los datos guardados en este equipo. Se actualizan solos al volver la señal.' : '';
+  el.hidden = !c;
+}
+// Lo que se cargó del servidor (o de la copia), sin la fila de envíos: `registros` es esto más lo pendiente.
+let registrosServ = [];
+let entsFila = [];
+let pintando = 0;
+// `registros` = lo del servidor + lo pendiente. Todo código que cambia la lista escribe en `registrosServ` y recompone:
+// si escribiera en `registros`, el siguiente repintado (cada pasada de la fila) se lo comería.
+function recomponer() { registros = entsFila.length ? TC.aplicarFilaTerreno(registrosServ, entsFila) : registrosServ; }
+// Firma de la fila (TC.firmaFila: ids+estado+error) tal como quedó pintada la última vez: una pasada de
+// sincronización (cada 60 s, incluso sin pendientes) que no cambia nada de esto no debe repintar nada (I3).
+let firmaVista = '';
+// `opc.sinRender`: cargar() ya va a hacer su propio render() completo con los datos nuevos del servidor —
+// pintarFila() solo necesita refrescar entsFila/registros antes de eso, sin repintar dos veces.
+async function pintarFila(opc) {
+  const n = ++pintando;
+  let ents = [];
+  try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch (_) { ents = []; }
+  if (n !== pintando) return;     // llegó un repintado más nuevo: ese es el que cuenta
+  entsFila = ents;
+  recomponer();
+  const firma = TC.firmaFila(ents), cambio = firma !== firmaVista;
+  firmaVista = firma;
+  if (opc && opc.sinRender) return;
+  if (!cambio) return;            // nada pendiente nuevo, resuelto o con otro error: nada que mostrar distinto (I3)
+  repintarListaSuave();
+}
+// A diferencia de render() (pensado para una navegación: cierra la vista previa del informe, pliega los
+// <details>, limpia el formulario), esto es para un repintado EN SEGUNDO PLANO (la fila, cada 60 s): solo
+// redibuja la lista/el panel, sin llevarse por delante un informe abierto, y reabre los <details> que ya
+// estaban desplegados en Registros (I3). Si hay un overlay encima (vista previa, confirmar envío, "Un
+// momento…", todos con la clase `informe-ov`) se posterga, en vez de repintar debajo de él.
+let repintoProg = null;
+const puedeRepintar = () => !document.querySelector('.informe-ov');
+function repintarListaSuave() {
+  if (vista !== 'panel' && vista !== 'registros') return;
+  if (!puedeRepintar()) {
+    if (!repintoProg) repintoProg = setTimeout(function rec(){
+      repintoProg = null;
+      if (puedeRepintar()) repintarListaSuave(); else repintoProg = setTimeout(rec, 2000);
+    }, 2000);
+    return;
+  }
+  const app = $('#app');
+  if (vista === 'registros') {
+    // `data-part` (participantes) o `data-sec` (resultados/detalle): los dos únicos atributos que identifican
+    // un <details> de la lista. Se recuerda el par atributo/valor, no una clave armada, para no tener que
+    // deshacerla después (los valores son ids: sin ':').
+    const abiertas = [...app.querySelectorAll('details[open]')]
+      .map(d => (d.dataset.part ? ['part', d.dataset.part] : d.dataset.sec ? ['sec', d.dataset.sec] : null))
+      .filter(Boolean);
+    app.innerHTML = vistaRegistros();
+    abiertas.forEach(([attr, val]) => {
+      const d = app.querySelector(`details[data-${attr}="${esc(val)}"]`);
+      if (d) { d.open = true; if (attr === 'part') cargarParticipantes(d); }
+    });
+    cargarFotos();
+  } else {
+    app.innerHTML = vistaPanel();
+    dibujarGraficos();
+  }
+  aplicarExigeSenal();
+}
+window.addEventListener('txoffline:cambio', () => { pintarFila(); });
+window.addEventListener('online', () => { if (copiaVisible()) cargar(); });
+const copiaVisible = () => { const el = $('#copia-ind'); return !!el && !el.hidden; };
+if (window.TXOffline) TXOffline.montarIndicador($('#fila-ind'));
+// Único camino para cerrar sesión: no se sale con registros sin enviar (se perderían).
+// Como en el CRM: mientras se está cerrando sesión, el handler de SIGNED_OUT (más abajo) no debe disparar su
+// propio location.reload() — competiría con alCerrarSesion() (que todavía no terminó de limpiar la copia local)
+// por quién recarga primero (m4).
+let saliendo = false;
+async function cerrarSesion() {
+  let ok = true;
+  try { ok = !window.TXOffline || await TXOffline.puedeCerrarSesion(); } catch (_) {}
+  if (!ok) {
+    let n = 0; try { n = (await TXOffline.entradas()).length; } catch (_) {}
+    toast(n ? `Tienes ${n} ${n === 1 ? 'registro' : 'registros'} sin enviar: espera a tener señal` : 'Tienes registros sin enviar: espera a tener señal');
+    return;
+  }
+  saliendo = true;
+  const { error } = await sb.auth.signOut();
+  if (error) { saliendo = false; toast(window.TXOfflineCore && TXOfflineCore.clasificarError(error) === 'red' ? 'Sin conexión: no se pudo cerrar sesión. Intenta de nuevo con señal.' : 'No se pudo cerrar sesión'); return; }
+  try { if (window.TXOffline) await TXOffline.alCerrarSesion(); } catch (_) {}
+  location.reload();
+}
+$('#btn-salir').onclick = cerrarSesion;
+// Cada tipo de la fila de envíos se agrega aquí (Tarea 5): TIPOS_FILA['terreno.registro'] = async (datos, archivos, meta) => {…}
+const TIPOS_FILA = {};
+function registrarTiposFila() {
+  if (!window.TXOffline) return;
+  for (const [t, fn] of Object.entries(TIPOS_FILA)) TXOffline.registrarTipo(t, fn);
 }
 
 // El listado NO trae los participantes (con sus firmas en PNG): solo cuántos son. Los datos de cada uno se piden
 // cuando se necesitan (abrir la actividad, "Ver participantes").
 const mapRegistro = r => ({ ...(r.datos || {}), id: r.id, kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id,
-  obra: r.obra, estado: r.estado, fotos: r.fotos || [], autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {},
+  obra: r.obra, estado: r.estado, fotos: r.fotos || [], updated_at: r.updated_at, autor: r.autor, autor_nombre: r.autor_nombre, creado: r.created_at, _datos: r.datos || {},
   asistencia_abierta: !!r.asistencia_abierta, nAsistencias: TC.conteoAsistencias(r.rt_asistencias) });
 
 async function cargar(){
-  const { data, error } = await sb.from('registros').select('*, rt_asistencias(count)').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
-  if (error) { setConexion('Error de conexión'); toast('No se pudieron cargar los registros'); return; }
-  registros = data.map(mapRegistro);
+  let r;
+  try {
+    r = await consultarTerreno('terreno.registros', async () => {
+      const { data, error } = await sb.from('registros').select('*, rt_asistencias(count)').order('fecha', { ascending: false }).order('created_at', { ascending: false }).limit(2000);
+      if (error) throw error;
+      return data;
+    });
+  } catch (e) { setConexion('Error de conexión'); toast('No se pudieron cargar los registros'); return; }
+  mostrarCopia(r);
+  registrosServ = r.datos.map(mapRegistro);
+  recomponer();
   ultimaCarga = Date.now();
+  // Datos nuevos del servidor: siempre se repinta (abajo), así que pintarFila() no debe hacerlo también por su
+  // cuenta (antes pintaba dos veces).
+  await pintarFila({ sinRender: true });
   if (vista === 'panel' || vista === 'registros') render();
 }
 
@@ -661,7 +854,7 @@ function renderPiesNuevos(){
 // "Crear ensayo de adherencia para esta obra": abre el formulario con lo que la visita ya sabe.
 function crearEnsayoDeVisita(id){
   const r = registros.find(x => x.id === id); if (!r) return;
-  vista = 'adherencia'; editandoId = null; cliNuevo = false;
+  vista = 'adherencia'; editandoId = null; baseEditando = null; reemplazaEntrada = null; participantesDisponibles = true; planReemplazado = null; cliNuevo = false;
   cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null;
   render(); window.scrollTo(0, 0);
   const f = $('#form');
@@ -757,20 +950,29 @@ const filaDom = id => [...document.querySelectorAll('#partics .part')].find(r =>
 // 'tabla', así un reintento después de una falla a medias no duplica nada.
 async function aplicarPlan(registroId, plan){
   const t = () => sb.from('rt_asistencias');
+  // El error con su status HTTP pegado: un 503 es "reintentar luego", no un rechazo.
+  const fallo = res => (window.TXOfflineCore ? TXOfflineCore.errorDeRespuesta(res) : res.error);
   const borrar = plan.borrar.filter(esUuid);
   if (borrar.length) {
-    const { error } = await t().delete().eq('registro_id', registroId).in('id', borrar);
+    const error = fallo(await t().delete().eq('registro_id', registroId).in('id', borrar));
     if (error) throw error;
     borrar.forEach(id => quitados.delete(id));
   }
   if (plan.insertar.length) {
     const nuevas = plan.insertar.map(f => ({ f, id: esUuid(f.id) ? f.id : crypto.randomUUID() }));
-    const { error } = await t().insert(nuevas.map(({ f, id }) => ({ id, registro_id: registroId, origen: 'manual', ...colsPart(f) })));
-    if (error) throw error;
+    // Un reintento después de una falla a medias: lo que ya quedó guardado no se vuelve a insertar.
+    const rEx = await t().select('id').eq('registro_id', registroId).in('id', nuevas.map(n => n.id));
+    if (fallo(rEx)) throw fallo(rEx);
+    const ya = new Set((rEx.data || []).map(x => x.id));
+    const faltan = nuevas.filter(n => !ya.has(n.id));
+    if (faltan.length) {
+      const error = fallo(await t().insert(faltan.map(({ f, id }) => ({ id, registro_id: registroId, origen: 'manual', ...colsPart(f) }))));
+      if (error) throw error;
+    }
     nuevas.forEach(({ f, id }) => { const row = filaDom(f.id); if (row) { row.dataset.id = id; row.dataset.origen = 'tabla'; delete row.dataset.sucia; } });
   }
   await Promise.all(plan.actualizar.map(async f => {
-    const { error } = await t().update(colsPart(f)).eq('id', f.id).eq('registro_id', registroId);
+    const error = fallo(await t().update(colsPart(f)).eq('id', f.id).eq('registro_id', registroId));
     if (error) throw error;
     const row = filaDom(f.id); if (row) delete row.dataset.sucia;
   }));
@@ -818,49 +1020,194 @@ const datosVisita = d => ({
 });
 
 // Refleja en la lista local lo que acaba de quedar en la base, sin volver a pedir todos los registros.
-function actualizarLocal(id, fila, datos, fotos){
-  const i = registros.findIndex(x => x.id === id), previo = registros[i];
-  const nuevo = mapRegistro({ ...fila, id, datos, fotos, autor: previo ? previo.autor : me.id, autor_nombre: previo ? previo.autor_nombre : me.nombre,
+// Si se conoce la versión que dejó el servidor (updatedAt), también se refresca la copia que usa la app sin
+// señal (N1, revisión final): sin esto, `anotarEnvio` dejaba el historial de envíos viejo en esa copia aunque
+// `registrosServ` ya tuviera el real, y una corrección hecha después sin señal lo pisaba en silencio, sin
+// CONFLICTO. Las dos llamadas de `persistir()` (guardarBorrador, siempre con señal) omiten `updatedAt` a
+// propósito: ahí la base del formulario se limpia aparte (`baseEditando = null`), así que no corresponde tocar
+// la copia con una versión que todavía no se conoce.
+function actualizarLocal(id, fila, datos, fotos, updatedAt){
+  const i = registrosServ.findIndex(x => x.id === id), previo = registrosServ[i];
+  const crudo = { ...fila, id, datos, fotos, autor: previo ? previo.autor : me.id, autor_nombre: previo ? previo.autor_nombre : me.nombre,
     created_at: previo ? previo.creado : new Date().toISOString(), asistencia_abierta: previo ? previo.asistencia_abierta : false,
-    rt_asistencias: [{ count: previo ? previo.nAsistencias : 0 }] });
-  if (i >= 0) registros[i] = nuevo; else registros.unshift(nuevo);
+    updated_at: updatedAt,   // sin versión conocida (null): el manejador pide la del servidor
+    rt_asistencias: [{ count: previo ? previo.nAsistencias : 0 }] };
+  const nuevo = mapRegistro(crudo);
+  registrosServ = i >= 0 ? registrosServ.map((x, k) => k === i ? nuevo : x) : [nuevo, ...registrosServ];
+  recomponer();
+  if (updatedAt && window.TXOffline) {
+    TXOffline.ajustarConsulta('terreno.registros', lista => {
+      const l = Array.isArray(lista) ? lista : [], j = l.findIndex(x => x.id === id);
+      return j >= 0 ? l.map((x, k) => k === j ? { ...x, ...crudo } : x) : [crudo, ...l];
+    }).catch(() => {});
+  }
 }
 
-// Escribe el registro (insert o update) y, si es una actividad, sus participantes. Devuelve el id.
-// `registroId`: si viene, corrige ese registro; si no, crea uno nuevo. Sirve igual para el guardado final y para el
-// borrador que se crea al generar el QR. `btn` solo muestra el avance de las fotos.
-async function persistir(kind, d, registroId, btn){
-  /* Cliente: si no se eligió de la base, se crea (o se reutiliza si ya existe ese RUT/nombre) */
-  let clienteId = cliSel && norm(cliSel.nombre) === norm(d.cliente) ? cliSel.id : null;
-  if (!clienteId) {
-    const { data, error } = await sb.rpc('rt_crear_cliente', { p_nombre: d.cliente, p_rut: d.cli_rut || '', p_comuna: d.cli_comuna || '', p_direccion: d.direccion || '' });
-    if (error) throw error;
-    clienteId = data;
-    cliSel = { ...(cliSel || {}), id: clienteId, nombre: d.cliente }; cliNuevo = false; infoCliente();   // ya está en la base
+// Una acción propia que NO pasa por la fila (chip de estado, abrir/cerrar el QR, anotar un envío) acaba de subir
+// `updated_at` en el servidor (todo UPDATE de `registros` pasa por el disparador que lo toca): sin esto, la
+// próxima vez que se abra "Editar" sobre este mismo registro viajaría una base vieja y `rt_guardar_registro`
+// daría un CONFLICTO falso, acusando a "otra persona" de un cambio que hizo el propio PM (I1). `ts` es la
+// versión real que dejó el servidor (hay que leerla: el disparador fija `clock_timestamp()`, no lo que se
+// manda en el UPDATE).
+// `cambios` (revisión final, N1): los campos que esa misma acción acaba de dejar en el servidor (p. ej.
+// `{ estado }` o `{ asistencia_abierta: false }`), para que la copia no quede vieja en EL RESTO de la fila: antes
+// fijarVersion solo tocaba `updated_at`, así que si el PM cerraba la app antes de otra recarga y corregía ese
+// mismo registro sin señal, la corrección viajaba con la base nueva (sin CONFLICTO) y pisaba en silencio el
+// estado o el historial de envío que esa acción en vivo había dejado.
+function fijarVersion(id, ts, cambios){
+  if (!ts) return;
+  const i = registrosServ.findIndex(x => x.id === id);
+  if (i >= 0 && (registrosServ[i].updated_at !== ts || cambios)) {
+    registrosServ = registrosServ.map((x, k) => k === i ? { ...x, ...cambios, updated_at: ts } : x);
+    recomponer();
   }
+  if (!window.TXOffline) return;
+  TXOffline.ajustarConsulta('terreno.registros', lista => {
+    const l = Array.isArray(lista) ? lista : [], j = l.findIndex(x => x.id === id);
+    return j >= 0 ? l.map((x, k) => k === j ? { ...x, ...cambios, updated_at: ts } : x) : l;
+  }).catch(() => {});
+}
 
+/* Tipos de la fila de envíos. Se registran antes de TXOffline.iniciar (que envía de inmediato lo que haya en la fila). */
+// El cliente escrito sin señal: el id que devuelve la base queda guardado con la clave de esta entrada, y el registro
+// que depende de ella lo lee antes de enviarse.
+TIPOS_FILA['terreno.cliente'] = async (d, archivos, meta) => {
+  const previos = new Set();   // clientes que ya existían con ese nombre o RUT: la base devuelve el existente en vez de duplicar
+  for (const q of [d.nombre, d.rut].filter(x => x && String(x).trim().length >= 2)) {
+    try { const r = await sb.rpc('rt_buscar_clientes', { q }); if (!r.error) (r.data || []).forEach(c => previos.add(c.id)); } catch (_) { /* el alta de abajo dirá si es falta de red */ }
+  }
+  const res = await sb.rpc('rt_crear_cliente', { p_nombre: d.nombre, p_rut: d.rut || '', p_comuna: d.comuna || '', p_direccion: d.direccion || '' });
+  const err = TXOfflineCore.errorDeRespuesta(res);
+  if (err) throw err;
+  await TXOffline.guardarLocal('cliente-de:' + meta.id, res.data);
+  if (previos.has(res.data)) toast(`Ese cliente ya estaba: se usó el existente (${d.nombre})`);
+  return res.data;
+};
+
+// El registro: fotos (409 = ya subida en un intento anterior), alta idempotente o guardado con versión, participantes.
+TIPOS_FILA['terreno.registro'] = async (d, archivos, meta) => {
+  const C = TXOfflineCore;
+  const ok = res => { const e = C.errorDeRespuesta(res); if (e) throw e; return res.data; };
+  let clienteId = d.fila.cliente_id || null;
+  if (!clienteId && d.clienteNuevo) {
+    clienteId = await TXOffline.leerLocal('cliente-de:' + d.clienteNuevo.entradaId);
+    if (!clienteId) throw new Error('No quedó el cliente nuevo de este registro: descártalo y créalo de nuevo.');
+  }
+  for (let i = 0; i < d.nFotosNuevas; i++) {
+    const blob = archivos[`${i + 1}.jpg`];
+    if (!blob) throw new Error(`Falta la foto ${i + 1} en este teléfono: descarta el registro y créalo de nuevo.`);
+    const r = await sb.storage.from(BUCKET).upload(TC.rutaFoto(d.id, i), blob, { contentType: blob.type || 'image/jpeg' });
+    const e = C.errorDeRespuesta(r);
+    if (e && !C.subidaYaExiste(e)) throw e;
+  }
+  const f = d.fila;
+  const cuerpo = { kind: f.kind, fecha: f.fecha, cliente: f.cliente, cliente_id: clienteId, obra: f.obra || '', estado: f.estado, datos: d.datos, fotos: d.fotosGuardadas };
+  const id = d.registroId || d.id;
+  // Si una pasada anterior de ESTA MISMA entrada ya guardó el registro con éxito y la red se cortó recién después
+  // (antes de aplicar el plan de participantes), 'version-de:<este id>' ya quedó escrita: un reintento no debe
+  // volver a mandar rt_guardar_registro/rt_crear_registro con la base de entonces (que el propio envío anterior
+  // ya dejó vieja: daría un CONFLICTO contra uno mismo) — salta directo a aplicar el plan con la versión que ya se
+  // sabe.
+  let ts = await TXOffline.leerLocal('version-de:' + meta.id);
+  if (!ts) {
+    if (d.registroId) {
+      // La base capturada al abrir el formulario queda vieja en cuanto la entrada de la que depende esta (una
+      // alta o corrección anterior del MISMO registro, encadenada porque estaba pendiente) se envía con éxito: esa
+      // madre deja su versión nueva con la clave 'version-de:<su id>' (más abajo), y acá se prefiere sobre la
+      // capturada (TC.baseCorreccion) — EXCEPTO si esta entrada trae una base fresca (`d.baseFresca`, "Ver mi
+      // versión" ya la pidió al servidor o a la copia local): esa nunca se reemplaza por la de una madre.
+      // `d.madre` (si se guardó al encolar) es la madre REAL de esta corrección aunque `meta.dependeDe` apunte a
+      // un cliente nuevo de por medio (cadena madre→cliente→corrección, m1): sin esto la versión de la madre no
+      // se encontraba y se usaba la base capturada, ya vieja.
+      let base = d.base;
+      const madreId = TC.madreParaVersion(d, meta && meta.dependeDe);
+      if (madreId) {
+        try { base = TC.baseCorreccion(d.base, await TXOffline.leerLocal('version-de:' + madreId), d.baseFresca); } catch (_) {}
+      }
+      if (!base) {   // sin versión conocida (p. ej. el borrador del QR): se toma la del servidor
+        const v = await sb.from('registros').select('updated_at').eq('id', id).maybeSingle();
+        const fila = ok(v);
+        if (!fila) throw new Error('NO_EXISTE: el registro ya no está');
+        base = fila.updated_at;
+      }
+      const res = await sb.rpc('rt_guardar_registro', { p_id: id, p_base: base, p: cuerpo });
+      const err = C.errorDeRespuesta(res);
+      if (err && TC.esConflicto(err)) {
+        // La respuesta de un envío anterior de ESTA MISMA entrada puede haberse perdido después de aplicarse con
+        // éxito en el servidor (la red cayó justo después): el reintento manda la misma base, que el propio envío
+        // anterior ya dejó vieja, y el servidor responde CONFLICTO contra uno mismo. Antes de darlo por un rechazo
+        // real, se compara lo que el servidor tiene AHORA contra lo que esta entrada estaba por mandar; si es
+        // exactamente lo mismo, ya se aplicó: se trata como éxito con el updated_at leído, no "con problema" (I4).
+        let fila = null;
+        try { fila = ok(await sb.from('registros').select('kind, fecha, cliente, cliente_id, obra, estado, datos, fotos, updated_at').eq('id', id).maybeSingle()); } catch (_) {}
+        if (fila && TC.mismoContenido(fila, cuerpo)) ts = fila.updated_at;
+        else throw err;
+      } else if (err) {
+        throw err;
+      } else {
+        ts = res.data;
+      }
+    } else {
+      ts = ok(await sb.rpc('rt_crear_registro', { p: { id, ...cuerpo, autor_nombre: f.autor_nombre, hecho_en: d.hechoEn } }));
+    }
+    // Se guarda ANTES de aplicarPlan (no solo al final): si la red se corta en el paso siguiente, el reintento de
+    // esta misma entrada no debe repetir el guardado del registro (ver el leerLocal de arriba).
+    try { await TXOffline.guardarLocal('version-de:' + meta.id, ts); } catch (_) {}
+  }
+  // Los participantes DESPUÉS de que el registro quedó guardado (o se sabe que ya se guardó, arriba): si
+  // rt_guardar_registro/rt_crear_registro rechaza, rt_asistencias no se toca (la corrección entera queda "con
+  // problema", no a medias).
+  if (d.plan) await aplicarPlan(id, d.plan);
+  reflejarEnvio(id, { ...cuerpo, id }, ts, d);
+};
+
+// Lo que ya salió queda en la lista (y en la copia local) con la versión que dio el servidor; si no, al dejar de ser
+// pendiente desaparecería de Registros hasta la próxima carga.
+function reflejarEnvio(id, cuerpo, ts, d){
+  try {
+    const previo = registrosServ.find(x => x.id === id);
+    const crudo = { ...cuerpo, autor: previo ? previo.autor : d.fila.autor, autor_nombre: previo ? previo.autor_nombre : d.fila.autor_nombre,
+      created_at: previo ? previo.creado : d.hechoEn, updated_at: ts, asistencia_abierta: previo ? previo.asistencia_abierta : false,
+      rt_asistencias: [{ count: previo ? previo.nAsistencias : 0 }] };
+    const nuevo = mapRegistro(crudo);
+    registrosServ = previo ? registrosServ.map(x => x.id === id ? nuevo : x) : [nuevo, ...registrosServ];
+    recomponer();
+    TXOffline.ajustarConsulta('terreno.registros', lista => {
+      const l = Array.isArray(lista) ? lista : [], i = l.findIndex(x => x.id === id);
+      return i >= 0 ? l.map((x, k) => k === i ? { ...x, ...crudo } : x) : [crudo, ...l];
+    }).catch(() => {});
+  } catch (e) { console.warn('[Terreno] no se pudo reflejar el envío en la lista:', e); }
+}
+
+// Arma el registro (y su cliente nuevo, si lo hay) y lo deja en la fila de envíos del teléfono; el envío real lo hace el
+// manejador de 'terreno.registro' (más abajo), ahora o cuando vuelva la señal. Devuelve el id del registro.
+// `registroId`: si viene, corrige ese registro; si no, crea uno nuevo. `btn` solo muestra el avance de las fotos.
+// `opc.enLinea`: escribe de inmediato en la base (solo el borrador del QR, que necesita existir ya en el servidor).
+let ultimoEnvio = { ids: [] };   // entradas que dejó el último persistir (guardar() mira si ya salieron)
+async function persistir(kind, d, registroId, btn, opc){
+  const enLinea = !!(opc && opc.enLinea);
   const previo = registroId ? registros.find(x => x.id === registroId) : null;
-  // Una sola lectura del formulario, ANTES de subir nada: las fotos que sobreviven con su pie, los
-  // pies de las nuevas y la tabla del ensayo. Entre medio hay un await por cada foto que se sube;
+  // Una sola lectura del formulario, ANTES de procesar nada: las fotos que sobreviven con su pie, los
+  // pies de las nuevas y la tabla del ensayo. Entre medio hay un await por cada foto que se comprime;
   // leer unas antes y otras después dejaría un pie describiendo la imagen equivocada.
   const guardadas = fotosGuardadasConPie(), piesDeLasNuevas = piesNuevos(), filasEns = kind === 'adherencia' ? leerFilasEnsayo() : null;
   if (registroId && !previo) throw new Error('El registro ya no está disponible. Recarga la página.');
   const id = registroId || crypto.randomUUID();
-  const fotos = [];
-  if (esInforme(kind) && d.fotos && d.fotos.length) {
-    for (let i = 0; i < d.fotos.length; i++) {
-      if (btn) btn.textContent = `Subiendo foto ${i + 1} de ${d.fotos.length}…`;
-      const blob = await comprimir(d.fotos[i]);
-      const path = `${id}/${i + 1}-${Date.now()}.jpg`;
-      const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: blob.type || 'image/jpeg' });
-      if (error) throw error;
-      fotos.push(path);
-    }
+  // Las fotos nuevas viajan como archivos de la fila, con rutas que salen solo de este id: un reintento sube a la misma
+  // ruta (y la base responde "ya existe"). Al corregir se usa un id propio, para no pisar las fotos que ya tenía.
+  const idEnvio = registroId ? crypto.randomUUID() : id;
+  const nuevas = !enLinea && esInforme(kind) && d.fotos ? d.fotos : [];
+  const archivos = {};
+  for (let i = 0; i < nuevas.length; i++) {
+    if (btn) btn.textContent = `Preparando foto ${i + 1} de ${nuevas.length}…`;
+    archivos[`${i + 1}.jpg`] = await comprimir(nuevas[i]);
   }
+  const rutas = nuevas.map((_, i) => TC.rutaFoto(idEnvio, i));
 
-  // Lo que queda tras la corrección: las guardadas que sobrevivieron (con su pie) más las recién
-  // subidas (con el suyo). Una sola regla decide las fotos y sus pies, así que no pueden divergir.
-  const fotosDeLaCorreccion = TC.fotosYPies(guardadas, fotos.map((ruta, i) => ({ ruta, pie: piesDeLasNuevas[i] })));
+  // Lo que queda tras la corrección: las guardadas que sobrevivieron (con su pie) más las nuevas (con el suyo).
+  // Una sola regla decide las fotos y sus pies, así que no pueden divergir.
+  const fotosDeLaCorreccion = TC.fotosYPies(guardadas, rutas.map((ruta, i) => ({ ruta, pie: piesDeLasNuevas[i] })));
+  const fotosLista = esInforme(kind) ? fotosDeLaCorreccion.fotos : (previo ? TC.fotosEditadas(previo.fotos, []) : []);
 
   const datos = { ...(previo ? previo._datos : {}), observaciones: d.observaciones || '' };   // al corregir se conservan los campos que el formulario no toca
   if (kind === 'visita') {
@@ -878,38 +1225,114 @@ async function persistir(kind, d, registroId, btn){
       tipo_act: kind === 'capacitacion' ? (d.tipo_act || 'Capacitación') : 'Charla técnica'
     });
   }
-  const plan = esInforme(kind) ? null : TC.planParticipantes(leerParticipantes(), { quitados: [...quitados], viejo: partsViejo });
+  // Al reemplazar una entrada con problema ("Ver mi versión"), el plan de participantes es el que esa entrada ya
+  // traía (planReemplazado), TAL CUAL: no se recalcula desde el formulario, que para una actividad no muestra la
+  // lista real (ver `participantesDisponibles`), y omitirlo perdería sin aviso los cambios que el PM ya había
+  // hecho. Fuera de ese caso, sin la lista real (sin señal) tampoco se calcula ni se encola ningún cambio: no hay
+  // con qué, y un plan a medias borraría o duplicaría asistentes reales que este formulario nunca mostró.
+  const plan = esInforme(kind) ? null
+    : reemplazaEntrada ? planReemplazado
+    : (participantesDisponibles ? TC.planParticipantes(leerParticipantes(), { quitados: [...quitados], viejo: partsViejo }) : null);
+  // Si la lista de un registro viejo pasa a la tabla, datos.participantes se retira; el manejador guarda primero los
+  // participantes y recién después el registro, así que nunca se pierde la lista antigua.
+  if (plan && plan.migrar) delete datos.participantes;
 
+  let clienteId = cliSel && norm(cliSel.nombre) === norm(d.cliente) ? cliSel.id : null;
+  const clienteNuevo = clienteId ? null : { nombre: d.cliente, rut: d.cli_rut || '', comuna: d.cli_comuna || '', direccion: d.direccion || '' };
   const fila = {
     kind, fecha: d.fecha, cliente: d.cliente, cliente_id: clienteId, obra: d.obra || '',
     estado: kind === 'visita' ? (d.estado || 'Abierto') : null
   };
-  if (registroId) {
-    // Los participantes primero: si la lista de un registro viejo pasa a la tabla, datos.participantes solo se
-    // retira cuando ya están guardados en ella.
-    if (plan) await aplicarPlan(registroId, plan);
-    if (plan && plan.migrar) delete datos.participantes;
-    // Corrección: huella de quién y cuándo (un borrador que aún no se ha cerrado no es una corrección);
-    // autor no se toca; las fotos previas se suman a las nuevas menos las que el PM quitó.
-    const ahora = new Date().toISOString();
-    const datosFinal = TC.esBorrador(previo) ? datos : TC.marcarEdicion(datos, me.nombre, ahora);
-    const fotosFinal = esInforme(kind) ? fotosDeLaCorreccion.fotos : TC.fotosEditadas(previo.fotos, fotos);
-    const { data, error } = await sb.from('registros').update({ ...fila, datos: datosFinal, fotos: fotosFinal, updated_at: ahora }).eq('id', registroId).select('id');
-    if (error) throw error;
-    if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
-    actualizarLocal(id, fila, datosFinal, fotosFinal);
-  } else {
-    const { error } = await sb.from('registros').insert({ id, ...fila, datos, fotos, autor: me.id, autor_nombre: me.nombre });
-    if (error) throw error;
-    // Desde aquí el registro existe: si algo falla después, reintentar corrige este mismo registro en vez de duplicarlo.
-    editandoId = id;
-    actualizarLocal(id, fila, datos, fotos);
-    if (plan) {
-      try { await aplicarPlan(id, plan); }
-      catch(e){ throw Object.assign(e, { registroGuardado: true }); }   // el registro ya existe: quien llama debe decirlo
+  const ahora = new Date().toISOString();
+  const datosFinal = previo && !TC.esBorrador(previo) ? TC.marcarEdicion(datos, me.nombre, ahora) : datos;   // un borrador que aún no se ha cerrado no es una corrección
+
+  if (enLinea) {
+    /* Cliente: si no se eligió de la base, se crea (o se reutiliza si ya existe ese RUT/nombre) */
+    if (clienteNuevo) {
+      const { data, error } = await sb.rpc('rt_crear_cliente', { p_nombre: clienteNuevo.nombre, p_rut: clienteNuevo.rut, p_comuna: clienteNuevo.comuna, p_direccion: clienteNuevo.direccion });
+      if (error) throw error;
+      clienteId = data; fila.cliente_id = clienteId;
+      cliSel = { ...(cliSel || {}), id: clienteId, nombre: d.cliente }; cliNuevo = false; infoCliente();   // ya está en la base
     }
+    if (registroId) {
+      if (plan) await aplicarPlan(registroId, plan);
+      const { data, error } = await sb.from('registros').update({ ...fila, datos: datosFinal, fotos: fotosLista, updated_at: ahora }).eq('id', registroId).select('id, updated_at');
+      if (error) throw error;
+      if (!data || !data.length) throw new Error('Solo el autor del registro o un administrador puede corregirlo');
+      // Se le pasa la versión real que dejó el servidor para que actualizarLocal refresque también la copia que
+      // usa la app sin señal (I-1, revisión final de N1): sin esto, un "Generar QR" sobre un registro existente
+      // (este mismo camino) dejaba esa copia con el contenido VIEJO, y el `fijarVersion` que viene después (al
+      // abrir la asistencia) le ponía encima una versión fresca sin el contenido real: una corrección hecha
+      // después sin señal no daría CONFLICTO y pisaría en silencio lo que este guardado acababa de dejar.
+      actualizarLocal(id, fila, datosFinal, fotosLista, data[0].updated_at);
+      // Este `update` (p. ej. el borrador del QR) acaba de subir `updated_at` en el servidor: la base que el
+      // formulario tenía al abrirse (`baseEditando`) quedó vieja. Si no se limpia, la próxima vez que se toque
+      // "Guardar cambios" sobre este mismo formulario manda una base vencida y sale CONFLICTO con señal, sin que
+      // nadie más haya tocado el registro.
+      baseEditando = null;
+    } else {
+      const { error } = await sb.from('registros').insert({ id, ...fila, datos, fotos: fotosLista, autor: me.id, autor_nombre: me.nombre });
+      if (error) throw error;
+      // Desde aquí el registro existe: si algo falla después, reintentar corrige este mismo registro en vez de duplicarlo.
+      editandoId = id;
+      baseEditando = null;   // recién creado: una futura corrección sin base conocida pide la versión del servidor
+      actualizarLocal(id, fila, datos, fotosLista);
+      if (plan) {
+        try { await aplicarPlan(id, plan); }
+        catch(e){ throw Object.assign(e, { registroGuardado: true }); }   // el registro ya existe: quien llama debe decirlo
+      }
+    }
+    if (plan && plan.migrar) { partsViejo = false; quitados.clear(); }
+    ultimoEnvio = { ids: [] };
+    return id;
   }
+
+  // Cada participante nuevo lleva su id desde ahora: un reintento no puede insertarlo dos veces.
+  if (plan) plan.insertar = plan.insertar.map(f => ({ ...f, id: esUuid(f.id) ? f.id : crypto.randomUUID() }));
+  const ids = [];
+  try {
+    // El registro que se corrige es, él mismo, una entrada que todavía no llegó al servidor (su alta, u otra
+    // corrección, sigue pendiente o con problema): nada de esta corrección puede adelantarse a esa entrada,
+    // ni siquiera el cliente nuevo que se encole junto con ella. Cadena en serie: madre -> cliente -> corrección
+    // (si hay madre y cliente a la vez), para que un solo `dependeDe` por entrada baste y nadie quede huérfano.
+    // Si este formulario viene de "Ver mi versión" (reemplazaEntrada), la entrada vieja se va a descartar más
+    // abajo: la madre no puede ser ella misma (quedaría huérfana), así que se hereda lo que ESA tenía.
+    const entradasParaReemplazo = reemplazaEntrada ? await TXOffline.entradas() : [];
+    const madre = registroId ? TC.dependeDeCorreccion(entradasParaReemplazo, { reemplazaEntrada, filaPrevia: previo ? previo._fila : null }) : null;
+    let clienteEntrada = null;
+    if (clienteNuevo) { clienteEntrada = await TXOffline.encolar('terreno.cliente', clienteNuevo, { dependeDe: madre }); ids.push(clienteEntrada); }
+    const filaEnvio = registroId ? fila : { ...fila, autor: me.id, autor_nombre: me.nombre, creado: ahora, asistencia_abierta: false, nAsistencias: 0 };
+    const ent = TC.entradaRegistro({ id: idEnvio, kind, fila: filaEnvio, datos: datosFinal, fotos: nuevas.length, base: registroId ? baseEditando : null,
+      baseFresca: !!reemplazaEntrada,   // "Ver mi versión" ya pidió esta base al servidor (o a la copia local): nunca se reemplaza por la de una madre
+      registroId, clienteNuevo: clienteNuevo ? { entradaId: clienteEntrada, nombre: clienteNuevo.nombre } : null, hechoEn: ahora });
+    ent.datos.fotosGuardadas = fotosLista;   // la lista COMPLETA que tendrá el registro: de aquí sale lo que se pinta mientras está pendiente
+    ent.datos.plan = plan;
+    // La madre REAL de esta corrección/alta (misma cadena del registro), aunque el `dependeDe` de la fila (abajo)
+    // apunte al cliente nuevo de por medio: el manejador la necesita para encontrar 'version-de:<madre>' (m1).
+    ent.datos.madre = madre || null;
+    ids.push(await TXOffline.encolar(ent.tipo, ent.datos, { archivos, dependeDe: clienteEntrada || madre }));
+    // La corrección nueva ya está a salvo en la fila: ahora sí se puede descartar la que reemplaza (nunca antes,
+    // porque si algo de arriba falla el PM no debe perder ni la vieja ni lo que acaba de escribir).
+    if (reemplazaEntrada) {
+      // I-2 (revisión final): un cliente nuevo que se había encolado junto con la entrada que se reemplaza (p.
+      // ej. madre→cliente→corrección) queda huérfano si se descarta solo la madre: su propio `dependeDe` apunta
+      // a un id que ya no existe y, si ya estaba 'problema', nunca se reprocesa solo (procesarFila solo
+      // reintenta 'pendiente'), sin tarjeta ni botones, bloqueando cerrar sesión para siempre.
+      // I-2a: solo los clientes que YA están 'problema' (TC.clientesHuerfanos) — uno todavía 'pendiente' puede
+      // seguir siendo necesario para otra corrección viva de este mismo registro (una edición normal hecha
+      // mientras la tarjeta seguía mostrando esta madre) que no ha fallado y se resuelve sola.
+      const huerfanos = TC.clientesHuerfanos(entradasParaReemplazo, reemplazaEntrada);
+      for (const h of huerfanos) { try { await TXOffline.descartar(h, { aunPendiente: true }); } catch (_) {} }
+      try { await TXOffline.descartar(reemplazaEntrada, { aunPendiente: true }); } catch (_) {}
+      reemplazaEntrada = null;
+    }
+  } catch (e) {
+    for (const x of ids) { try { await TXOffline.descartar(x, { aunPendiente: true }); } catch (_) {} }   // no dejar un cliente suelto
+    throw e;
+  }
+  ultimoEnvio = { ids };
   if (plan && plan.migrar) { partsViejo = false; quitados.clear(); }
+  await pintarFila();
   return id;
 }
 
@@ -926,22 +1349,50 @@ async function guardar(kind, btn, registroId, enviar){
   const bloqueados = [...document.querySelectorAll('#form [data-a="quitarFoto"], #form [name="fotos"], #form [data-a="guardar"], #form [data-a="guardarEnviar"]')];
   bloqueados.forEach(el => { el.disabled = true; });
   const desbloquear = () => bloqueados.forEach(el => { el.disabled = false; });
-  let guardadoId = null;
+  let guardadoId = null, enServidor = false;
   try {
     const eraBorrador = TC.esBorrador(registros.find(x => x.id === registroId));
     const id = await persistir(kind, d, registroId, btn);
     if (kind === 'adherencia') recordarFirmante(d);
+    // Con señal se intenta el envío ahora y se avisa cómo quedó; sin señal queda en el teléfono. `sincronizar()`
+    // procesa TODA la fila pendiente, no solo lo que se acaba de guardar: con señal débil o mucha cola el
+    // formulario quedaría bloqueado esperando. Con un tope (como en Entregas y CRM) se sigue sin esperar más: lo
+    // escrito ya está a salvo en IndexedDB y la fila sigue en segundo plano (I2).
+    const TOPE_SINCRONIZAR_MS = 8000;
+    let problemaEnvio = null, vencioEspera = false;
+    if (navigator.onLine !== false && window.TXOffline) {
+      try { vencioEspera = (await Promise.race([TXOffline.sincronizar().then(() => false), esperar(TOPE_SINCRONIZAR_MS).then(() => true)])); } catch (_) {}
+      try { const mias = (await TXOffline.entradas()).filter(e => ultimoEnvio.ids.includes(e.id)); enServidor = !mias.length; problemaEnvio = mias.find(e => e.estado === 'problema') || null; } catch (_) {}
+    }
     // Al guardar la actividad el enlace del QR deja de aceptar participantes. Si el cierre falla el registro queda
     // como "en curso" en Registros, con su botón para cerrarlo.
     let aviso = '';
     const reg = registros.find(x => x.id === id);
     if (TC.esBorrador(reg)) {
-      const { error } = await sb.rpc('rt_asistencia_cerrar', { p_registro: id });
-      if (error) aviso = ' Pero no se pudo cerrar la asistencia por QR: ciérrala desde Registros.';
-      else reg.asistencia_abierta = false;
+      // El registro mismo puede ser todavía solo una entrada (sin enviar): cerrar la asistencia en la base
+      // ahora mismo no tendría qué actualizar. Nada la cierra sola todavía (ni al sincronizar la corrección,
+      // ni en otra parte): posible trabajo futuro sería que el manejador de 'terreno.registro' llamara a
+      // rt_asistencia_cerrar tras confirmar el alta de un borrador, pero eso no es de esta tarea.
+      if (reg._fila) aviso = ' La asistencia por QR sigue abierta: ciérrala desde Registros cuando el registro se envíe.';
+      else {
+        const { error } = await sb.rpc('rt_asistencia_cerrar', { p_registro: id });
+        if (error) aviso = ' Pero no se pudo cerrar la asistencia por QR: ciérrala desde Registros.';
+        else {
+          reg.asistencia_abierta = false;
+          // rt_asistencia_cerrar subió updated_at en el servidor y cerró la asistencia: refrescar la copia local
+          // con las dos cosas, o la próxima vez que se toque "Editar" sobre este registro saldría un CONFLICTO
+          // falso (I1), o peor, una corrección sin señal reabriría la asistencia sin querer (N1).
+          try { const v = await sb.from('registros').select('updated_at').eq('id', id).maybeSingle(); fijarVersion(id, v.data && v.data.updated_at, { asistencia_abierta: false }); } catch (_) {}
+        }
+      }
     }
-    toast((registroId && !eraBorrador ? 'Cambios guardados.' : 'Registro guardado.') + aviso);
-    cliSel = null; cliNuevo = false; editandoId = null;
+    toast(enServidor ? (registroId && !eraBorrador ? 'Cambios guardados.' : 'Registro guardado.') + aviso
+      : problemaEnvio ? ((TC.esConflicto(problemaEnvio.error) || TC.noExiste(problemaEnvio.error))
+          ? (TC.esConflicto(problemaEnvio.error) ? TC.MSG_CONFLICTO : problemaEnvio.error) + ' Usa "Ver mi versión" desde Registros.'
+          : 'No se pudo enviar: ' + (problemaEnvio.error || 'error') + '. Queda en Registros para reintentar o descartar.')
+      : vencioEspera ? 'Guardado en el teléfono: se está enviando.' + aviso
+      : 'Guardado en el teléfono: se enviará al volver la señal.' + aviso);
+    cliSel = null; cliNuevo = false; editandoId = null; baseEditando = null; reemplazaEntrada = null; participantesDisponibles = true; planReemplazado = null;
     vista = registroId || esInforme(kind) ? 'registros' : 'panel';
     render(); window.scrollTo(0, 0);
     guardadoId = id;
@@ -952,7 +1403,9 @@ async function guardar(kind, btn, registroId, enviar){
     toast('No se pudo guardar: ' + (e.code === '42501' ? 'solo el autor del registro o un administrador puede corregirlo' : e.message || e.code || 'error'));
   }
   // El envío va aparte: si falla, el registro YA está guardado y el aviso no debe decir que no se guardó.
-  if (guardadoId && enviar) {
+  if (guardadoId && enviar && !enServidor) {
+    toast(gen(kind).Art + ' quedó guardad' + gen(kind).o + ' en el teléfono. La copia al cliente se envía desde Registros cuando salga el registro.');
+  } else if (guardadoId && enviar) {
     try { await cargar(); await enviarRegistro(guardadoId); }
     catch(e){ console.error(e); toast(gen(kind).Art + ' quedó guardad' + gen(kind).o + ', pero el envío falló: ' + (e.message || 'error') + '. Revisa la ficha antes de reintentar.'); }
   }
@@ -1094,8 +1547,21 @@ async function verInforme(armar, btn){
     ultimoInforme = await generarPdf(reg);
     mostrarInforme(ultimoInforme, reg.kind);
   } catch(e){
-    console.error(e); toast('No se pudo generar el informe: ' + (e.message || 'error'));
-  } finally { btn.disabled = false; btn.textContent = txt; }
+    console.error(e); toast(esRed(e) ? 'Necesitas señal para ver el informe (las fotos están en el servidor)' : 'No se pudo generar el informe: ' + (e.message || 'error'));
+  } finally {
+    btn.textContent = txt;
+    if (btn.dataset.a === 'verInformeReg') {
+      // "Ver informe" de la lista (uno de los 5 controles de esta tarea, gobernado por exigeSenal): si la red se
+      // cayó mientras esta llamada estaba en vuelo, no lo reactiva igual — navigator.onLine (y, si ya corrió,
+      // exigeSenal vía el evento 'offline') son la única fuente de verdad sobre si debe quedar habilitado.
+      if (navigator.onLine !== false) { btn.disabled = false; btn.title = ''; }
+    } else {
+      // Vista previa del formulario (data-a="verInforme"): no es uno de los 5 controles de esta tarea y nunca
+      // pasa por exigeSenal, así que ningún evento 'online' lo recuperaría después. Se reactiva siempre, igual
+      // que antes de esta tarea, para no dejarlo atascado sin título y sin forma de volver a habilitarse.
+      btn.disabled = false;
+    }
+  }
 }
 
 /* Cierre con el cliente: quien recibe, y las firmas (cliente y PM) con la ventana de firma compartida. */
@@ -1119,6 +1585,7 @@ const cierreDeCampos = d => TC.cierreVisita({ nombre: d.cierre_nombre, cargo: d.
 // Un informe de otra visita ya guardada (botón "Ver informe" de Registros).
 async function verInformeRegistro(b){
   const r = registros.find(x => x.id === b.dataset.id); if (!r) return;
+  if (r._fila) return toast('Disponible cuando se envíe el registro.');
   await verInforme(() => ({ reg: regParaInforme(r, []), rutas: r.fotos || [], archivos: [] }), b);
 }
 
@@ -1197,9 +1664,12 @@ function confirmarEnvio(envio, pdf, dudoso){   // envio.este: "esta visita" o "e
 
 // Escribe datos (con el historial de envíos) en el registro y refresca la lista local. true si quedó guardado.
 async function anotarEnvio(r, datos){
-  const { data, error } = await sb.from('registros').update({ datos }).eq('id', r.id).select('id');
+  const { data, error } = await sb.from('registros').update({ datos }).eq('id', r.id).select('id, updated_at');
   if (error || !data || !data.length) return false;
-  actualizarLocal(r.id, { kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id, obra: r.obra, estado: r.estado }, datos, r.fotos);
+  // Este UPDATE también subió updated_at en el servidor: al pasarle la versión real, actualizarLocal refresca
+  // tanto la lista en memoria como la copia que usa la app sin señal (N1) — si no, "Editar" después de esto
+  // daría un CONFLICTO falso, o peor, una corrección sin señal pisaría en silencio este mismo historial.
+  actualizarLocal(r.id, { kind: r.kind, fecha: r.fecha, cliente: r.cliente, cliente_id: r.cliente_id, obra: r.obra, estado: r.estado }, datos, r.fotos, data[0].updated_at);
   return true;
 }
 
@@ -1223,6 +1693,7 @@ async function enviarRegistro(id){
   if (enviando) return;
   const r = registros.find(x => x.id === id);
   if (!r || !esInforme(r.kind) || !TC.puedeEditar(r, me)) return toast('No se puede enviar ' + (r ? gen(r.kind).este : 'este registro') + '.');
+  if (r._fila) return toast('Disponible cuando se envíe el registro.');
   const g = gen(r.kind);
   const para = String(TC.correoCliente(r.kind, r._datos)).trim();
   if (!TC.correoValido(para)) return toast(r.kind === 'adherencia' ? 'El ensayo no tiene un correo de cliente válido: edítalo y escríbelo en «Correo del cliente».' : 'La visita no tiene un correo de cliente válido: edítala y escríbelo en «Cierre con el cliente».');
@@ -1240,7 +1711,8 @@ async function enviarRegistro(id){
       if (!v.ok) throw new Error(TC.textoErrorEnvio(v.motivo, undefined, r.kind));
     } catch(e){
       console.error(e);
-      return toast('No se pudo preparar el informe: ' + (e.message || 'error') + ' ' + g.Art + ' quedó guardad' + g.o + '; usa «Reintentar envío».');
+      const det = esRed(e) ? 'necesitas señal (las fotos están en el servidor)' : (e.message || 'error');
+      return toast('No se pudo preparar el informe: ' + det + ' ' + g.Art + ' quedó guardad' + g.o + '; usa «Reintentar envío».');
     } finally { fin(); }
 
     const dudoso = TC.envioDudoso(r._datos);
@@ -1277,7 +1749,7 @@ async function guardarBorrador(){
   const kind = d.kind_sel === 'capacitacion' ? 'capacitacion' : 'charla';
   const falta = validarCampos(kind, d);
   if (falta) throw Object.assign(new Error(falta), { validacion: true });
-  return persistir(kind, d, editandoId, null);
+  return persistir(kind, d, editandoId, null, { enLinea: true });   // el QR necesita que la actividad ya exista en el servidor
 }
 
 function mostrarQR(url){
@@ -1350,41 +1822,65 @@ async function generarQR(btn){
       const { data, error } = await sb.rpc('rt_asistencia_abrir', { p_registro: id });
       if (error) throw error;
       token = data; tokenQR = { registroId: id, token };
+      // rt_asistencia_abrir también subió updated_at en el servidor y abrió la asistencia: refrescar la copia
+      // local con las dos cosas (I1/N1).
+      try { const v = await sb.from('registros').select('updated_at').eq('id', id).maybeSingle(); fijarVersion(id, v.data && v.data.updated_at, { asistencia_abierta: true }); } catch (_) {}
     }
     const r = registros.find(x => x.id === id); if (r) r.asistencia_abierta = true;
     mostrarQR(TC.enlaceAsistencia(token));
     iniciarRefresco(id);
   } catch(e){
-    const det = e.message || e.code || 'error';
+    const det = esRed(e) ? 'necesitas señal' : (e.message || e.code || 'error');
     // Si el borrador ya se guardó, decirlo: queda sin QR y cuenta como actividad terminada hasta que se abra el QR o se borre.
     toast(e.validacion ? e.message
       : e.registroGuardado ? 'La actividad quedó guardada, pero no se pudo guardar la lista de participantes: ' + det + '. Vuelve a intentar el QR (o toca Guardar).'
       : id ? 'La actividad quedó guardada, pero no se pudo generar el QR: ' + det + '. Vuelve a intentar el QR o bórrala en Registros.'
       : 'No se pudo generar el QR: ' + det);
-  } finally { btn.disabled = false; btn.textContent = txt; }
+  } finally {
+    btn.textContent = txt;
+    // exigeSenal es la única fuente de verdad sobre si #btn-qr debe quedar habilitado: si la red se cayó
+    // mientras la llamada estaba en vuelo, no lo reactiva por el solo hecho de que la llamada terminó.
+    btn.disabled = false; btn.title = '';
+    exigeSenal(btn, 'Necesitas señal para generar el código QR');
+  }
 }
 
 async function cerrarBorrador(id){
   const r = registros.find(x => x.id === id);
   if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor de la actividad o un administrador puede cerrar la asistencia');
+  if (r._fila) return toast('Esta actividad aún no sale del teléfono: espera a que se envíe para cerrar la asistencia.');
   if (!confirm('¿Cerrar la asistencia de esta actividad? El enlace del QR dejará de aceptar participantes.')) return;
   const { error } = await sb.rpc('rt_asistencia_cerrar', { p_registro: id });
-  if (error) return toast('No se pudo cerrar la asistencia');
+  if (error) return toast(esRed(error) ? 'Necesitas señal para cerrar la asistencia por QR' : 'No se pudo cerrar la asistencia');
   r.asistencia_abierta = false; render(); toast('Asistencia cerrada');
+  // rt_asistencia_cerrar también subió updated_at en el servidor y cerró la asistencia: refrescar la copia local
+  // con las dos cosas (I1/N1).
+  try { const v = await sb.from('registros').select('updated_at').eq('id', id).maybeSingle(); fijarVersion(id, v.data && v.data.updated_at, { asistencia_abierta: false }); } catch (_) {}
 }
 
 /* Abre el formulario del registro con sus datos para corregirlo (participantes y firmas incluidos). */
 async function editarRegistro(id){
   const r = registros.find(x => x.id === id);
   if (!r || !TC.puedeEditar(r, me)) return toast('Solo el autor del registro o un administrador puede corregirlo');
-  let filas = [];
+  let filas = [], participantesOk = true;
   const esActividad = r.kind === 'charla' || r.kind === 'capacitacion';
   if (esActividad) {   // los participantes se piden al abrir (con sus firmas), no en el listado
-    const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', id).order('created_at');
-    if (error) return toast('No se pudieron cargar los participantes');
-    filas = data || [];
+    try {
+      const { data, error } = await sb.from('rt_asistencias').select('*').eq('registro_id', id).order('created_at');
+      if (error) throw error;
+      filas = data || [];
+    } catch (e) {
+      // Sin señal esto siempre falla: antes de esta tarea eso impedía corregir la actividad por completo. Se abre
+      // igual (fecha, duración, temas, lo que sea, se pueden corregir sin riesgo) pero sin tocar participantes:
+      // ver `participantesDisponibles` más abajo y en persistir().
+      if (!window.TXOfflineCore || TXOfflineCore.clasificarError(e) !== 'red') return toast('No se pudieron cargar los participantes');
+      participantesOk = false;
+    }
   }
   editandoId = id;
+  baseEditando = r.updated_at || null;   // la versión que el PM tiene a la vista: viaja tal cual al corregir
+  reemplazaEntrada = null;   // "Editar" normal nunca reemplaza una entrada: si hay una pendiente, se encadena (ver abajo)
+  participantesDisponibles = participantesOk;
   cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null; cliNuevo = false;
   vista = r.kind; render(); window.scrollTo(0, 0);
   const f = $('#form');
@@ -1398,8 +1894,15 @@ async function editarRegistro(id){
     else if (el.type !== 'radio') el.value = v;
   });
   if (esActividad) {
-    partsViejo = !filas.length && (r.participantes || []).length > 0;
-    $('#partics').innerHTML = TC.participantesVista(filas, r.participantes).map(p => filaPart(p, filas.length ? 'tabla' : 'viejo')).join('');
+    if (participantesOk) {
+      partsViejo = !filas.length && (r.participantes || []).length > 0;
+      $('#partics').innerHTML = TC.participantesVista(filas, r.participantes).map(p => filaPart(p, filas.length ? 'tabla' : 'viejo')).join('');
+    } else {
+      partsViejo = false;
+      $('#partics').innerHTML = '<p class="mute">No se pueden ver ni editar los participantes sin señal: se conservan los que ya tiene la actividad.</p>';
+      const addBtn = f.querySelector('[data-a="addPart"]'); if (addBtn) addBtn.hidden = true;
+      const qrBtn = $('#btn-qr'); if (qrBtn) qrBtn.hidden = true;
+    }
     $('#act-titulo').textContent = 'Corregir ' + KIND_LABEL[r.kind].toLowerCase();
     botonesAsistencia();
   } else if (r.kind === 'adherencia') {
@@ -1414,21 +1917,146 @@ async function editarRegistro(id){
   f.querySelector('[data-a="guardar"]').textContent = 'Guardar cambios';
   const cancelar = f.querySelector('.acciones [data-a="nav"]'); if (cancelar) cancelar.dataset.v = 'registros';
   infoCliente();
+  // Ya hay otra corrección de este registro sin enviar (pendiente o con problema): la nueva se encadena a ella
+  // (persistir() lo hace con TC.dependeDeCorreccion), así que no sale antes de tiempo ni la pisa.
+  if (r._fila) toast('Hay otra corrección de este registro sin enviar: esta se enviará después de esa.');
+}
+
+// "Ver mi versión": la corrección quedó con problema (conflicto o el registro ya no está) y el PM necesita decidir
+// qué hacer sin perder lo que escribió. Reabre el formulario con lo que quedó en ESA entrada de la fila (fila/datos),
+// no con lo que hay en el servidor ni en `registros`: por eso no pide nada a la base. Al no saber si la versión que
+// tenía sigue vigente, el formulario queda sin base conocida; para reintentar primero hay que descartar esta entrada
+// (si no, la nueva corrección depende de ella y hereda el mismo problema) y guardar de nuevo, lo que pide la versión
+// actual del servidor.
+// Unas pocas líneas de lo que hay AHORA en el servidor para ese registro, junto al formulario: el PM no debe
+// decidir a ciegas qué hacer con su versión sin enviar (I1 de la revisión). `mr` ya pasó por mapRegistro.
+function resumenServidor(mr){
+  if (!mr) return '';
+  if (mr.kind === 'adherencia') return `<p><b>Motivo:</b> ${esc(mr.motivo_visita || '—')}</p><p><b>Conclusión:</b> ${esc(mr.conclusion || '—')}</p>`;
+  if (mr.kind === 'visita') return `<p><b>Motivo:</b> ${esc(mr.motivo || '—')}</p><p><b>Causa:</b> ${esc(mr.causa || '—')}</p><p><b>Solución:</b> ${esc(mr.solucion || '—')}</p>`;
+  return `<p><b>Nombre:</b> ${esc(mr.nombre || '—')}</p><p><b>Observaciones:</b> ${esc(mr.observaciones || '—')}</p>`;
+}
+// "corrigió Fulano el 24-11-2026 10:05" (TC.marcarEdicion deja esto en datos.editado); genérico si no hay firma.
+function textoEdicion(editado){
+  if (!editado) return 'otra persona';
+  return (editado.por || 'otra persona') + (editado.ts ? ' el ' + TC.fechaHoraCL(editado.ts) : '');
+}
+
+// "Ver mi versión": la corrección quedó con problema (CONFLICTO o NO_EXISTE) y el PM necesita decidir qué hacer
+// sin perder lo que escribió. Reabre el formulario con lo que quedó en ESA entrada de la fila (fila/datos) — no
+// con lo del servidor, porque eso es justo lo que se muestra aparte para comparar — y, con señal, pide la versión
+// actual del servidor para fijar una base válida (nunca null) y mostrarla junto al formulario. Sin señal no hay
+// con qué comparar: se avisa y la base queda en lo que diga la copia local (tampoco null: null haría que, si se
+// reenvía sin señal y alguien más corrige entretanto, se pise sin ningún aviso). Guardar desde aquí (persistir())
+// REEMPLAZA esta entrada (la descarta) en vez de encadenarse a ella, así la corrección sí llega.
+// Si el registro ya no existe (NO_EXISTE, se sabe por el propio error, sin necesidad de consultar nada) no tiene
+// sentido seguir "corrigiendo" un id que no está: se guarda como un registro NUEVO (editandoId = null, por el
+// camino del alta), con lo mismo que el PM había escrito.
+async function verMiVersion(entradaId){
+  let ents = [];
+  try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch (_) {}
+  const e = ents.find(x => x.id === entradaId);
+  if (!e) return toast('Esa corrección ya no está pendiente.');
+  const d = e.datos || {};
+  const kind = d.kind;
+  const registroIdOriginal = d.registroId || null;
+  const yaNoExiste = TC.noExiste(e.error);
+  const rutaDe = x => (x && typeof x === 'object') ? x.ruta : x;
+  const r = { ...(d.fila || {}), ...(d.datos || {}), id: registroIdOriginal || d.id, kind,
+    fotos: (d.fotosGuardadas || []).map(rutaDe).filter(Boolean) };
+
+  let servidor = null, consultado = false;
+  if (!yaNoExiste && registroIdOriginal && navigator.onLine !== false) {
+    try {
+      const { data, error } = await sb.from('registros').select('*').eq('id', registroIdOriginal).maybeSingle();
+      if (!error) { servidor = data || null; consultado = true; }
+    } catch (_) { /* se trata como sin señal abajo */ }
+  }
+  // "Como nuevo": el id original no existe (ya se sabía, o se acaba de confirmar al consultar). No se corrige
+  // nada: se guarda con registroId = null, que persistir() trata como un alta (id nuevo, rt_crear_registro).
+  const comoNuevo = yaNoExiste || (consultado && !servidor);
+
+  editandoId = comoNuevo ? null : registroIdOriginal;
+  baseEditando = comoNuevo ? null
+    : consultado ? (servidor.updated_at || null)
+    : registroIdOriginal ? ((registrosServ.find(x => x.id === registroIdOriginal) || {}).updated_at || null)
+    : null;
+  reemplazaEntrada = entradaId;
+  const esActividad = kind === 'charla' || kind === 'capacitacion';
+  // Esta vista no trae la lista real de participantes (ni la actual del servidor, ni la que había antes de
+  // reabrir): el plan que traía la entrada vieja viaja TAL CUAL a la nueva (R3), no se recalcula desde el
+  // formulario, que no tiene con qué.
+  participantesDisponibles = !esActividad;
+  planReemplazado = esActividad ? (d.plan || null) : null;
+  cliSel = r.cliente_id ? { id: r.cliente_id, nombre: r.cliente } : null; cliNuevo = false;
+  vista = kind; render(); window.scrollTo(0, 0);
+  const f = $('#form');
+  const c = r.cierre || {};
+  const fm = r.firmante || {};
+  const valores = { ...r, firm_nombre: fm.nombre, firm_cargo: fm.cargo, firm_movil: fm.movil, firm_correo: fm.correo,
+    cierre_nombre: c.nombre, cierre_cargo: c.cargo, cierre_email: c.email, cierre_fono: c.fono, cierre_firma: c.firma, cierre_firma_pm: c.firmaPm };
+  f.querySelectorAll('[name]').forEach(el => {
+    const n = el.name, v = valores[n];
+    if (el.type === 'file' || v === undefined || v === null) return;
+    if (el.type === 'checkbox') el.checked = [].concat(v).includes(el.value);
+    else if (el.type !== 'radio') el.value = v;
+  });
+  if (esActividad) {
+    $('#partics').innerHTML = '<p class="mute">No se pueden ver ni editar los participantes desde aquí: se aplicarán los cambios (altas y bajas) que ya habías hecho antes de que esto quedara con problema.</p>';
+    const addBtn = f.querySelector('[data-a="addPart"]'); if (addBtn) addBtn.hidden = true;
+    const qrBtn = $('#btn-qr'); if (qrBtn) qrBtn.hidden = true;
+    $('#act-titulo').textContent = 'Corregir ' + KIND_LABEL[kind].toLowerCase();
+  } else if (kind === 'adherencia') {
+    cargarEnsayoEnFormulario(r);
+  } else {
+    f.querySelector('h2').textContent = 'Corregir visita por reclamo';
+    refrescarFirmasCierre();
+    f.querySelector('[name="fotos"]').insertAdjacentHTML('afterend', `<div id="fotos-guardadas">${[...new Set(r.fotos)].map((p, i) => filaFotoGuardadaHtml(p, i, null)).join('')}</div>`);
+    renderAvisoCupo();
+    cargarFotos();
+  }
+  f.querySelector('[data-a="guardar"]').textContent = comoNuevo ? 'Guardar como registro nuevo' : 'Guardar cambios';
+  const cancelar = f.querySelector('.acciones [data-a="nav"]'); if (cancelar) cancelar.dataset.v = 'registros';
+  infoCliente();
+
+  // La otra versión, a la vista, para que el PM no decida a ciegas (I1/I2 de la revisión).
+  let bannerHtml, msg;
+  if (comoNuevo) {
+    bannerHtml = '<div class="aviso">Este registro ya no está en el servidor (puede haberlo eliminado un administrador). Al guardar, tu versión se crea como un registro nuevo.</div>';
+    msg = 'El registro ya no está: al guardar se crea como uno nuevo.';
+  } else if (!registroIdOriginal) {
+    bannerHtml = ''; msg = 'Esta es tu versión sin enviar. Revísala y guarda de nuevo si corresponde.';
+  } else if (!consultado) {
+    bannerHtml = '<div class="aviso">Sin señal no se puede comparar con el servidor: se guardará igual con la última versión que se conoce de este equipo, y puede volver a marcar conflicto si alguien más lo corrigió mientras tanto.</div>';
+    msg = 'Esta es tu versión sin enviar. Sin señal no se pudo traer la del servidor para compararla.';
+  } else {
+    const mrServ = mapRegistro(servidor);
+    bannerHtml = `<div class="aviso">Esta es TU versión sin enviar. En el servidor ahora hay otra, corregida por ${esc(textoEdicion(mrServ.editado))}:${resumenServidor(mrServ)}</div>`;
+    msg = 'Esta es tu versión sin enviar. Revisa la del servidor antes de guardar de nuevo.';
+  }
+  if (bannerHtml) f.insertAdjacentHTML('afterbegin', bannerHtml);
+  toast(msg);
 }
 
 async function cambiarEstado(id, estado){
   const r = registros.find(x => x.id === id); if (!r || r.estado === estado) return;
+  if (r._fila) return toast('Este registro aún no sale del teléfono: espera a que se envíe para cambiar su estado.');
   const antes = r.estado; r.estado = estado; render();
-  const { error } = await sb.from('registros').update({ estado, updated_at: new Date().toISOString() }).eq('id', id);
-  if (error) { r.estado = antes; render(); toast('No se pudo actualizar el estado'); }
+  const { data, error } = await sb.from('registros').update({ estado, updated_at: new Date().toISOString() }).eq('id', id).select('updated_at');
+  if (error) { r.estado = antes; render(); toast('No se pudo actualizar el estado'); return; }
+  // El disparador fija su propia updated_at (no la que se manda arriba): se lee la real para que la próxima
+  // vez que se toque "Editar" no viaje una base vieja y dé un CONFLICTO falso (I1). El estado nuevo también se
+  // refresca en la copia, o una corrección hecha después sin señal lo pisaría en silencio, sin CONFLICTO (N1).
+  fijarVersion(id, data && data[0] && data[0].updated_at, { estado });
 }
 
 async function eliminar(id){
   const r = registros.find(x => x.id === id); if (!r) return;
+  if (r._fila) return toast('Este registro aún no sale del teléfono: si tiene problema, descártalo desde su tarjeta.');
   if (!confirm('¿Eliminar este registro? No se puede deshacer.')) return;
   const { error } = await sb.from('registros').delete().eq('id', id);
-  if (error) return toast('No se pudo eliminar');
-  registros = registros.filter(x => x.id !== id); render(); toast('Registro eliminado');
+  if (error) return toast(esRed(error) ? 'Necesitas señal para eliminar el registro' : 'No se pudo eliminar');
+  registrosServ = registrosServ.filter(x => x.id !== id); recomponer(); render(); toast('Registro eliminado');
 }
 
 /* ===================== Panel ===================== */
@@ -1546,6 +2174,9 @@ const puedeBorrar = r => me && (me.admin || r.autor === me.id);
 
 // Ver informe, enviar la copia al cliente y el historial de envíos: igual para una visita y para un ensayo.
 function bloqueInforme(r){
+  // Mientras el registro es solo una entrada sin enviar, el PDF y la copia al cliente no tienen de dónde
+  // sacar las fotos (solo existen como blobs en el teléfono) ni un registro real al que apuntar.
+  if (r._fila) return `<div class="acciones" style="margin-top:10px"><button class="btn ghost" disabled title="Disponible cuando se envíe">Ver informe</button></div>`;
   const boton = TC.puedeEditar(r, me) && TC.botonEnvio(r._datos, r.kind);
   return `<div class="acciones" style="margin-top:10px"><button class="btn ghost" data-a="verInformeReg" data-id="${esc(r.id)}">Ver informe</button>${boton ? `<button class="btn ghost" data-a="enviarReg" data-id="${esc(r.id)}">${boton}</button>` : ''}</div>
       ${TC.lineaEnvio(r._datos) ? `<p class="mute" data-envio="${esc(r.id)}">${esc(TC.lineaEnvio(r._datos))}</p>` : ''}
@@ -1560,13 +2191,38 @@ function resultadosEnsayo(r){
   const linea = f => `<p>N° ${esc(f.n)} · ${esc(f.sustrato || '—')} · ${esc(TC.fmtNum(f.cargaKn) || '—')} kN · <b>${esc(TC.fmtMpa(TC.mpaDeFila(f)) || '—')} MPa</b>${TC.esManual(f) ? ' (manual)' : ''}${f.falla ? ' · ' + esc(f.falla) : ''}</p>`;
   return `<p>${filas.length} extracción(es)${res.min != null ? ` · ${TC.fmtMpa(res.min)} a ${TC.fmtMpa(res.max)} MPa (promedio ${TC.fmtMpa(res.prom)})` : ''}</p>
       ${res.bajoUmbral.length ? `<div class="aviso">Bajo 0,20 MPa: N° ${res.bajoUmbral.map(esc).join(', ')}</div>` : ''}
-      <details class="mas"><summary>Ver resultados</summary>${filas.map(linea).join('')}</details>`;
+      <details class="mas" data-sec="res:${esc(r.id)}"><summary>Ver resultados</summary>${filas.map(linea).join('')}</details>`;
 }
 
-function tarjeta(r){
+// Lo registrado en el teléfono que aún no llega al servidor (_fila): estado y, si falló, Reintentar / Descartar.
+function bandaFila(r){
+  const f = r._fila; if (!f) return '';
+  if (f.estado !== 'problema') return '<p class="mute" style="margin:0 0 6px">Pendiente de enviar: se envía solo al volver la señal.</p>';
+  // Un conflicto real (otra persona corrigió el mismo registro mientras no había señal) o un registro que ya no
+  // está no se arreglan reintentando a ciegas: volverían a fallar igual. En vez de Reintentar se ofrece revisar
+  // lo escrito y decidir ("Ver mi versión" compara con lo que haya ahora en el servidor, si hay señal).
+  const conflicto = TC.esConflicto(f.error), noExiste = TC.noExiste(f.error);
+  const msg = conflicto ? TC.MSG_CONFLICTO : (f.error || 'error');
+  const accion = (conflicto || noExiste)
+    ? `<button class="btn" data-a="verMiVersion" data-eid="${esc(f.entradaId)}">Ver mi versión</button>`
+    : `<button class="btn" data-a="filaReintentar" data-eid="${esc(f.entradaId)}">Reintentar</button>`;
+  return `<div class="aviso" style="margin:0 0 8px">No se pudo enviar: ${esc(msg)}
+    <div class="acciones" style="margin-top:6px">${accion}
+    <button class="btn ghost" data-a="filaDescartar" data-eid="${esc(f.entradaId)}">Descartar</button></div></div>`;
+}
+const tarjeta = r => { const h = tarjetaBase(r); return r._fila ? h.replace('<div class="card">', '<div class="card">' + bandaFila(r)) : h; };
+// Sin señal no se puede consultar la regla de la base (rt_registros_restringir_edicion): se decide aquí con el mismo
+// criterio (autor o admin). Con señal se deja el botón oculto como hoy si no corresponde, y la base decide al guardar;
+// sin señal, en vez de ocultarlo, queda deshabilitado con el motivo para que el PM entienda por qué no puede corregirlo.
+function botonEditar(r){
+  if (TC.puedeEditar(r, me)) return `<button class="del" data-a="editar" data-id="${esc(r.id)}">Editar</button>`;
+  if (navigator.onLine === false) return `<button class="del" disabled title="Sin señal: solo puedes corregir tus propios registros">Editar</button>`;
+  return '';
+}
+function tarjetaBase(r){
   const autor = `<span class="mute"> · ${esc(nombreAutor(r))}</span>`;
-  const del = (puedeBorrar(r) ? `<button class="del" data-a="eliminar" data-id="${esc(r.id)}">Eliminar</button>` : '')
-    + (TC.puedeEditar(r, me) ? `<button class="del" data-a="editar" data-id="${esc(r.id)}">Editar</button>` : '');
+  const del = (puedeBorrar(r) && !r._fila ? `<button class="del" data-a="eliminar" data-id="${esc(r.id)}">Eliminar</button>` : '')
+    + botonEditar(r);
   if (r.kind === 'adherencia') {
     return `<div class="card">${del}
       <span class="tag">Adherencia</span><b>${esc(r.cliente)}</b>${autor}
@@ -1584,7 +2240,7 @@ function tarjeta(r){
       <p><b>Motivo:</b> ${esc(r.motivo)}</p>
       <p><b>Causa probable:</b> ${esc(r.causa || '—')}${r.lab === 'Sí' ? ' · Requiere laboratorio' : ''}</p>
       ${r.lab === 'Sí' ? `<p style="margin:0 0 8px"><button class="enlace" data-a="crearEnsayo" data-id="${esc(r.id)}">Crear ensayo de adherencia para esta obra</button></p>` : ''}
-      ${(r.verificacion || r.solucion || r.contacto || r.direccion || r.observaciones) ? `<details class="mas"><summary>Ver detalle</summary>
+      ${(r.verificacion || r.solucion || r.contacto || r.direccion || r.observaciones) ? `<details class="mas" data-sec="det:${esc(r.id)}"><summary>Ver detalle</summary>
         ${r.direccion ? `<p><b>Dirección:</b> ${esc(r.direccion)}</p>` : ''}
         ${r.contacto ? `<p><b>Contacto:</b> ${esc(r.contacto)}</p>` : ''}
         ${r.verificacion ? `<p><b>Verificación:</b> ${esc(r.verificacion)}</p>` : ''}
@@ -1666,14 +2322,20 @@ function marcarSinFoto(a){
 
 /* ===================== Accesos (solo administradores) ===================== */
 function vistaAccesos(){
+  // Lista y cambia accesos de otros PM en vivo: sin señal no tiene caso intentar rt_accesos (fallaría con un
+  // error de red) ni dejar los controles de cambio de acceso operables (rt_set_acceso fallaría igual).
+  if (navigator.onLine === false) {
+    return `<div class="card"><h2>Accesos al módulo</h2><div class="aviso">Necesitas señal para ver y cambiar accesos.</div></div>`;
+  }
   return `<div class="card"><h2>Accesos al módulo</h2>
     <p class="mute">Activa a los Product Managers que deben registrar charlas, capacitaciones y visitas. Todos los habilitados ven todos los registros. Los administradores entran siempre. Si alguien no aparece, primero debe crear su cuenta en el portal de Apps Grupo TX.</p>
     <div id="acc-lista">${accesos.length ? accesos.map(u => `<div class="acc"><div><b>${esc(u.nombre || u.email)}</b><small>${esc(u.email)}${u.rol === 'admin' ? ' · administrador' : ''}</small></div>
       <label class="sw" title="Acceso"><input type="checkbox" data-acc="${esc(u.id)}" ${u.acceso || u.rol === 'admin' ? 'checked' : ''} ${u.rol === 'admin' ? 'disabled' : ''}><span></span></label></div>`).join('') : '<p class="mute">Cargando…</p>'}</div></div>`;
 }
 async function cargarAccesos(){
+  if (navigator.onLine === false) return;   // vistaAccesos() ya muestra el aviso; no tiene caso intentarlo
   const { data, error } = await sb.rpc('rt_accesos');
-  if (error) return toast('No se pudo cargar la lista de usuarios');
+  if (error) return toast(esRed(error) ? 'Necesitas señal para ver los accesos' : 'No se pudo cargar la lista de usuarios');
   accesos = data || [];
   if (vista === 'accesos') render();
 }
@@ -1684,7 +2346,7 @@ const acciones = {
   nav: b => {
     // Tocar el botón de la pantalla que ya está abierta no la reconstruye: perdería lo escrito, las firmas y los participantes llegados por QR.
     if (FORMS.includes(vista) && (b.dataset.vistas || b.dataset.v).split(' ').includes(vista)) return window.scrollTo(0, 0);
-    vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
+    vista = b.dataset.v; cliSel = null; cliNuevo = false; editandoId = null; baseEditando = null; reemplazaEntrada = null; participantesDisponibles = true; planReemplazado = null; render(); window.scrollTo(0,0); if (vista === 'accesos') cargarAccesos(); },
   addPart: () => $('#partics').insertAdjacentHTML('beforeend', filaPart()),
   delPart: b => {
     const row = b.closest('.part');
@@ -1734,6 +2396,16 @@ const acciones = {
   editar: b => editarRegistro(b.dataset.id),
   filtro: b => { filtro = b.dataset.f; render(); },
   estado: b => cambiarEstado(b.dataset.id, b.dataset.e),
+  // La entrada con problema y la que la precede (el cliente nuevo del que depende) vuelven juntas o se van juntas.
+  // Reintentar y Descartar actúan sobre la cadena completa (el cliente nuevo, el alta y cada corrección que
+  // dependa de la anterior): un solo eslabón no puede ir solo, o queda huérfano o se adelanta a su dependencia.
+  filaReintentar: async b => { await TXOffline.reintentar(TC.cadenaCompleta(await TXOffline.entradas(), b.dataset.eid)); },
+  verMiVersion: b => verMiVersion(b.dataset.eid),
+  filaDescartar: async b => {
+    if (!confirm('¿Descartar este registro? Se perderá lo que escribiste en el teléfono.')) return;
+    for (const x of TC.cadenaCompleta(await TXOffline.entradas(), b.dataset.eid)) { try { await TXOffline.descartar(x, { aunPendiente: true }); } catch (_) {} }
+    toast('Registro descartado');
+  },
   eliminar: b => eliminar(b.dataset.id)
 };
 
@@ -1781,10 +2453,11 @@ document.addEventListener('change', async e => {
     return;
   }
   if (t.matches('[data-acc]')) {
+    if (navigator.onLine === false) { t.checked = !t.checked; return toast('Necesitas señal para cambiar accesos'); }
     t.disabled = true;
     const { error } = await sb.rpc('rt_set_acceso', { p_id: t.dataset.acc, p_activo: t.checked });
     t.disabled = false;
-    if (error) { t.checked = !t.checked; return toast('No se pudo guardar el acceso'); }
+    if (error) { t.checked = !t.checked; return toast(esRed(error) ? 'Necesitas señal para cambiar accesos' : 'No se pudo guardar el acceso'); }
     const u = accesos.find(x => x.id === t.dataset.acc); if (u) u.acceso = t.checked;
     toast(t.checked ? 'Acceso habilitado' : 'Acceso retirado');
   }
@@ -1800,7 +2473,28 @@ document.addEventListener('keydown', e => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && me && Date.now() - ultimaCarga > 60000 && (vista === 'panel' || vista === 'registros')) cargar();
 });
-sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
+sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT' && !saliendo) location.reload(); });
+
+/* ===================== Lo que exige señal ===================== */
+// A diferencia de bloqueInforme/botonEditar (que miran si el registro SIGUE SIENDO una entrada de la fila, `_fila`),
+// estos controles hacen una llamada en vivo que no tiene sentido sin red aunque el registro ya esté confirmado en
+// el servidor: generar/cerrar el QR, ver el informe, enviar la copia al cliente y eliminar. Cada uno dice qué
+// necesita en el `title` (nunca un "sin conexión" genérico) y conviven con esas otras dos capas: si el botón ya
+// está deshabilitado por otra razón (title propio, no vacío, distinto del nuestro) no se toca.
+function exigeSenal(btn, motivo){
+  if (!btn || (btn.disabled && btn.title && btn.title !== motivo)) return;
+  if (navigator.onLine === false) { btn.disabled = true; btn.title = motivo; }
+  else if (btn.title === motivo) { btn.disabled = false; btn.title = ''; }
+}
+// Reaplica exigeSenal a los controles ya dibujados: se llama al final de cada render() y, más abajo, también al
+// vuelo en los eventos online/offline, sin esperar al siguiente render.
+function aplicarExigeSenal(){
+  exigeSenal($('#btn-qr'), 'Necesitas señal para generar el código QR');
+  document.querySelectorAll('[data-a="cerrarBorrador"]').forEach(b => exigeSenal(b, 'Necesitas señal para cerrar la asistencia por QR'));
+  document.querySelectorAll('[data-a="verInformeReg"]').forEach(b => exigeSenal(b, 'Necesitas señal para ver el informe (las fotos están en el servidor)'));
+  document.querySelectorAll('[data-a="enviarReg"]').forEach(b => exigeSenal(b, 'Necesitas señal para enviar la copia al cliente'));
+  document.querySelectorAll('[data-a="eliminar"]').forEach(b => exigeSenal(b, 'Necesitas señal para eliminar el registro'));
+}
 
 /* ===================== Render ===================== */
 function render(){
@@ -1822,9 +2516,24 @@ function render(){
   if (vista === 'panel') dibujarGraficos();
   if (vista === 'registros') cargarFotos();
   if (vista === 'adherencia') actualizarEnsayo();
+  aplicarExigeSenal();
 }
+// Si la pestaña Accesos está abierta cuando cambia la señal, la vista completa (no un botón suelto) tiene que
+// reflejarlo sin esperar al siguiente render(): repinta solo esa vista, sin rehacer toda la pantalla (no hace
+// falta detenerRefresco ni lo demás que hace render()). Al perder la señal pasa a mostrar el aviso; al
+// recuperarla, si la lista nunca llegó a cargar, lo intenta de una vez (y esa carga ya repinta por su cuenta).
+function repintarAccesosSiToca(){
+  if (vista !== 'accesos') return;
+  if (navigator.onLine !== false && !accesos.length) return cargarAccesos();
+  $('#app').innerHTML = vistaAccesos();
+}
+// Se agregan una sola vez (no en cada render): reevalúan los controles ya dibujados al vuelo cuando cambia la
+// señal, y si la pestaña Accesos está abierta, también ella (ver repintarAccesosSiToca arriba).
+window.addEventListener('online', () => { aplicarExigeSenal(); repintarAccesosSiToca(); });
+window.addEventListener('offline', () => { aplicarExigeSenal(); repintarAccesosSiToca(); });
 
 iniciar();
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('terreno-sw.js',{scope:'./registro-terreno'}).catch(()=>{});
 </script>
 </body>
 </html>
