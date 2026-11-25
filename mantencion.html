@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mantención Grupo TX</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="offline-core.js"></script>
+<script src="offline.js"></script>
+<script src="mantencion-core.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:rgba(228,3,46,.16);--bg:#08090c;--surface:#12141a;--sunk:#1b1e25;--ink:#f2f2ef;--muted:#9097a3;--line:#262a33;--ok:#2fbf71;--ok-soft:rgba(47,191,113,.14);--warn:#f5a524;--warn-soft:rgba(245,165,36,.14);--bad:#ff4d5e;--bad-soft:rgba(255,77,94,.15);--c-crm:#6ea8ff;--c-silos:#e4032e;--c-ent:#2fbf71;--c-pro:#a77ce0;--c-tur:#f5a524;--c-rt:#27b5b8;--f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace}
 *{box-sizing:border-box}
@@ -211,6 +214,7 @@ input.cbx{width:100%;height:auto;min-height:0;flex:none;align-self:stretch}
     <button class="btn gh sm" data-act="exportar">Respaldo</button>
     <button class="btn gh sm" data-act="importar">Restaurar</button>
     <input type="file" id="fileImp" accept="application/json" style="display:none">
+    <span class="sync" id="fila-ind" hidden></span>
     <span class="sync" id="sync">Conectando…</span>
   </div>
 </header>
@@ -2590,6 +2594,15 @@ let ME = null, canalRT = null;
 const ARR = ['repuestos','movs','sol','ots','chk','org'];
 const SEP = '\u0001';
 const snap = new Map();
+// Fix del hallazgo Critical de la revisión de la Tarea 5: `subirCambios()` mandaba siempre `base:
+// null`, y `mtto_guardar_doc` con `p_base` null sobre un documento YA EXISTENTE compara CONTENIDO —
+// si difiere (el caso normal de corregir algo), CONFLICTO siempre, sin excepción (nunca puede tener
+// éxito marcar un paso, registrar un permiso o cerrar una OT que ya se sincronizó antes). Este mapa
+// guarda el último `updated_at` conocido de cada documento (clave MC.claveDoc) para que `base=null`
+// quede reservado de verdad para la primera alta: lo llenan `cargarTodo()` (lectura masiva, agrega
+// `updated_at` al select que ya hacía), `cambioRT()` (lo que llega por tiempo real) y el propio
+// manejador 'mantencion.doc' (tras cada guardado propio exitoso).
+const baseConocida = new Map();
 let colaSync = Promise.resolve(), tSync = null, tRender = null;
 function sigNum(lista, pref){ let m = 0; (lista||[]).forEach(x => { const n = parseInt(String(x.id||'').replace(pref,''),10); if(n > m) m = n; }); return m + 1; }
 function asegurar(){
@@ -2628,41 +2641,160 @@ function syncGuardar(){
   clearTimeout(tSync);
   tSync = setTimeout(() => { colaSync = colaSync.then(subirCambios).catch(e => { estadoSync('Error al guardar'); toast('No se pudo guardar: '+(e.message||e)); }); }, 250);
 }
+// Tarea 5, Step 2: ya no arma lotes para `sb.from('mtto_docs').upsert(...)` directo. Cada documento
+// que cambió (MC.docsCambiados, equivalente puro del diff viejo contra `snap`) se encola como su
+// propia entrada de la fila (TXOffline.encolar) y la envía el manejador único 'mantencion.doc' (ver
+// TIPOS_FILA más abajo), ahora o cuando vuelva la señal. `snap` se actualiza recién DENTRO del
+// manejador, cuando la entrada se confirma enviada — nunca aquí al encolar — para que un reenvío de
+// la misma entrada siga comparando contra lo último realmente confirmado, no contra algo que solo se
+// alcanzó a poner en la fila (si se actualizara acá, un documento que queda "con problema" se vería
+// erróneamente como ya sincronizado para la siguiente pasada de subirCambios).
 async function subirCambios(){
   if(!ME) return;
   if(!ME.editor){ toast('Tu acceso es de solo lectura: el cambio no se guardó.'); await cargarTodo(); render(); return; }
-  const act = docsDeDb();
-  const subir = [], borrar = {};
-  act.forEach((v,k) => { const j = JSON.stringify(v); if(snap.get(k) !== j) subir.push([k,v,j]); });
-  snap.forEach((_,k) => { if(!act.has(k)){ const [c,id] = k.split(SEP); (borrar[c] = borrar[c] || []).push(id); } });
-  if(!subir.length && !Object.keys(borrar).length) return;
+  const { cambiados, borrados } = MC.docsCambiados(docsDeDb(), snap);
+  if(!cambiados.length && !borrados.length) return;
   estadoSync('Guardando…');
-  for(let i=0;i<subir.length;i+=10){
-    const lote = subir.slice(i,i+10);
-    const { error } = await sb.from('mtto_docs').upsert(lote.map(([k,v]) => { const [c,id] = k.split(SEP); return { coleccion:c, id, data:v, updated_by:ME.id, updated_at:new Date().toISOString() }; }), { onConflict:'coleccion,id' });
-    if(error) throw error;
-    lote.forEach(([k,,j]) => snap.set(k,j));
+  // Los checklists se encolan PRIMERO: si alguno creó una OT correctiva en el mismo guardado
+  // (mismo chkId), la OT se encola DESPUÉS con dependeDe hacia la entrada que se acaba de encolar
+  // para ese checklist (Tarea 5, Step 3 — mismo patrón que Terreno con el cliente nuevo de un
+  // registro: el id de la entrada ya encolada se pasa como dependeDe de la siguiente, nunca al
+  // revés). Si el checklist no viene en este mismo lote (ya se había encolado o sincronizado antes),
+  // la OT no depende de nada nuevo.
+  const chks = [], otros = [];
+  cambiados.forEach(par => (par[0].startsWith('chk'+SEP) ? chks : otros).push(par));
+  // `base` sale de `baseConocida` (fix del hallazgo Critical de la revisión: antes siempre viajaba
+  // null, y mtto_guardar_doc trata un `p_base` null sobre un documento YA EXISTENTE como "compara
+  // contenido" -> CONFLICTO en cuanto el contenido cambia, es decir, SIEMPRE que de verdad se corrige
+  // algo). Sin entrada en `baseConocida` (documento recién creado en este mismo lote, o uno que de
+  // verdad nunca se cargó antes) queda null a propósito: es la primera alta, mtto_guardar_doc no
+  // compara nada.
+  // Fix del hallazgo Important de la revisión: si ya hay una entrada pendiente/con problema para
+  // ESTE MISMO documento (dos correcciones sucesivas — p. ej. marcar dos pasos de la misma OT — antes
+  // de que la primera confirme: exactamente lo que puede pasar con señal pobre/lenta, que es la razón
+  // de ser de esta tarea), `baseConocida` leída AHORA puede quedar vieja antes de que esa entrada
+  // anterior siquiera se intente enviar. La nueva se encadena a esa entrada anterior con `dependeDe`
+  // (vía `madre`, un campo propio en `datos` — no tocar `mantencion-core.js` — paralelo al
+  // `dependeDe` que ya usan los pares checklist→OT) y el manejador, al enviarla, usa la versión que
+  // esa entrada madre deja al confirmarse, no una base leída de antemano — mismo patrón que
+  // terreno-core.js (dependeDeCorreccion/filaPrevia + baseCorreccion/madreParaVersion).
+  const entradasFila = window.TXOffline ? await TXOffline.entradas() : [];
+  // `TXOffline.entradas()` ya viene ordenada ASCENDENTE por `creada` (offline.js): con 3+
+  // correcciones sin confirmar del MISMO documento (técnico sin señal que marca varios pasos
+  // seguidos — uso normal, no caso extremo), hay que encadenar con la MÁS RECIENTE, no con la
+  // primera que aparece en el arreglo — `.find()` a secas daría la más vieja y dejaría la 2ª y la 3ª
+  // colgando de la 1ª en vez de 1←2←3 (fix de la segunda ronda de revisión de este hallazgo).
+  // `reduce` se queda con la última coincidencia recorriendo una sola vez, sin mutar el arreglo
+  // (ordenado) con reverse().
+  const entradaPreviaDe = (clave) => entradasFila.reduce((ultima, e) => (e && e.tipo === 'mantencion.doc' && e.datos && MC.claveDoc(e.datos.coleccion, e.datos.docId || e.datos.id) === clave) ? e : ultima, null);
+  const entradaDeChk = new Map();
+  for (const [clave, doc] of chks){
+    const [, id] = clave.split(SEP);
+    const archivos = fotosPendientes(id);
+    const base = baseConocida.get(clave) || null;
+    const madre = entradaPreviaDe(clave);
+    const ent = MC.entradaDoc({ id, coleccion:'chk', data:doc, base, hechoEn:new Date().toISOString(), dependeDe: madre ? madre.id : null });
+    if (madre) ent.datos.madre = madre.id;
+    const entradaId = await TXOffline.encolar(ent.tipo, ent.datos, { archivos, dependeDe: ent.dependeDe });
+    entradaDeChk.set(id, entradaId);
   }
-  for(const [c,ids] of Object.entries(borrar)){
-    const { error } = await sb.from('mtto_docs').delete().eq('coleccion',c).in('id',ids);
-    if(error) throw error;
-    ids.forEach(id => snap.delete(c+SEP+id));
+  for (const [clave, doc] of otros){
+    const [coleccion, id] = clave.split(SEP);
+    const base = baseConocida.get(clave) || null;
+    const madre = entradaPreviaDe(clave);
+    const dependeDe = madre ? madre.id : ((coleccion==='ots' && doc.chkId) ? (entradaDeChk.get(doc.chkId) || null) : null);
+    const ent = MC.entradaDoc({ id, coleccion, data:doc, base, hechoEn:new Date().toISOString(), dependeDe });
+    if (madre) ent.datos.madre = madre.id;
+    await TXOffline.encolar(ent.tipo, ent.datos, { dependeDe: ent.dependeDe });
   }
-  estadoSync('Sincronizado · '+new Date().toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}));
+  // Los borrados (hoy solo `orgdel`, y ese ya exige señal — Tarea 7) no pasan por la fila: el
+  // manejador único/`mtto_guardar_doc` no tienen forma de borrar, y este camino solo se alcanza
+  // cuando SÍ hay señal (el botón está deshabilitado si no la hay), así que seguir llamando a
+  // Supabase directo acá es seguro y no necesita reintentos sin conexión.
+  if (borrados.length){
+    const porColeccion = {};
+    borrados.forEach(k => { const [c,bid] = k.split(SEP); (porColeccion[c] = porColeccion[c] || []).push(bid); });
+    for (const [c,ids] of Object.entries(porColeccion)){
+      const { error } = await sb.from('mtto_docs').delete().eq('coleccion',c).in('id',ids);
+      if(error) throw error;
+      ids.forEach(bid => { snap.delete(c+SEP+bid); baseConocida.delete(c+SEP+bid); });
+    }
+  }
+  estadoSync('Guardado · se envía solo');
+}
+// Consulta con copia local: sin red conocida (navigator.onLine) va directo a la copia. Si no se pudo
+// abrir la copia (TXOffline ausente o sin iniciar), la consulta sigue funcionando con señal — mismo
+// contrato que consultarTerreno/consultarSilos (registro-terreno.html / silos-tx/index.html).
+// `cargarTodo()` trae TODO mtto_docs de una vez (paginado de 200 en 200): puede tardar más que el tope
+// por defecto de TXOffline.consultar (8 s) en una red lenta, así que usa el mismo tope largo que
+// Silos (consultarSilosLarga) para que la copia llegue a crearse completa, no a medio camino.
+const TOPE_LARGO_MS = 120000;
+// Acota una página cualquiera a `ms`: mismo mecanismo que silos-tx/index.html (conTope/PAGINA_TOPE_MS).
+// El tope largo de arriba cubre TODA la operación paginada, pero una conexión REALMENTE colgada (acepta
+// la conexión y nunca responde — distinto de un fetch que falla rápido) dejaría al técnico esperando
+// hasta 2 minutos en "Conectando…" sin ningún indicio de que algo anda mal, antes de caer a la copia.
+// Con esto, cada página por sí sola falla a los 8 s (clasificado 'red' por el AbortError) y el resto de
+// la operación sigue su curso normal (el tope largo, o la copia si ya se agotó también ese).
+const PAGINA_TOPE_MS = 8000;
+function conTope(promesa, ms){
+  return new Promise((ok, mal) => {
+    const t = setTimeout(() => { const e = new Error('Tiempo de espera agotado'); e.name = 'AbortError'; mal(e); }, ms);
+    promesa.then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); mal(e); });
+  });
+}
+function consultarMantencion(clave, fn){
+  const traer = () => { if(navigator.onLine === false) throw new TypeError('Failed to fetch'); return fn(); };
+  if(!window.TXOffline) return traer().then(datos => ({ datos, desdeCache:false, guardadoEn:null }));
+  return TXOffline.consultar(clave, traer, { tope: TOPE_LARGO_MS }).catch(e => {
+    if(e && /no está iniciado/i.test(e.message || '')) return traer().then(datos => ({ datos, desdeCache:false, guardadoEn:null }));
+    throw e;
+  });
 }
 async function cargarTodo(){
+  const r = await consultarMantencion('mantencion.docs', async () => {
+    const filas = [];
+    for(let d=0;;d+=200){
+      // `updated_at` se agrega al select (Tarea 5, fix del hallazgo Critical de su revisión): sin
+      // esto `baseConocida` no se puede llenar al cargar y toda corrección de un documento ya
+      // existente queda condenada a CONFLICTO (ver el comentario junto a `baseConocida`, arriba).
+      const { data, error } = await conTope(sb.from('mtto_docs').select('coleccion,id,data,updated_at').order('coleccion').order('id').range(d,d+199), PAGINA_TOPE_MS);
+      if(error) throw error;
+      filas.push(...data); if(data.length < 200) break;
+    }
+    return filas;
+  });
+  // Fix del hallazgo Important de la revisión final de la rama: `TXOffline.iniciar()` (arrancar(),
+  // más abajo) dispara `sincronizar()` SIN esperarlo apenas abre la copia local, y esa resincronización
+  // en segundo plano puede seguir reenviando una corrección pendiente/con problema de una sesión
+  // anterior (sube fotos una por una antes de llamar a mtto_guardar_doc: puede tardar, más aún con la
+  // señal débil/intermitente que es el caso de uso de esta app) mientras esta lectura cruda ya está en
+  // camino. Sin fusionar, `db`/`snap` quedarían con la versión VIEJA de ese documento: el técnico vería
+  // su propia corrección como "revertida" aunque el servidor ya la tenga bien, y la siguiente edición
+  // de ese mismo documento (subirCambios()/docsCambiados comparando `db` viejo contra `snap`, que el
+  // manejador único 'mantencion.doc' SÍ deja al día al confirmarse) volvería a encolar y a sobrescribir
+  // el servidor con el contenido viejo. `MC.aplicarFilaDocs` (probado en tests/mantencion-core.test.js)
+  // es exactamente para esto — mismo patrón que silos-tx/index.html (recomponerSols/SC.aplicarFilaSilos):
+  // se fusiona ANTES de reconstruir `db`/`snap`, nunca después. Solo hace falta en ESTE punto (la única
+  // lectura cruda de TODO mtto_docs sin pasar por `db`): las ediciones en vivo ya escriben directo en
+  // `db[col]` (comentario de refrescarEntsFila/filaDeDoc, más abajo) y cambioRT() ya se cuida de no
+  // pisar un documento con una entrada propia pendiente (filaPendiente()), así que no hace falta repetir
+  // esta fusión en cada 'txoffline:cambio' — hacerlo ahí volvería a aplicar entradas ya retiradas de la
+  // fila sobre un snapshot congelado y revertiría silenciosamente la corrección recién confirmada.
+  let entradasFusion = []; try{ entradasFusion = window.TXOffline ? await TXOffline.entradas() : []; } catch(_){}
+  const fusionDocs = MC.aplicarFilaDocs(r.datos, entradasFusion);
   db = vacio(); snap.clear(); db.org = null; db.tpls = {}; db.mm = {};
-  const filas = [];
-  for(let d=0;;d+=200){
-    const { data, error } = await sb.from('mtto_docs').select('coleccion,id,data').order('coleccion').order('id').range(d,d+199);
-    if(error) throw error;
-    filas.push(...data); if(data.length < 200) break;
-  }
-  filas.forEach(f => aplicarDoc(f.coleccion, f.id, f.data));
+  baseConocida.clear();
+  // `baseConocida` se llena con el `updated_at` REAL del servidor (r.datos, nunca `fusionDocs`): sigue
+  // siendo la base para comparar en la próxima corrección (mtto_guardar_doc), y debe representar lo que
+  // el servidor de verdad tiene confirmado, no el contenido todavía pendiente de confirmarse.
+  r.datos.forEach(f => baseConocida.set(MC.claveDoc(f.coleccion, f.id), f.updated_at));
+  fusionDocs.forEach(f => aplicarDoc(f.coleccion, f.id, f.data));
   const sinOrg = !db.org || !db.org.length;
   asegurar();
-  if(sinOrg && ME.editor) syncGuardar();
-  estadoSync('Sincronizado');
+  // Si los datos vienen de la copia (sin señal) no se sube nada: subirCambios necesita red y solo
+  // produciría un "Error al guardar" sin sentido mientras no vuelva la señal.
+  if(sinOrg && ME.editor && !r.desdeCache) syncGuardar();
+  estadoSync(r.desdeCache ? 'Sin conexión · datos del ' + new Date(r.guardadoEn).toLocaleString('es-CL') : 'Sincronizado');
 }
 function renderSeguro(){
   clearTimeout(tRender);
@@ -2675,18 +2807,104 @@ function renderSeguro(){
 }
 function conectarVivo(){
   if(canalRT) sb.removeChannel(canalRT);
-  canalRT = sb.channel('mtto-docs').on('postgres_changes', { event:'*', schema:'public', table:'mtto_docs' }, async p => {
-    try{
-      if(p.eventType === 'DELETE'){ const o = p.old; if(!o || !o.coleccion) return; aplicarDoc(o.coleccion, o.id, null); renderSeguro(); return; }
-      const n = p.new; let data = n.data;
-      if(data === undefined || data === null){
-        const r = await sb.from('mtto_docs').select('data').eq('coleccion',n.coleccion).eq('id',n.id).maybeSingle();
-        data = r.data && r.data.data; if(!data) return;
-      }
-      if(snap.get(n.coleccion+SEP+n.id) === JSON.stringify(data)) return;
-      aplicarDoc(n.coleccion, n.id, data); renderSeguro();
-    }catch(e){}
-  }).subscribe();
+  canalRT = sb.channel('mtto-docs').on('postgres_changes', { event:'*', schema:'public', table:'mtto_docs' }, p => { cambioRT(p).catch(()=>{}); }).subscribe();
+}
+// Un documento (coleccion+id) con una entrada propia pendiente o con problema en la fila de envíos sin
+// conexión (un cambio de este mismo técnico, en este mismo equipo, que todavía no salió) no se pisa con
+// lo que llega por tiempo real: si se reemplazara db/snap de inmediato, se perdería en memoria lo que el
+// técnico está editando antes de que la fila alcance a enviarlo. El conflicto real (¿otra persona cambió
+// este documento mientras no había señal?) lo decide mtto_guardar_doc al sincronizar esa entrada (su
+// propia versión del servidor vía clock_timestamp()), nunca este repintado en vivo — este solo evita
+// adelantarse. A diferencia de Terreno/Silos (un solo id por fila), acá la identidad de un documento es
+// coleccion+id (MC.claveDoc): uno de los 2 riesgos del plan sin equivalente exacto en esas apps.
+async function filaPendiente(coleccion, id){
+  if(!window.TXOffline) return false;
+  let ents; try{ ents = await TXOffline.entradas(); } catch(_){ return false; }
+  if(!ents.length) return false;
+  const clave = MC.claveDoc(coleccion, id);
+  return ents.some(e => e && e.tipo === 'mantencion.doc' && e.datos && MC.claveDoc(e.datos.coleccion, e.datos.docId || e.datos.id) === clave);
+}
+// Tarea 6: cache en memoria de `TXOffline.entradas()` (pendientes/con problema), solo para PINTAR la
+// banda de conflicto de cada OT (filaDeDoc/bandaFilaOt más abajo) — a diferencia de Terreno/Silos, acá
+// no hace falta fusionar ESTO con `MC.aplicarFilaDocs` para mostrar "mi versión" en cada repintado:
+// `db.ots` YA ES la versión editable (pasos/cierre/permiso se escriben ahí mismo al tocar la OT,
+// confirmados o no), así que lo que se ve en la fila en todo momento es lo que el técnico escribió.
+// `MC.aplicarFilaDocs` sí se usa, pero una sola vez, dentro de `cargarTodo()` (arriba): es la única
+// lectura cruda de TODO mtto_docs que puede llegar antes de que una corrección pendiente de una sesión
+// anterior termine de confirmarse (revisión final de la rama) — fusionar en cada 'txoffline:cambio'
+// aquí sería incorrecto, porque reaplicaría sobre `db` entradas ya retiradas de la fila. Se refresca con cada
+// 'txoffline:cambio' (el mismo evento que ya pinta fila-ind) y dispara un repintado seguro (no pisa un
+// formulario/sheet abierto, igual que cambioRT).
+let entsFila = [];
+async function refrescarEntsFila(){
+  try{ entsFila = window.TXOffline ? await TXOffline.entradas() : []; } catch(_){ entsFila = []; }
+  renderSeguro();
+}
+window.addEventListener('txoffline:cambio', refrescarEntsFila);
+// Info de la fila para UN documento (coleccion+id): null si no hay nada pendiente/con problema. Misma
+// precedencia que MC.aplicarFilaDocs (ver su comentario en mantencion-core.js): si ya hay un PROBLEMA
+// para este documento se deja ese — es la única entrada con "Ver mi versión"/Reintentar y Descartar, y
+// una pendiente posterior (p. ej. otra corrección encolada mientras la primera seguía con problema) no
+// debe taparlo. `MC.causaCadena` se llama con `entsFila` completo (no solo las de este documento):
+// una OT correctiva puede estar "Depende de un registro con problema" apuntando a SU checklist de
+// origen, en otra colección/clave, y la causa real hay que seguirla hasta ahí.
+function filaDeDoc(coleccion, id){
+  const clave = MC.claveDoc(coleccion, id);
+  const propias = entsFila.filter(e => e && e.tipo === 'mantencion.doc' && e.datos && MC.claveDoc(e.datos.coleccion, e.datos.docId || e.datos.id) === clave);
+  if (!propias.length) return null;
+  const problema = propias.find(e => e.estado === 'problema');
+  const e = problema || propias[propias.length - 1];
+  return { entradaId: e.id, estado: e.estado, error: e.estado === 'problema' ? MC.causaCadena(entsFila, e) : null };
+}
+// Único criterio de "puede corregir" en Mantención: a diferencia de Silos (puedeEditarSolicitud, que
+// combina estado+rol+autoría del documento — tuvo que unificarse en una sola función porque el botón
+// normal y "Ver mi versión" la habían duplicado y se desincronizaron, Tarea 6 de Silos), aquí no hay
+// ningún permiso por documento: es el mismo ME.editor binario que ya revisa subirCambios() antes de
+// encolar cualquier corrección (Tarea 5) y que la política RLS de mtto_docs (mtto_editor()) vuelve a
+// exigir en el servidor sin importar lo que decida el cliente. Se nombra aparte (en vez de leer
+// `ME.editor` suelto) para que "Ver mi versión" y cualquier otro camino de corrección futuro lean
+// siempre el mismo criterio — un solo lugar que cambiar si Mantención alguna vez agrega una regla por
+// documento.
+function puedeCorregir(){ return !!ME && !!ME.editor; }
+// Trae UN solo documento (coleccion+id) del servidor y lo aplica a `db`/`snap`/`baseConocida`, igual
+// que cargarTodo() para todos a la vez pero sin recargar todo mtto_docs — lo usa Descartar (Tarea 6,
+// hueco documentado del plan): si no se volviera a traer el documento real, el técnico seguiría viendo
+// en pantalla la corrección que acaba de descartar hasta el próximo cargarTodo() completo (recarga de
+// página), tal como señaló explícitamente la revisión de la Tarea 5. Sin señal no hace nada (no hay de
+// dónde traerlo): se queda con lo que había, mismo límite que ya tiene cualquier consulta de esta app.
+async function refrescarDocDesdeServidor(coleccion, id){
+  if (navigator.onLine === false) return;
+  try {
+    const r = await sb.from('mtto_docs').select('data,updated_at').eq('coleccion',coleccion).eq('id',id).maybeSingle();
+    if (r.error) return;
+    const clave = MC.claveDoc(coleccion, id);
+    if (!r.data){ aplicarDoc(coleccion, id, null); baseConocida.delete(clave); return; }
+    aplicarDoc(coleccion, id, r.data.data); baseConocida.set(clave, r.data.updated_at);
+  } catch(_) { /* sin señal o error de red: se queda con lo que había */ }
+}
+// Separado de conectarVivo (que solo cablea el canal) para poder probarse a mano desde la consola —
+// cambioRT({eventType:'UPDATE', new:{coleccion:'chk', id:'x', data:{...}}}) — sin depender de un
+// evento real de Supabase ni tocar la base de verdad.
+async function cambioRT(p){
+  if(p.eventType === 'DELETE'){
+    const o = p.old; if(!o || !o.coleccion) return;
+    if(await filaPendiente(o.coleccion, o.id)) return;
+    aplicarDoc(o.coleccion, o.id, null); baseConocida.delete(MC.claveDoc(o.coleccion, o.id)); renderSeguro(); return;
+  }
+  const n = p.new;
+  if(await filaPendiente(n.coleccion, n.id)) return;
+  let data = n.data, updatedAt = n.updated_at;
+  if(data === undefined || data === null){
+    const r = await sb.from('mtto_docs').select('data,updated_at').eq('coleccion',n.coleccion).eq('id',n.id).maybeSingle();
+    data = r.data && r.data.data; if(!data) return;
+    updatedAt = r.data.updated_at;
+  }
+  if(snap.get(n.coleccion+SEP+n.id) === JSON.stringify(data)) return;
+  // `updated_at` también se guarda acá (no solo en cargarTodo): Tarea 5, fix del hallazgo Critical de
+  // su revisión — si no se actualizara, un cambio ajeno que llega por tiempo real dejaría
+  // `baseConocida` vieja, y una corrección propia posterior de ESE MISMO documento chocaría con
+  // CONFLICTO aunque el contenido en memoria ya esté al día (ver MC.claveDoc arriba).
+  aplicarDoc(n.coleccion, n.id, data); baseConocida.set(MC.claveDoc(n.coleccion, n.id), updatedAt); renderSeguro();
 }
 function pantallaLogin(msg){
   document.getElementById('nav').hidden = true;
@@ -2702,17 +2920,98 @@ function pantallaLogin(msg){
     arrancar();
   };
 }
+const TIPOS_FILA = {};
+// Manejador único de la fila para Mantención (Tarea 5): TODO documento de mtto_docs (checklists,
+// OTs, y cualquier otra colección que algún día se guarde sin señal) pasa por acá, sin importar qué
+// parte de la UI lo encoló — mismo patrón que silos-tx/index.html ('silos.solicitud'). Sube las
+// fotos pendientes del checklist (si las hay, una por una, ruta determinista) y recién después llama
+// a mtto_guardar_doc; el placeholder {pendiente:true} se reemplaza por la ruta real tanto en lo que
+// se guarda como en el documento VIVO de `db` (si todavía está ahí): si solo se corrigiera la copia
+// local de `datos.data`, subirCambios() vería este checklist "cambiado" para siempre, porque `db`
+// seguiría con el placeholder aunque el servidor ya tenga la ruta real.
+// `base` sale de `baseConocida` cuando subirCambios() encola (null solo en la primera alta de
+// verdad); al confirmarse el guardado, acá abajo se refresca `baseConocida` con el `updated_at` que
+// devuelve mtto_guardar_doc, para que la PRÓXIMA corrección de este mismo documento (aunque la
+// encole una pasada de subirCambios distinta, incluso en otra sesión tras recargar) ya lo conozca.
+// Red de seguridad (fix del hallazgo Critical de la revisión de la Tarea 5): un CONFLICTO con
+// `base` null SOLO puede pasar si el documento YA EXISTÍA con contenido distinto (una alta de
+// verdad jamás da CONFLICTO) — es decir, `baseConocida` tenía un hueco para este documento (nunca
+// se cargó individualmente, o la corrección llegó antes de que cargarTodo()/cambioRT() alcanzaran a
+// registrarlo). Antes de dejarlo "con problema" como un conflicto real con otra persona, se pide la
+// versión actual del servidor y se reintenta UNA sola vez con esa base: si nadie más lo tocó en esa
+// ventana mínima, el reintento tiene éxito (el propio técnico corrigiendo su trabajo reciente); si
+// alguien más sí lo cambió justo ahí, el reintento vuelve a chocar y eso sí queda como conflicto
+// real, para que la Tarea 6 lo resuelva.
+TIPOS_FILA['mantencion.doc'] = async (datos, archivos, meta) => {
+  const C = TXOfflineCore;
+  const coleccion = datos.coleccion, docId = datos.docId || datos.id;
+  const clave = MC.claveDoc(coleccion, docId);
+  let data = datos.data || {};
+  if (coleccion === 'chk' && Array.isArray(data.items)){
+    const vivo = (db.chk || []).find(k => k.id === docId);
+    for (let ix=0; ix<data.items.length; ix++){
+      const it = data.items[ix];
+      if (!it || !it.foto || !it.foto.pendiente) continue;
+      const blob = archivos[ix+'.jpg'];
+      if (!blob) throw new Error('Falta la foto '+(ix+1)+' en este teléfono: descarta el checklist y créalo de nuevo.');
+      const ruta = rutaFoto(docId, ix);
+      const r = await sb.storage.from('mantencion').upload(ruta, blob, { contentType: blob.type || 'image/jpeg' });
+      const e = C.errorDeRespuesta(r);
+      if (e && !C.subidaYaExiste(e)) throw e;
+      it.foto = { path: ruta };
+      if (vivo && vivo.items && vivo.items[ix]) vivo.items[ix].foto = { path: ruta };
+    }
+    if (vivo) data = vivo;
+  }
+  let base = datos.base;
+  // Fix del hallazgo Important de la revisión: si esta entrada corrige el MISMO documento que una
+  // entrada anterior todavía sin confirmar (`datos.madre`, fijado por subirCambios), la base que se
+  // haya capturado entonces (o `baseConocida` en ese momento) puede haber quedado vieja antes de que
+  // esa madre siquiera se intentara enviar — se usa la versión que la madre deja al confirmarse, NO
+  // la capturada (mismo patrón que TC.baseCorreccion/madreParaVersion de Terreno; `datos.madre` acá
+  // cumple el rol de `madreParaVersion`, sin la excepción `baseFresca` de Terreno porque Mantención
+  // todavía no tiene un "Ver mi versión" que la necesite — Tarea 6 la agregará si corresponde).
+  if (datos.madre){
+    const versionMadre = await TXOffline.leerLocal('version-de:' + datos.madre);
+    if (versionMadre) base = versionMadre;
+  }
+  let res = await sb.rpc('mtto_guardar_doc', { p_coleccion: coleccion, p_id: docId, p_base: base, p_data: data });
+  let err = C.errorDeRespuesta(res);
+  if (err && base == null && MC.esConflicto(err)){
+    const actual = await sb.from('mtto_docs').select('updated_at').eq('coleccion', coleccion).eq('id', docId).maybeSingle();
+    if (!actual.error && actual.data && actual.data.updated_at){
+      base = actual.data.updated_at;
+      res = await sb.rpc('mtto_guardar_doc', { p_coleccion: coleccion, p_id: docId, p_base: base, p_data: data });
+      err = C.errorDeRespuesta(res);
+    }
+  }
+  if (err) throw err;
+  snap.set(clave, JSON.stringify(data));
+  baseConocida.set(clave, res.data);
+  try { await TXOffline.guardarLocal('version-de:' + meta.id, res.data); } catch(_){}
+  return res.data;
+};
+function registrarTiposFila(){
+  if(!window.TXOffline) return;
+  for(const [t, fn] of Object.entries(TIPOS_FILA)) TXOffline.registrarTipo(t, fn);
+}
 async function arrancar(){
   estadoSync('Conectando…');
   const { data:{ session } } = await sb.auth.getSession();
   if(!session) return pantallaLogin();
+  // Los tipos de la fila se registran ANTES de iniciar, porque iniciar() envía de inmediato lo que haya
+  // quedado pendiente de una sesión anterior. La copia local va por usuario (TXOffline.iniciar abre/crea
+  // su base ya sabiendo quién es).
+  registrarTiposFila();
+  try{ await TXOffline.iniciar({ app:'mantencion', sb, usuarioId: session.user.id }); }
+  catch(e){ console.warn('[Mantencion] sin copia local:', e); }
   const [rol, prof] = await Promise.all([ sb.rpc('mtto_mi_rol'), sb.from('profiles').select('nombre,email').eq('id', session.user.id).maybeSingle() ]);
   const pr = prof.data || {};
   ME = { id: session.user.id, email: session.user.email, nombre: pr.nombre || session.user.user_metadata?.nombre || session.user.email.split('@')[0], editor: rol.data === 'editor' };
   if(rol.error || !rol.data){
     document.getElementById('nav').hidden = true; estadoSync('');
     document.getElementById('app').innerHTML = `<div id="gate"><div class="card"><h2>Sin acceso a Mantención</h2><p class="muted">Tu cuenta (${esc(ME.email)}) aún no tiene acceso a este módulo. Pídele al administrador que te habilite en Usuarios y accesos.</p>
-      <button class="btn gh" onclick="sb.auth.signOut().then(()=>location.reload())">Cerrar sesión</button></div></div>`;
+      <button class="btn gh" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
     return;
   }
   document.getElementById('uchip').textContent = ME.nombre + ' · ' + (ME.editor ? 'Editor' : 'Solo lectura');
@@ -2722,7 +3021,27 @@ async function arrancar(){
   catch(e){ estadoSync('Error de conexión'); document.getElementById('app').innerHTML = `<div id="gate"><div class="card"><h2>No se pudieron cargar los datos</h2><p class="muted">${esc(e.message||e)}</p></div></div>`; return; }
   leerHash(); render(); conectarVivo();
 }
-sb.auth.onAuthStateChange(ev => { if(ev === 'SIGNED_OUT') location.reload(); });
+// Mientras se está cerrando sesión (cerrarSesion, abajo) este handler no debe disparar su propio
+// location.reload(): competiría con TXOffline.alCerrarSesion() (que todavía no terminó de limpiar la
+// copia local) por quién recarga primero. Mismo arreglo que Terreno/Silos/CRM.
+let saliendoSesion = false;
+sb.auth.onAuthStateChange(ev => { if(ev === 'SIGNED_OUT' && !saliendoSesion) location.reload(); });
+if(window.TXOffline) TXOffline.montarIndicador(document.getElementById('fila-ind'));
+// Único camino para cerrar sesión: no se sale con documentos sin enviar (se perderían).
+async function cerrarSesion(){
+  let ok = true;
+  try{ ok = !window.TXOffline || await TXOffline.puedeCerrarSesion(); }catch(_){}
+  if(!ok){
+    let n = 0; try{ n = (await TXOffline.entradas()).length; }catch(_){}
+    toast(n ? `Tienes ${n} ${n===1?'cambio':'cambios'} sin enviar: espera a tener señal` : 'Tienes cambios sin enviar: espera a tener señal');
+    return;
+  }
+  saliendoSesion = true;
+  const { error } = await sb.auth.signOut();
+  if(error){ saliendoSesion = false; toast(window.TXOfflineCore && TXOfflineCore.clasificarError(error) === 'red' ? 'Sin conexión: no se pudo cerrar sesión. Intenta de nuevo con señal.' : 'No se pudo cerrar sesión'); return; }
+  try{ if(window.TXOffline) await TXOffline.alCerrarSesion(); }catch(_){}
+  location.reload();
+}
 
 function stock(id){ return db.movs.filter(m=>m.rep===id).reduce((a,m)=> a + (m.tipo==='entrada'? m.cant : -m.cant), 0); }
 function ultimoChk(c){ return db.chk.filter(k=>k.eq===c).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0]; }
@@ -2797,6 +3116,24 @@ const RIESGOS = {
 function permisoHTML(rs, pref){
   return rs.map(k=>`<div class="card permiso"><h2>⚠ ${esc(RIESGOS[k].t)}</h2><p class="muted" style="margin:-4px 0 8px">Marca cada condición cuando la hayas verificado en terreno. Es obligatorio para continuar.</p>${RIESGOS[k].req.map((r,i)=>`<label class="chkrow"><input type="checkbox" name="${pref}${k}_${i}" required> ${esc(r)}</label>`).join('')}</div>`).join('')
   + `<div class="card permiso"><h2>Corroboración del supervisor</h2><label>Corroborado por<select name="corr" required><option value="">— Elige —</option>${db.org.map(p=>`<option>${esc(p.nombre)}</option>`).join('')}</select></label><label class="chkrow"><input type="checkbox" name="corrok" required> El supervisor verificó en terreno que se cumplen las condiciones indicadas</label></div>`;
+}
+// Tarea 6: banda de conflicto/pendiente bajo la fila de una OT, con el mismo patrón que
+// bandaFila/registro-terreno.html (MC.esConflicto/MC.noExiste/MC.MSG_CONFLICTO) — "Ver mi versión"
+// para un conflicto real o un documento que ya no existe, "Reintentar" para cualquier otro problema
+// (p. ej. "Depende de un registro con problema" si la OT es correctiva y su checklist de origen sigue
+// con problema), "Descartar" siempre disponible. `filaDeDoc` ya resuelve que, si hay una entrada con
+// problema para esta OT, es esa la que se pinta (no una pendiente posterior que la tape).
+function bandaFilaOt(o){
+  const f = filaDeDoc('ots', o.id);
+  if (!f) return '';
+  if (f.estado !== 'problema') return `<tr><td colspan="8" style="padding-top:0"><p class="muted" style="margin:0">Pendiente de enviar: se envía solo al volver la señal.</p></td></tr>`;
+  const conflicto = MC.esConflicto(f.error), noExiste = MC.noExiste(f.error);
+  const msg = conflicto ? MC.MSG_CONFLICTO : noExiste ? 'Esta orden de trabajo ya no está en el servidor. "Ver mi versión" la vuelve a guardar igual que la primera vez.' : (f.error || 'Error al guardar');
+  const accion = (conflicto || noExiste)
+    ? `<button class="btn sm" data-act="verMiVersionOt" data-eid="${esc(f.entradaId)}">Ver mi versión</button>`
+    : `<button class="btn sm" data-act="filaReintentarOt" data-eid="${esc(f.entradaId)}">Reintentar</button>`;
+  return `<tr><td colspan="8" style="padding-top:0"><div class="alert alta" style="margin:0">No se pudo guardar: ${esc(msg)}
+    <div class="row" style="margin-top:6px">${accion} <button class="btn sm gh" data-act="filaDescartarOt" data-eid="${esc(f.entradaId)}">Descartar</button></div></div></td></tr>`;
 }
 function riesgoPills(o){
   if(!o.riesgos || !o.riesgos.length) return '';
@@ -3021,7 +3358,7 @@ const PAGES = {
       <td>${esc(o.tipo)}<br><small class="muted">${esc(o.pri)}</small>${riesgoPills(o)}</td><td>${esc(o.asig)}</td>
       <td>${o.compromiso||'—'} ${o.compromiso && o.compromiso<hoy() && o.estado!=='cerrada'?'<span class="pill p-bad">atrasada</span>':''}</td>
       <td><span class="pill ${o.estado==='cerrada'?'p-ok':o.estado==='en curso'?'p-info':'p-warn'}">${o.estado}</span></td>
-      <td style="white-space:nowrap">${o.riesgos&&o.riesgos.length&&!o.permiso&&o.estado!=='cerrada'?`<button class="btn sm am" data-act="permiso" data-id="${o.id}">Permiso</button> `:''}${o.estado==='abierta'?`<button class="btn sm gh" data-act="otest" data-id="${o.id}" data-e="en curso">Iniciar</button> `:''}${o.estado!=='cerrada'?`<button class="btn sm ok" data-act="otest" data-id="${o.id}" data-e="cerrada">Cerrar</button>`:''}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Sin OT</td></tr>'}
+      <td style="white-space:nowrap">${o.riesgos&&o.riesgos.length&&!o.permiso&&o.estado!=='cerrada'?`<button class="btn sm am" data-act="permiso" data-id="${o.id}">Permiso</button> `:''}${o.estado==='abierta'?`<button class="btn sm gh" data-act="otest" data-id="${o.id}" data-e="en curso">Iniciar</button> `:''}${o.estado!=='cerrada'?`<button class="btn sm ok" data-act="otest" data-id="${o.id}" data-e="cerrada">Cerrar</button>`:''}</td></tr>${bandaFilaOt(o)}`).join('') || '<tr><td colspan="8" class="muted">Sin OT</td></tr>'}
     </tbody></table></div>`;
   },
 
@@ -3051,10 +3388,54 @@ const PAGES = {
   }
 };
 
+/* ===================== Lo que exige señal ===================== */
+// Repuestos/bodega, organigrama (incl. su único borrado, orgdel), crear una plantilla de checklist nueva
+// (fnchk) y la lista de usuarios son trabajo de oficina/gestión, no de captura en terreno (decisión del
+// propio plan, "Fuera de alcance"): a diferencia de los checklists/OTs, que SÍ se encolan sin señal, estos
+// controles se dejan deshabilitados sin red, con el motivo a la vista, en vez de dejarlos entrar a
+// save()/subirCambios() y fallar ahí con un error técnico. Cada uno dice qué necesita en el `title` (nunca
+// un "sin conexión" genérico). Mismo patrón ya endurecido en Terreno/Silos: exigeSenal/aplicarExigeSenal
+// (copiado tal cual de registro-terreno.html).
+function exigeSenal(btn, motivo){
+  if (!btn || (btn.disabled && btn.title && btn.title !== motivo)) return;
+  if (navigator.onLine === false) { btn.disabled = true; btn.title = motivo; }
+  else if (btn.title === motivo) { btn.disabled = false; btn.title = ''; }
+}
+// El "Depende de" (jefe) del organigrama casi siempre tiene más de 7 opciones: comboboxes() (más abajo)
+// lo reemplaza por un campo de texto + datalist y oculta el <select> real. Deshabilitar solo el <select>
+// no alcanza para bloquear la edición ahí: hay que alcanzar también ese campo visible si ya existe.
+function exigeSenalCampo(el, motivo){
+  exigeSenal(el, motivo);
+  const cbx = el.nextElementSibling;
+  if (cbx && cbx.classList && cbx.classList.contains('cbx')) exigeSenal(cbx, motivo);
+}
+// Reaplica exigeSenal a los controles ya dibujados: se llama al final de cada render() y, más abajo,
+// también al vuelo en los eventos online/offline, sin esperar al siguiente render. Solo uno de
+// fsol/fmov/frep existe a la vez en el DOM (repuestos() solo pinta el paso activo): los otros
+// querySelectorAll simplemente no encuentran nada, sin problema.
+function aplicarExigeSenal(){
+  document.querySelectorAll('#fsol button[type="submit"]').forEach(b => exigeSenal(b, 'Necesitas señal para enviar la solicitud de repuesto'));
+  document.querySelectorAll('#fmov button[type="submit"]').forEach(b => exigeSenal(b, 'Necesitas señal para registrar el movimiento de bodega'));
+  document.querySelectorAll('#frep button[type="submit"]').forEach(b => exigeSenal(b, 'Necesitas señal para crear el producto en el catálogo'));
+  document.querySelectorAll('[data-act="entregar"]').forEach(b => exigeSenal(b, 'Necesitas señal para entregar el repuesto'));
+  document.querySelectorAll('[data-act="rechazar"]').forEach(b => exigeSenal(b, 'Necesitas señal para rechazar la solicitud'));
+  document.querySelectorAll('#forg button[type="submit"]').forEach(b => exigeSenal(b, 'Necesitas señal para agregar a esta persona al organigrama'));
+  document.querySelectorAll('[data-org]').forEach(el => exigeSenalCampo(el, 'Necesitas señal para editar el organigrama'));
+  document.querySelectorAll('[data-act="orgdel"]').forEach(b => exigeSenal(b, 'Necesitas señal para quitar a esta persona del organigrama'));
+  document.querySelectorAll('#fnchk button[type="submit"]').forEach(b => exigeSenal(b, 'Necesitas señal para crear la plantilla de checklist'));
+  document.querySelectorAll('[data-act="usuarios"]').forEach(b => exigeSenal(b, 'Necesitas señal para editar la lista de usuarios'));
+}
+// Se agregan una sola vez (no en cada render): reevalúan los controles ya dibujados al vuelo cuando
+// cambia la señal, sin esperar al siguiente render().
+window.addEventListener('online', aplicarExigeSenal);
+window.addEventListener('offline', aplicarExigeSenal);
+aplicarExigeSenal();   // el botón "Usuarios" del encabezado existe desde que carga la página, antes del primer render()
+
 function render(){
   document.getElementById('nav').innerHTML = TABS.map(([k,l,c])=>`<button class="${k===tab?'on':''}" style="--c:${c}" data-act="ir" data-tab="${k}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg><span>${l}</span></button>`).join('');
   document.getElementById('yo').innerHTML = db.usuarios.map((u,i)=>`<option value="${i}" ${i===db.yo?'selected':''}>${esc(u)}</option>`).join('');
   document.getElementById('app').innerHTML = PAGES[tab]();
+  aplicarExigeSenal();
 }
 
 const ACT = {
@@ -3090,7 +3471,14 @@ const ACT = {
   pasos(b){ verPasos(b.dataset.id); },
   qr(b){ verQR(b.dataset.eq); },
   permiso(b){ verPermiso(b.dataset.id); },
-  orgdel(b){ db.org.forEach(p=>{ if(p.jefe===b.dataset.id) p.jefe=''; }); db.org = db.org.filter(p=>p.id!==b.dataset.id); save(); render(); }
+  orgdel(b){ db.org.forEach(p=>{ if(p.jefe===b.dataset.id) p.jefe=''; }); db.org = db.org.filter(p=>p.id!==b.dataset.id); save(); render(); },
+  // Tarea 6: tarjeta de pendientes de una OT con problema (bandaFilaOt, dentro de PAGES.ot).
+  verMiVersionOt(b){ verMiVersionOt(b.dataset.eid); },
+  filaReintentarOt: async b => { await TXOffline.reintentar(MC.cadenaCompleta(await TXOffline.entradas(), b.dataset.eid)); },
+  filaDescartarOt: async b => {
+    if (!confirm('¿Descartar esta corrección? Se perderá lo que cambiaste en este equipo mientras no tenías señal.')) return;
+    await descartarCorreccion(b.dataset.eid);
+  }
 };
 
 document.addEventListener('click', ev => {
@@ -3129,21 +3517,34 @@ document.addEventListener('submit', e => {
     o.permiso = {fecha:hoy(), por:yo(), corr:fd.get('corr'), riesgos:o.riesgos};
     f.closest('.sheet-bg').remove(); save(); render(); toast('Permiso registrado. Ya puedes iniciar el trabajo.'); return;
   }
+  // Segunda capa, independiente de exigeSenal/aplicarExigeSenal sobre el botón: ese disabled es la
+  // primera línea de defensa (clic normal), pero un `submit` puede llegar igual sin pasar por el botón
+  // (Enter en un campo, form.requestSubmit() desde la consola, o el disabled que no llegó a aplicarse a
+  // tiempo) y, sin este chequeo, estos 5 flujos de oficina igual entraban a save()/subirCambios() para
+  // terminar reventando 250ms después con el error crudo de Supabase (el mismo error técnico que este
+  // task existe para evitar). Mismo motivo que ya usa exigeSenal para cada control, para no decir dos
+  // cosas distintas del mismo botón. (No cubre el caso "wifi conectado pero sin internet real": ahí
+  // navigator.onLine sigue en true y hace falta la traducción de error de subirCambios/syncGuardar,
+  // que son archivo de Task 5.)
   if (f.id==='fnchk'){
+    if (navigator.onLine === false) return toast('Necesitas señal para crear la plantilla de checklist');
     const items = String(fd.get('items')||'').split('\n').map(s=>s.trim()).filter(Boolean);
     const eq = fd.get('eq'); if(!eq || !items.length) return;
     db.tpls[eq] = {t:fd.get('nom').trim(), p:+fd.get('per')||7, i:items, r:fd.getAll('rk')};
     sel = eq; save(); render(); toast('Checklist creado. Aquí está su QR.'); verQR(eq); return;
   }
   if (f.id==='forg'){
+    if (navigator.onLine === false) return toast('Necesitas señal para agregar a esta persona al organigrama');
     db.org.push({id:uid('p'),nombre:fd.get('nombre').trim(),cargo:(fd.get('cargo')||'').trim(),email:(fd.get('email')||'').trim(),jefe:''});
     save(); render(); return;
   }
   if (f.id==='frep'){
+    if (navigator.onLine === false) return toast('Necesitas señal para crear el producto en el catálogo');
     db.repuestos.push({id:uid('r'),cod:fd.get('cod').trim(),desc:fd.get('desc').trim(),uni:fd.get('uni').trim(),min:+fd.get('min'),ub:fd.get('ub')||''});
     save(); render(); toast('Repuesto agregado');
   }
   if (f.id==='fmov'){
+    if (navigator.onLine === false) return toast('Necesitas señal para registrar el movimiento de bodega');
     const rep = fd.get('rep'); if(!rep){ toast('Agrega un repuesto primero'); return; }
     const tipo = fd.get('tipo'); const cant = +fd.get('cant');
     if (tipo==='salida' && stock(rep) < cant){ toast('Existencia insuficiente para esa salida'); return; }
@@ -3151,6 +3552,7 @@ document.addEventListener('submit', e => {
     save(); render(); toast('Movimiento registrado');
   }
   if (f.id==='fsol'){
+    if (navigator.onLine === false) return toast('Necesitas señal para enviar la solicitud de repuesto');
     const rep = db.repuestos.find(r=>r.id===fd.get('rep')); if(!rep) return;
     const n = sigNum(db.sol,'SOL-');
     db.sol.push({id:'SOL-'+String(n).padStart(4,'0'),rep:rep.id,repDesc:rep.desc,cant:+fd.get('cant'),eq:fd.get('eq')||'',ref:fd.get('ref')||'',estado:'pendiente',fecha:hoy(),usuario:yo()});
@@ -3190,6 +3592,12 @@ function comboboxes(){
     dl.innerHTML = opts.map(o=>'<option value="'+esc(o.text)+'"></option>').join('');
     const cur = sl.options[sl.selectedIndex]; inp.value = cur && cur.value!=='' ? cur.text : '';
     const req = sl.required; if (req){ sl.required = false; inp.required = true; }
+    // Si exigeSenal ya deshabilitó el <select> (p.ej. "Depende de" en el organigrama, sin señal), el
+    // campo visible que lo reemplaza tiene que nacer igual de deshabilitado: si no, el <select> real
+    // queda oculto e inerte pero este input de texto sigue editable, y la señal deja de ser la única
+    // fuente de verdad. aplicarExigeSenal() alcanza este input en vivo (ver más abajo), esto solo cubre
+    // el caso en que la conversión ocurre DESPUÉS de deshabilitar el <select> en el mismo render.
+    if (sl.disabled) { inp.disabled = true; inp.title = sl.title; }
     const apply = () => {
       const v = inp.value.trim().toLowerCase();
       let m = opts.find(o=>o.text.toLowerCase()===v);
@@ -3216,23 +3624,47 @@ async function fotoDataURL(file){
   c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
   return c.toDataURL('image/jpeg',0.6);
 }
-// Sube la foto al bucket privado 'mantencion' y devuelve {path}. Si no se puede subir
-// (sin conexión, sin permiso), devuelve el base64 como antes para no perder la foto.
-async function fotoGuardar(file, chkId, ix){
+// Decisión del Step 1 de la Tarea 5 (Review Focus punto 5): el código viejo intentaba subir la foto
+// al bucket AL TOMARLA y, si fallaba, caía sola a guardarla como base64 dentro de `data`. Sin señal
+// esa subida fallaría SIEMPRE, así que cada checklist offline habría dejado fotos pesadas en base64
+// incrustadas para siempre en `mtto_docs.data` (nunca se reintenta subirlas de verdad después) — el
+// mismo riesgo que la revisión de la Tarea 4 marcó para el tope de 8 s por página de `cargarTodo()`.
+// Se decide subir recién al sincronizar, como Terreno: acá solo se comprime la foto y se devuelve su
+// blob (para viajar como archivo de la entrada de la fila) más un placeholder liviano para `data`
+// mientras no se ha enviado; el manejador único ('mantencion.doc', más abajo) sube la foto de verdad,
+// una por una, con ruta determinista (rutaFoto) justo antes de llamar a mtto_guardar_doc, y reemplaza
+// el placeholder por la ruta real tanto en lo que guarda como en el documento vivo de `db`.
+async function fotoGuardar(file){
   const dataURL = await fotoDataURL(file);
   if(!dataURL) return null;
-  try{
-    const blob = await (await fetch(dataURL)).blob();
-    const path = chkId+'/'+ix+'-'+Date.now()+'.jpg';
-    const { error } = await sb.storage.from('mantencion').upload(path, blob, { contentType:'image/jpeg', upsert:false });
-    if(error) throw error;
-    return { path };
-  }catch(e){ console.warn('Foto en base64 (no se pudo subir):', e && e.message); return dataURL; }
+  const blob = await (await fetch(dataURL)).blob();
+  return { blob, placeholder:{ pendiente:true } };
 }
+// Blobs de fotos de checklists ya guardados en `db` pero todavía no encolados (subirCambios los
+// recoge y los adjunta a la entrada de la fila cuando por fin encola ese checklist): viven en memoria,
+// no en IndexedDB, nada más mientras pasa el debounce de syncGuardar (250 ms) — el mismo riesgo breve
+// que ya tenía cualquier otro cambio de `db` antes de este guardado (no es un riesgo nuevo de esta
+// tarea). Clave: el id propio del checklist (no el de la entrada de la fila).
+const FOTOS_PENDIENTES = new Map();
+function fotosPendientes(chkId){
+  const m = FOTOS_PENDIENTES.get(chkId);
+  if(!m) return {};
+  FOTOS_PENDIENTES.delete(chkId);
+  const out = {};
+  Object.entries(m).forEach(([ix,blob]) => { out[ix+'.jpg'] = blob; });
+  return out;
+}
+// Ruta determinista de la foto de un ítem de checklist en el bucket 'mantencion': `docId` es el id
+// propio del checklist (el que se guarda en mtto_docs), no el id de la entrada de la fila que la
+// envía — mismo patrón que TC.rutaFoto de Terreno (registro-terreno.html), para que un reintento
+// suba a la MISMA ruta y el bucket responda "ya existe" (TXOfflineCore.subidaYaExiste), nunca una
+// foto duplicada.
+function rutaFoto(docId, ix){ return docId+'/'+(ix+1)+'.jpg'; }
 async function guardarChk(f){
   const fd = new FormData(f);
   const t = tplDe(sel); const items = [];
   const id = uid('k');
+  const fotosBlob = {};
   for (let ix=0; ix<t.i.length; ix++){
     const v = fd.get('i'+ix);
     const file = fd.get('f'+ix);
@@ -3240,7 +3672,11 @@ async function guardarChk(f){
       const el = f.querySelector('.item[data-ix="'+ix+'"]'); if(el){ el.classList.add('falta'); el.scrollIntoView({block:'center',behavior:'smooth'}); }
       toast('Falta la foto obligatoria del ítem marcado «Revisar».'); return;
     }
-    const foto = await fotoGuardar(file, id, ix);
+    let foto = null;
+    if (file && file.size){
+      const r = await fotoGuardar(file);
+      if (r){ foto = r.placeholder; fotosBlob[ix] = r.blob; }
+    }
     items.push({item:t.i[ix], r:v, foto, com:(fd.get('c'+ix)||'').trim()});
   }
   const fallas = items.filter(x=>x.r==='falla');
@@ -3248,11 +3684,111 @@ async function guardarChk(f){
   const chk = {id,eq:sel,tpl:t.t,fecha:hoy(),usuario:yo(),items,fallas:fallas.length,resuelta:fallas.length===0,obs:items.filter(x=>x.com).map(x=>x.item.split(' | ')[0]+': '+x.com).join(' · '),permiso:(t.r&&t.r.length)?{riesgos:t.r,corr:fd.get('corr'),fecha:hoy()}:null};
   db.chk.push(chk);
   if (fallas.length){
+    // La OT correctiva se encola DESPUÉS del checklist, con dependeDe hacia su entrada (Tarea 5, Step
+    // 3): eso lo decide subirCambios() más abajo (procesa 'chk' antes que el resto de lo cambiado en
+    // el mismo lote), no aquí — acá solo se deja la relación (chkId) para que subirCambios la vea.
     const oid='OT-'+String(sigNum(db.ots,'OT-')).padStart(4,'0');
     db.ots.push({id:oid,eq:sel,tipo:'Correctiva',pri:'Alta',desc:'Revisar en checklist: '+fallas.map(x=>x.item+(x.com?' ('+x.com+')':'')).join('; '),asig:db.usuarios[0],compromiso:sumarDias(2),estado:'abierta',creada:hoy(),usuario:yo(),chkId:id});
     toast('Checklist guardado con ítems a revisar. Se creó '+oid);
   } else toast('Checklist guardado. Todo OK');
+  if (Object.keys(fotosBlob).length) FOTOS_PENDIENTES.set(id, fotosBlob);
   save(); render();
+}
+
+/* ===================== Tarea 6: conflicto real al corregir una OT ===================== */
+// Resumen corto de un documento de OT (propio o el que trae el servidor) para la tarjeta de
+// pendientes: mismos campos que pinta la tabla de la pestaña OT, sin repetir su HTML completo.
+function resumenOt(data){
+  if (!data) return '';
+  const pasos = data.pasos && data.pasos.length ? `${data.pasos.filter(p=>p.ok).length}/${data.pasos.length} pasos` : null;
+  return `<p style="margin:4px 0"><b>Estado:</b> ${esc(data.estado||'—')}</p>`
+    + (pasos ? `<p style="margin:4px 0"><b>Pasos:</b> ${esc(pasos)}</p>` : '')
+    + (data.cierre ? `<p style="margin:4px 0"><b>Cierre:</b> ${esc(data.cierre)}</p>` : '')
+    + (data.permiso ? `<p style="margin:4px 0"><b>Permiso:</b> corroborado por ${esc(data.permiso.corr||'—')}</p>` : '');
+}
+// Reintenta la corrección de una OT con una base recién pedida al servidor (o la última que se
+// conocía, sin señal): descarta primero toda la cadena de la entrada con problema (MC.cadenaCompleta —
+// incluye lo que de verdad dependa de ella, p. ej. una corrección posterior del mismo documento que
+// quedó "Depende de un registro con problema"; nunca al revés) y deja que subirCambios() vuelva a
+// encolar desde `db.ots` — que ya tiene todo lo que el técnico marcó, confirmado o no — con la base
+// fresca. No se reconstruye el documento a mano: lo que se ve en la fila de OT en este momento YA ES
+// "mi versión".
+async function reintentarOtConBaseFresca(entradaId, otId, baseFresca){
+  let ents = [];
+  try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch(_) {}
+  for (const x of MC.cadenaCompleta(ents, entradaId)) { try { await TXOffline.descartar(x, { aunPendiente:true }); } catch(_) {} }
+  baseConocida.set(MC.claveDoc('ots', otId), baseFresca || null);
+  save();
+  toast('Reintentando con la versión actual del servidor…');
+}
+// Construye y muestra la tarjeta de comparación. `dataServ` es `null` si no se pudo consultar (sin
+// señal) o si el documento ya no existe en el servidor.
+function mostrarVerMiVersionOt(o, entradaId, dataServ, consultado, yaNoExiste, baseFresca){
+  const box = document.createElement('div'); box.className = 'sheet-bg';
+  let bannerHtml;
+  if (yaNoExiste) bannerHtml = '<div class="alert alta">Esta orden de trabajo ya no está en el servidor: al reintentar se vuelve a guardar igual que la primera vez.</div>';
+  else if (!consultado) bannerHtml = '<div class="alert">Sin señal no se puede comparar con el servidor todavía: se reintentará con la última versión que se conoce de este equipo, y puede volver a marcar conflicto si alguien más la corrigió mientras tanto.</div>';
+  else bannerHtml = `<div class="alert alta">Otra persona corrigió esta OT en el servidor mientras no tenías señal:${resumenOt(dataServ)}</div>`;
+  box.innerHTML = `<div class="sheet" style="max-width:560px;max-height:90vh;overflow:auto">
+    <h3>${esc(o.id)} · tu versión sin enviar</h3>
+    <p class="muted" style="margin-top:-4px">${esc(EQ[o.eq]?.n||o.eq)} · ${esc(o.desc||'')}</p>
+    ${bannerHtml}
+    <p style="margin:10px 0 0"><b>Tu versión (lo que ves ahora en esta pantalla):</b></p>
+    ${resumenOt(o)}
+    <div class="row" style="justify-content:flex-end;margin-top:6px">
+      <button class="btn gh" type="button" id="otVerCerrar">Cerrar</button>
+      <button class="btn" type="button" id="otVerReintentar">Mantener mi versión y reintentar</button>
+    </div></div>`;
+  box.addEventListener('click', ev => { if (ev.target===box || ev.target.id==='otVerCerrar') box.remove(); });
+  box.querySelector('#otVerReintentar').addEventListener('click', () => { box.remove(); reintentarOtConBaseFresca(entradaId, o.id, baseFresca); });
+  document.body.appendChild(box);
+}
+// "Ver mi versión": la corrección de esta OT quedó con problema (CONFLICTO — o NO_EXISTE, defensivo:
+// mtto_guardar_doc nunca borra una OT, así que hoy no debería pasar) y el técnico necesita decidir sin
+// perder lo que marcó. A diferencia de Terreno/Silos, acá no hay un formulario separado que reabrir:
+// `db.ots` YA ES la versión editable (pasos/cierre/permiso se escriben ahí mismo), así que esto solo
+// compara con lo que haya ahora en el servidor y, si el técnico decide mantener la suya, pide una base
+// fresca antes de reenviar — nunca la vieja que causó el conflicto.
+// El permiso para corregir (puedeCorregir()) se vuelve a chequear AQUÍ, contra el estado ACTUAL de la
+// sesión — no contra la copia vieja en conflicto, que no sabe nada de permisos — igual que tuvo que
+// corregir la Tarea 6 de Silos (puedeEditarSolicitud evaluada contra el documento actual, nunca contra
+// `d.datos`): si la sesión pasó a ser de solo lectura mientras no había señal, no se ofrece reintentar.
+async function verMiVersionOt(entradaId){
+  let ents = [];
+  try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch(_) {}
+  const e = ents.find(x => x.id === entradaId);
+  if (!e) { toast('Esa corrección ya no está pendiente.'); return; }
+  const d = e.datos || {};
+  if (d.coleccion !== 'ots') { toast('Esta corrección no se puede revisar desde aquí.'); return; }
+  const docId = d.docId || d.id;
+  const o = db.ots.find(x => x.id === docId);
+  if (!o) { toast('Esa orden de trabajo ya no está en este equipo.'); return; }
+  if (!puedeCorregir()) { toast('Tu acceso es de solo lectura: no puedes corregir esta orden de trabajo.'); return; }
+  let dataServ = null, consultado = false, updatedAt = null;
+  if (navigator.onLine !== false) {
+    try {
+      const r = await sb.from('mtto_docs').select('data,updated_at').eq('coleccion','ots').eq('id',docId).maybeSingle();
+      if (!r.error) { consultado = true; if (r.data) { dataServ = r.data.data; updatedAt = r.data.updated_at; } }
+    } catch(_) {}
+  }
+  const yaNoExiste = MC.noExiste(e.error) || (consultado && !dataServ);
+  const baseFresca = yaNoExiste ? null : consultado ? updatedAt : (d.base || null);
+  mostrarVerMiVersionOt(o, entradaId, dataServ, consultado, yaNoExiste, baseFresca);
+}
+// "Descartar": abandona la corrección sin enviar (y todo lo que dependa de verdad de ella — la cadena
+// completa, MC.cadenaCompleta) y, si era de una OT, vuelve a traer el documento real del servidor para
+// que el técnico no se quede viendo en pantalla lo que acaba de descartar (ver refrescarDocDesdeServidor).
+async function descartarCorreccion(entradaId){
+  let ents = [];
+  try { ents = window.TXOffline ? await TXOffline.entradas() : []; } catch(_) {}
+  const e = ents.find(x => x.id === entradaId);
+  const d = (e && e.datos) || {};
+  const esOt = d.coleccion === 'ots';
+  const docId = esOt ? (d.docId || d.id) : null;
+  for (const x of MC.cadenaCompleta(ents, entradaId)) { try { await TXOffline.descartar(x, { aunPendiente:true }); } catch(_) {} }
+  if (esOt && docId) await refrescarDocDesdeServidor('ots', docId);
+  render();
+  toast('Corrección descartada.' + (esOt ? ' Se muestra la versión del servidor.' : ''));
 }
 
 function verPasos(id){
@@ -3267,6 +3803,7 @@ function leerHash(){ try{ const m=(location.hash||'').match(/chk=([^&]+)/); if(m
 let _cbT; new MutationObserver(()=>{ clearTimeout(_cbT); _cbT=setTimeout(comboboxes,0); }).observe(document.body,{childList:true,subtree:true});
 leerHash(); window.addEventListener('hashchange',()=>{ leerHash(); if(ME) render(); });
 arrancar();
+if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('mantencion-sw.js',{scope:'./mantencion'}).catch(()=>{});
 </script>
 </body>
 </html>
