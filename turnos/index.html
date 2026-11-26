@@ -270,11 +270,29 @@ body.auth-out .nav{visibility:hidden}
 }
 .ttl small::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:#e09a1f;margin-right:7px;vertical-align:1px;box-shadow:0 0 10px #e09a1f}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
+// Carga perezosa de librerías pesadas (xlsx, jspdf+autotable): se piden recién al primer
+// export/import, no en cada visita. Cachea la promesa para no repetir la carga.
+const _scriptsCargados=new Map();
+function loadScript(src){
+  if(_scriptsCargados.has(src))return _scriptsCargados.get(src);
+  const p=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src;
+    s.onload=()=>res();
+    s.onerror=()=>{_scriptsCargados.delete(src);rej(new Error('No se pudo cargar '+src))};
+    document.head.appendChild(s);
+  });
+  _scriptsCargados.set(src,p);
+  return p;
+}
+const XLSX_SRC='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+// autotable extiende el prototipo de jsPDF: debe cargarse después, nunca en paralelo.
+async function loadJsPdf(){
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+}
 /* =====================================================================
    CONFIGURACIÓN SUPABASE — pega aquí los datos de tu proyecto
    (Supabase > Project Settings > API). La "anon / publishable key" es
@@ -988,6 +1006,7 @@ async function offer(filename, blob){
 function fichaCell(f){ return /^\d+$/.test(f) ? Number(f) : f; }
 function slug(t){ return t.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w]+/g,'_'); }
 async function exportXlsx(ws, from, to){
+  try{await loadScript(XLSX_SRC)}catch(e){return toast('No se pudo cargar el generador de Excel. Revisa tu conexión.')}
   const a=areaOf(S.area), cc=a.centroCosto!==false;
   const head=['FICHA','NOMBRE','CARGO','F  / INGRESO','PLANTA','Turno','Fecha','DNI','ID','Dia','Mes','Año']; if (cc) head.push('ID Centro de Costo');
   const aoa=[head];
@@ -1013,6 +1032,7 @@ function logoForPdf(){
   return new Promise(res => { const img=new Image(); img.onload=()=>{ const c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight; const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(img,0,0); try{ res({data:c.toDataURL('image/jpeg',0.92), ratio:img.naturalWidth/img.naturalHeight}); }catch(e){ res(null); } }; img.onerror=()=>res(null); img.src=LOGO; });
 }
 async function exportPdf(ws, from, to, boss){
+  try{await loadJsPdf()}catch(e){return toast('No se pudo cargar el generador de PDF. Revisa tu conexión.')}
   const { jsPDF }=window.jspdf, a=areaOf(S.area);
   const doc=new jsPDF({unit:'mm',format:'letter'});
   const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=18;
@@ -1063,6 +1083,7 @@ function headerISO(v){ if (v instanceof Date) return `${v.getFullYear()}-${pad(v
 function timeTxt(x){ if (x instanceof Date) return `${pad(x.getHours())}:${pad(x.getMinutes())}`; if (typeof x==='number'){ const t=Math.round(x*1440); return `${pad(Math.floor(t/60)%24)}:${pad(t%60)}`; } return String(x).trim(); }
 async function importExcel(file){
   const area=areaOf(S.area);
+  try{await loadScript(XLSX_SRC)}catch(e){return toast('No se pudo cargar el lector de Excel. Revisa tu conexión.')}
   try{
     const wb=XLSX.read(await file.arrayBuffer(),{cellDates:true});
     const find=rx=>wb.SheetNames.find(n=>rx.test(n.normalize('NFD').replace(/[\u0300-\u036f]/g,'')));

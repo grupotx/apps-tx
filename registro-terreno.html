@@ -14,7 +14,6 @@
 <script src="terreno-firma.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js" integrity="sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
 :root{--brand:#e4032e;--brand-ink:#fff;--brand-soft:#fde7eb;--red:var(--brand);--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;--line:#dfdfdb;--gray:#8d939a;--ok:#18864a;--ok-soft:#ddf2e5;--warn:#b86e00;--warn-soft:#fbeed6;
   --f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;color-scheme:light}
@@ -195,6 +194,21 @@ details.mas p{margin:6px 0}
 <main id="app"></main>
 <div id="toast"></div>
 <script>
+// Carga perezosa del generador de PDF (html2pdf): se pide recién al primer informe, no en cada visita.
+const _scriptsCargados=new Map();
+function loadScript(src){
+  if(_scriptsCargados.has(src))return _scriptsCargados.get(src);
+  const p=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src;
+    s.onload=()=>res();
+    s.onerror=()=>{_scriptsCargados.delete(src);rej(new Error('No se pudo cargar '+src))};
+    document.head.appendChild(s);
+  });
+  _scriptsCargados.set(src,p);
+  return p;
+}
+const HTML2PDF_SRC='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
 /* ===================== Configuración ===================== */
 const SB_URL = 'https://xinnonzltoaoptnvkhhy.supabase.co';
 const SB_KEY = 'sb_publishable_DoSRSj0wmAR_UIX8tENXXQ_X5BS5a1q';
@@ -1494,7 +1508,9 @@ function pieDePagina(pdf, adherencia){
 // Genera el PDF UNA vez. Quien lo ve y quien lo envía usan este mismo resultado: { blob, base64, nombre, huella, registroId }.
 // `registroId` (null si la visita aún no está guardada) dice a qué visita pertenece: el envío debe validar identidad Y huella.
 async function generarPdf(reg){
-  if (!window.html2pdf) throw new Error('No se pudo cargar el generador de PDF. Revisa tu conexión.');
+  if (!window.html2pdf){
+    try{await loadScript(HTML2PDF_SRC)}catch(e){throw new Error('No se pudo cargar el generador de PDF. Revisa tu conexión.')}
+  }
   const html = informeHtml(reg);
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-10000px;top:0;width:${ANCHO_PDF_PX}px;background:#fff`;

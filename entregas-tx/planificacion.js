@@ -1,4 +1,19 @@
 /* ================== Entregas TX · Pendientes, armado de rutas y flota ================== */
+// Carga perezosa del lector de Excel (xlsx): se pide recién al importar un archivo, no en cada visita.
+const _scriptsCargados=new Map();
+function loadScript(src){
+  if(_scriptsCargados.has(src))return _scriptsCargados.get(src);
+  const p=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src;
+    s.onload=()=>res();
+    s.onerror=()=>{_scriptsCargados.delete(src);rej(new Error('No se pudo cargar '+src))};
+    document.head.appendChild(s);
+  });
+  _scriptsCargados.set(src,p);
+  return p;
+}
+const XLSX_SRC='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 const EST_RUTA = { propuesta: 'Propuesta', asignada: 'Asignada', aceptada: 'Aceptada', en_ruta: 'En ruta', finalizada: 'Finalizada', cancelada: 'Cancelada' };
 const EST_RUTA_CHIP = { propuesta: '', asignada: 'warn', aceptada: 'info', en_ruta: 'brand', finalizada: 'ok', cancelada: 'plain' };
 const chipRuta = (e) => `<span class="chip ${EST_RUTA_CHIP[e] ?? ''}">${EST_RUTA[e] || esc(e)}</span>`;
@@ -135,7 +150,9 @@ function importarExcel(alTerminar) {
   };
   $('#xFile', sh).onchange = async (ev) => {
     const f = ev.target.files[0]; if (!f) return;
-    if (!window.XLSX) return toast('No se pudo cargar el lector de Excel. Revisa tu conexión.');
+    if (!window.XLSX) {
+      try { await loadScript(XLSX_SRC); } catch (e) { return toast('No se pudo cargar el lector de Excel. Revisa tu conexión.'); }
+    }
     try {
       wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
       const hojas = wb.SheetNames;

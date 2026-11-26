@@ -14,11 +14,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="foto-archivada.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="offline-core.js"></script>
 <script src="offline.js"></script>
 <script src="crm-offline.js"></script>
@@ -388,6 +386,28 @@ tr.over td{background:color-mix(in srgb,var(--amber-bg) 60%,transparent)}.neg{co
 
 <script>
 /* ============ utilities ============ */
+// Carga perezosa de librerías pesadas (xlsx, html2pdf): se piden recién al primer export/import,
+// no en cada visita a la página. Cachea la promesa para no repetir la carga ni duplicar <script>.
+const _scriptsCargados=new Map();
+function loadScript(src){
+  if(_scriptsCargados.has(src))return _scriptsCargados.get(src);
+  const p=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=src;
+    s.onload=()=>res();
+    s.onerror=()=>{_scriptsCargados.delete(src);rej(new Error('No se pudo cargar '+src))};
+    document.head.appendChild(s);
+  });
+  _scriptsCargados.set(src,p);
+  return p;
+}
+const XLSX_SRC='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+const HTML2PDF_SRC='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+// Compartir una cotización SIN SEÑAL genera el PDF al toque del botón, sin paso previo con conexión
+// (ver mailQModal): si html2pdf nunca se cargó, esa ruta fallaría justo cuando más se necesita. Por
+// eso, con señal, se la precarga en segundo plano apenas abre la página (no bloquea el render; si falla
+// o no hay señal, no pasa nada — generarPdf la vuelve a intentar al usarla).
+if(navigator.onLine!==false)loadScript(HTML2PDF_SRC).catch(()=>{});
 let TODAY=new Date();
 let seed=20260930;const R=()=>{seed=(seed*16807)%2147483647;return (seed-1)/2147483646};
 const pick=a=>a[Math.floor(R()*a.length)];
@@ -1754,7 +1774,7 @@ function vPrices(){
   if(e.target.id==='xlsIn')importXls(e.target.files[0])};
  M().oninput=null;
 }
-function importXls(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const wb=XLSX.read(r.result,{type:'array'});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+async function importXls(f){if(!f)return;try{await loadScript(XLSX_SRC)}catch(e){toast('No se pudo cargar el lector de Excel. Revisa tu conexión.');return}const r=new FileReader();r.onload=()=>{try{const wb=XLSX.read(r.result,{type:'array'});const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
   const key=(o,names)=>{const k=Object.keys(o).find(k=>names.includes(norm(k)));return k?o[k]:''};
   const ch=[];const err=[];rows.forEach((o,i)=>{const code=String(key(o,['codigo','code','sku'])).trim().toUpperCase();const price=+String(key(o,['precio','price','valor'])).replace(/[^\d]/g,'');let list=String(key(o,['lista','region'])).trim();const lid=list?(LISTS.find(l=>norm(l.name)===norm(list)||norm(l.id)===norm(list))||{}).id:curList;
    if(!P(code)){err.push(`Fila ${i+2}: código “${code}” no existe`);return}if(!price){err.push(`Fila ${i+2}: precio vacío`);return}if(!lid){err.push(`Fila ${i+2}: lista “${list}” no reconocida`);return}
@@ -1880,7 +1900,7 @@ function compressImage(file,max=1280,q=.72){return new Promise((res,rej)=>{const
 const nombrePdf=q=>(q.num||'cotizacion-borrador')+'.pdf';
 // salida 'save' (descarga, → true) o 'blob' (→ Blob). Error → null (con aviso).
 async function generarPdf(q,salida){
- if(!window.html2pdf){toast('No se pudo cargar el generador de PDF. Revisa tu conexión.');return null}
+ if(!window.html2pdf){try{await loadScript(HTML2PDF_SRC)}catch(e){toast('No se pudo cargar el generador de PDF. Revisa tu conexión.');return null}}
  const host=document.createElement('div');host.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#fff';host.innerHTML=pdfSheet(q);document.body.appendChild(host);
  const el=host.firstElementChild;el.style.boxShadow='none';el.style.maxWidth='794px';
  try{const w=html2pdf().set({margin:0,filename:nombrePdf(q),image:{type:'jpeg',quality:.95},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'pt',format:'a4',orientation:'portrait'},pagebreak:{mode:['css'],avoid:['tr','.q-foot','.q-cond','.q-grid','.q-hd','h5']}}).from(el);
@@ -1959,7 +1979,7 @@ function exportData(what){if(!can('exportar')){toast('Tu perfil no puede exporta
  if(what==='actividad')rows=[['Fecha','Tipo','Vendedor','Cliente','Detalle'],...S.visits.map(v=>[v.date,'Visita',U(v.userId).name,VC(v).name,v.reason]),...S.quotes.map(q=>[q.date,'Cotización',U(q.userId).name,CQ(q).name,q.num+' '+STATUS[qStatus(q)]]),...S.tasks.map(t=>[t.date,TASKT[t.type],U(t.userId).name,(C(t.clientId)||{}).name||'',t.title])];
  openModal('Exportar '+what,`<p>${rows.length-1} filas listas para descargar en Excel.</p><div class="tbl-w" style="max-height:300px;overflow:auto"><table><thead><tr>${rows[0].map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.slice(1,11).map(r=>`<tr>${r.map(x=>`<td class="small">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="small muted">Vista previa de las primeras 10 filas.</p>`,`<button class="btn" id="cpy">${ico('copy')}Copiar</button><button class="btn pri" id="xls">${ico('dl')}Descargar Excel</button>`,'wide');
  $('#cpy').onclick=()=>copyText(rows.map(r=>r.join('\t')).join('\n'));
- $('#xls').onclick=()=>{try{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]??'').length)))}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,what.slice(0,30));XLSX.writeFile(wb,`CRM_TX_${what}_${ymd(new Date())}.xlsx`);if(navigator.onLine!==false)audit('Exportación',what,'Exportado a Excel',rows.length-1+' filas');closeModal()}catch(e){toast('No se pudo generar el Excel.')}}}
+ $('#xls').onclick=async()=>{try{await loadScript(XLSX_SRC);const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]??'').length)))}));const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,what.slice(0,30));XLSX.writeFile(wb,`CRM_TX_${what}_${ymd(new Date())}.xlsx`);if(navigator.onLine!==false)audit('Exportación',what,'Exportado a Excel',rows.length-1+' filas');closeModal()}catch(e){toast('No se pudo generar el Excel.')}}}
 function copyText(t){try{navigator.clipboard.writeText(t).then(()=>toast('Copiado. Pégalo en Excel.'),()=>fallbackCopy(t))}catch(e){fallbackCopy(t)}}
 function fallbackCopy(t){const ta=document.createElement('textarea');ta.value=t;ta.style.cssText='width:100%;height:160px';const mb=document.querySelector('.mb');if(mb){mb.appendChild(ta);ta.select();toast('Selecciona y copia el texto (Ctrl+C).')}}
 
