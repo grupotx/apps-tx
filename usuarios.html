@@ -243,7 +243,7 @@ async function renderSeguridad(){
     if(error){toast(error.message);btn.disabled=false;btn.textContent='Activar 2FA';return}
     $('#miseguridad').innerHTML=`<div class="card"><h2>Activar 2FA</h2>
       <p class="aviso">Escanea este código con tu app de autenticación (Google Authenticator, Authy, etc.) o ingresa la clave manualmente.</p>
-      <div style="max-width:220px;margin:0 auto 12px">${en.totp.qr_code}</div>
+      <div style="max-width:220px;margin:0 auto 12px"><img src="${esc(en.totp.qr_code)}" alt="Código QR del 2FA" style="width:100%;height:auto;display:block"></div>
       <p class="small" style="text-align:center;word-break:break-all">${esc(en.totp.secret)}</p>
       <label>Código de 6 dígitos</label><input id="sg-code" inputmode="numeric" maxlength="6" placeholder="000000">
       <div class="acciones"><button class="btn ghost" id="sg-cancel">Cancelar</button><button class="btn" id="sg-verify">Confirmar</button></div></div>`;
