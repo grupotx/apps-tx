@@ -5,7 +5,9 @@ do $$
 declare
   pm1 uuid; pm2 uuid; adm uuid;
   reg uuid := gen_random_uuid();
-  tok text; tok2 text; n int; ok boolean; v text; fila record; i int;
+  reg2 uuid := gen_random_uuid();
+  reg3 uuid := gen_random_uuid();
+  tok text; tok2 text; tok3 text; tok4 text; n int; ok boolean; v text; fila record; i int;
   firma_ok text := 'data:image/png;base64,iVBORw0KGgo=';
 begin
   -- ===== Preparación (como dueño) =====
@@ -199,8 +201,17 @@ begin
   reset role;
   select count(*) into n from public.rt_asistencias where registro_id = reg;
   if n <> 3 then raise exception 'se esperaban 3 participantes, hay %', n; end if;
+  -- Las 3 altas reales de más arriba (Ana, Luis x2) también cuentan para el límite de ráfaga si se dejan
+  -- con su created_at real: se atrasan junto con las 67 siguientes para que el bucle de abajo arranque
+  -- con la ventana de 60s en 0 y pueda hacer sus 10 altas sin tropezar con el límite de ráfaga.
+  update public.rt_asistencias set created_at = now() - interval '2 minutes' where registro_id = reg;
+  -- Las primeras 67 se insertan directo con created_at de hace 2 minutos: cuentan para el tope de 80
+  -- (sin ventana de tiempo) pero no para el límite de ráfaga de rt_asistencia_agregar (50 altas por
+  -- QR cada 60s), que de otro modo podría interferir con este bucle.
+  insert into public.rt_asistencias (registro_id, nombre, origen, created_at)
+    select reg, 'Participante ' || gi, 'qr', now() - interval '2 minutes' from generate_series(1, 67) gi;
   set local role anon;
-  for i in 1..77 loop
+  for i in 68..77 loop
     perform public.rt_asistencia_agregar(tok, 'Participante ' || i, '', '', '', '', '');
   end loop;
   reset role;
@@ -367,9 +378,63 @@ begin
   -- (79 tras borrar uno + 2 manuales = 81) para no bloquear capacitaciones de más de 80 personas.
   if n <> 81 then raise exception 'el alta manual del PM debe poder superar el tope de 80 del QR (hay %)', n; end if;
 
+  -- ===== Límite de ráfaga de rt_asistencia_agregar (2026-11-26): 50 altas por QR por actividad cada 60s =====
+  perform set_config('request.jwt.claims', json_build_object('sub', pm1, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  insert into public.registros (id, kind, fecha, cliente, obra, estado, autor, datos)
+    values (reg2, 'charla', current_date, 'Cliente Ráfaga', 'Obra Ráfaga', 'Abierto', pm1, '{}'::jsonb);
+  tok3 := public.rt_asistencia_abrir(reg2);
+  reset role;
+  set local role anon;
+  for i in 1..50 loop
+    if public.rt_asistencia_agregar(tok3, 'Ráfaga ' || i, '', '', '', '', '') is not true then
+      raise exception 'alta % de la ráfaga falló', i;
+    end if;
+  end loop;
+  ok := false;
+  begin
+    perform public.rt_asistencia_agregar(tok3, 'Ráfaga 51', '', '', '', '', '');
+  exception when others then
+    if sqlerrm <> 'enlace no válido o actividad cerrada' then raise exception 'error inesperado (ráfaga): %', sqlerrm; end if;
+    ok := true;
+  end;
+  if not ok then raise exception 'se aceptó la 51ª alta en menos de 60 segundos'; end if;
+  reset role;
+  select count(*) into n from public.rt_asistencias where registro_id = reg2;
+  if n <> 50 then raise exception 'se esperaban 50 altas tras la ráfaga, hay %', n; end if;
+  -- pasados los 60s (simulado corriendo el reloj hacia atrás sobre las filas ya creadas), la ventana se
+  -- libera sola: no es un bloqueo permanente del token, solo de ráfaga.
+  update public.rt_asistencias set created_at = now() - interval '2 minutes' where registro_id = reg2;
+  set local role anon;
+  if public.rt_asistencia_agregar(tok3, 'Ráfaga 51 (ventana libre)', '', '', '', '', '') is not true then
+    raise exception 'pasada la ventana de 60s, la alta siguiente debería aceptarse';
+  end if;
+  reset role;
+
+  -- ===== El límite de ráfaga solo cuenta altas por QR (origen = 'qr'), no las manuales del PM =====
+  perform set_config('request.jwt.claims', json_build_object('sub', pm1, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  insert into public.registros (id, kind, fecha, cliente, obra, estado, autor, datos)
+    values (reg3, 'charla', current_date, 'Cliente Manual', 'Obra Manual', 'Abierto', pm1, '{}'::jsonb);
+  tok4 := public.rt_asistencia_abrir(reg3);
+  -- 55 altas manuales "recientes" (más que el límite de 50): si el límite no filtrara por origen, la
+  -- siguiente alta por QR ya estaría bloqueada aunque nadie haya usado el QR todavía.
+  insert into public.rt_asistencias (registro_id, nombre, origen)
+    select reg3, 'Manual ' || gi, 'manual' from generate_series(1, 55) gi;
+  reset role;
+  set local role anon;
+  if public.rt_asistencia_agregar(tok4, 'Primer QR', '', '', '', '', '') is not true then
+    raise exception 'las altas manuales recientes bloquearon la primera alta por QR (el límite de ráfaga no debe contarlas)';
+  end if;
+  reset role;
+
   -- borrar el registro borra en cascada sus participantes
   delete from public.registros where id = reg;
+  delete from public.registros where id = reg2;
+  delete from public.registros where id = reg3;
   if exists (select 1 from public.rt_asistencias where registro_id = reg) then raise exception 'los participantes no se borraron en cascada'; end if;
+  if exists (select 1 from public.rt_asistencias where registro_id = reg2) then raise exception 'los participantes de reg2 no se borraron en cascada'; end if;
+  if exists (select 1 from public.rt_asistencias where registro_id = reg3) then raise exception 'los participantes de reg3 no se borraron en cascada'; end if;
 
   raise exception 'OK_ROLLBACK';
 exception when others then
