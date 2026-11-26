@@ -443,7 +443,7 @@ async function cargarPerfil(user) {
   if (data.rol === 'pendiente') return pantallaPendiente('Tu cuenta está creada. Un administrador debe asignarte un perfil (Chofer, Logística o Admin) para que puedas usar la aplicación.');
   // 2FA: el rol de Entregas ("admin" aquí) no es lo mismo que el admin central que exige 2FA
   // (profiles.rol); por eso se consulta aparte. Si falla por red u otra razón, TMfa.gate no bloquea.
-  const { data: esAdmin } = await sb.rpc('soy_admin').catch(() => ({ data: false }));
+  const { data: esAdmin } = await Promise.resolve(sb.rpc('soy_admin')).catch(() => ({ data: false }));
   if (!(await TMfa.gate(sb, { requireEnrollment: esAdmin }))) return;
   if (data.rol === 'cliente') return iniciarCliente();
   await cargarCatalogos();

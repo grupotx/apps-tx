@@ -2002,7 +2002,7 @@ async function boot(){
  S.me=user.id;
  // 2FA: solo con señal (si no, soloCopia ya decidió abrir con la copia local; no tiene sentido esperar
  // una verificación que de todos modos no podría completarse). Si falla por red, TMfa.gate no bloquea.
- if(!soloCopia){const{data:esAdmin}=await sb.rpc('soy_admin').catch(()=>({data:false}));if(!(await TMfa.gate(sb,{requireEnrollment:esAdmin})))return}
+ if(!soloCopia){const{data:esAdmin}=await Promise.resolve(sb.rpc('soy_admin')).catch(()=>({data:false}));if(!(await TMfa.gate(sb,{requireEnrollment:esAdmin})))return}
  // copia local y fila por usuario: se abren antes de cualquier consulta (tipos registrados antes de iniciar)
  registrarTiposFila();
  try{await TXOffline.iniciar({app:'crm',sb,usuarioId:user.id})}catch(e){console.warn('[CRM] sin copia local:',e)}

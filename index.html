@@ -384,7 +384,7 @@ async function onSession(session){
   const h = location.hash.slice(1);
   await checkAccess();
   // 2FA: si falla por red u otra razón, TMfa.gate no bloquea (ver mfa-gate.js).
-  const { data: pr } = await sb.from('profiles').select('rol,activo').eq('id', session.user.id).maybeSingle().catch(() => ({ data: null }));
+  const { data: pr } = await Promise.resolve(sb.from('profiles').select('rol,activo').eq('id', session.user.id).maybeSingle()).catch(() => ({ data: null }));
   if (!(await TMfa.gate(sb, { requireEnrollment: !!(pr && pr.activo && pr.rol === 'admin') }))) { started = false; return; }
   if(APPS.some(a => a.id===h)) openApp(h, false); else show('home');
   if(session.user.user_metadata && session.user.user_metadata.must_change) newPassSheet();
