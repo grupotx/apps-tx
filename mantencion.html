@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mantención Grupo TX</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="mfa-gate.js"></script>
 <script src="offline-core.js"></script>
 <script src="offline.js"></script>
 <script src="mantencion-core.js"></script>
@@ -3030,12 +3031,13 @@ async function arrancar(){
   let acceso = null;
   const r1 = await Promise.race([
     (async () => {
-      const [rol, prof] = await Promise.all([ sb.rpc('mtto_mi_rol'), sb.from('profiles').select('nombre,email').eq('id', session.user.id).maybeSingle() ]);
+      const [rol, prof] = await Promise.all([ sb.rpc('mtto_mi_rol'), sb.from('profiles').select('nombre,email,rol,activo').eq('id', session.user.id).maybeSingle() ]);
       return { rolData: rol.data, rolError: rol.error, profData: prof.data };
     })().catch(error => ({ error })),
     esperar(8000).then(() => null)
   ]);
-  if (r1 && !r1.error){
+  const enVivo = r1 && !r1.error; // false: se abrió con la copia guardada, sin llegar a consultar al servidor
+  if (enVivo){
     acceso = r1;
     if (window.TXOffline){ try { await TXOffline.guardarLocal(cacheAcceso, acceso); } catch(_){} }
   } else if (window.TXOffline){
@@ -3055,6 +3057,9 @@ async function arrancar(){
       <button class="btn gh" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
     return;
   }
+  // 2FA: solo con señal real (si no, se abrió con la copia local; TMfa.gate tampoco podría verificar
+  // nada). Si falla por red, TMfa.gate no bloquea de todos modos (ver mfa-gate.js).
+  if (enVivo && !(await TMfa.gate(sb, { requireEnrollment: !!(pr.activo && pr.rol === 'admin') }))) return;
   document.getElementById('uchip').textContent = ME.nombre + ' · ' + (ME.editor ? 'Editor' : 'Solo lectura');
   document.body.classList.toggle('ro', !ME.editor);
   document.getElementById('nav').hidden = false;

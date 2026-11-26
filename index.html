@@ -16,6 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="mfa-gate.js"></script>
 <style>
 /* Layout: one app shell — login, then a main menu of app tiles; an opened app fills the screen inside the shell under a slim switcher bar */
 :root{
@@ -382,6 +383,9 @@ async function onSession(session){
   renderTiles();
   const h = location.hash.slice(1);
   await checkAccess();
+  // 2FA: si falla por red u otra razón, TMfa.gate no bloquea (ver mfa-gate.js).
+  const { data: pr } = await sb.from('profiles').select('rol,activo').eq('id', session.user.id).maybeSingle().catch(() => ({ data: null }));
+  if (!(await TMfa.gate(sb, { requireEnrollment: !!(pr && pr.activo && pr.rol === 'admin') }))) { started = false; return; }
   if(APPS.some(a => a.id===h)) openApp(h, false); else show('home');
   if(session.user.user_metadata && session.user.user_metadata.must_change) newPassSheet();
 }

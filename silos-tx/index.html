@@ -380,6 +380,7 @@ input[type=file]{padding:8px;background:var(--sunk)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../foto-archivada.js"></script>
+<script src="../mfa-gate.js"></script>
 <script src="../offline-core.js"></script>
 <script src="../offline.js"></script>
 <script src="../silos-core.js"></script>
@@ -2534,6 +2535,9 @@ async function onSession(session){
     return;
   }
   if(!p || p.rol==='pendiente' || !p.activo){ pendingScreen(p); return; }
+  // 2FA: solo con señal real (si no, TMfa.gate tampoco podría verificar nada). Si falla por red, no
+  // bloquea de todos modos (ver mfa-gate.js).
+  if(!sinSenalReal() && !(await TMfa.gate(sb, { requireEnrollment: p.rol==='admin' }))) return;
   S.me = p; S.uid = p.id; S.rol = p.rol; S.canEdit = p.rol==='admin'; S.canWrite = true;
   S.assets = sbAssets; S.downloads = sbDownloads; S.db = sbDB;
   $('#auth').hidden = true; $('#app-shell').hidden = false;

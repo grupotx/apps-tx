@@ -271,6 +271,7 @@ body.auth-out .nav{visibility:hidden}
 .ttl small::before{content:"";display:inline-block;width:7px;height:7px;border-radius:2px;background:#e09a1f;margin-right:7px;vertical-align:1px;box-shadow:0 0 10px #e09a1f}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="../mfa-gate.js"></script>
 <script>
 // Carga perezosa de librerías pesadas (xlsx, jspdf+autotable): se piden recién al primer
 // export/import, no en cada visita. Cachea la promesa para no repetir la carga.
@@ -557,6 +558,7 @@ async function startDB(user){
     const [t,p]=await Promise.all([ S.sb.from('tur_usuarios').select('activo').eq('id',user.id).maybeSingle(), S.sb.from('profiles').select('rol,activo').eq('id',user.id).maybeSingle() ]);
     const ok=(t.data&&t.data.activo)||(p.data&&p.data.activo&&p.data.rol==='admin');
     if(!ok){ document.body.classList.add('auth-out'); document.getElementById('view').innerHTML=`<div class="login"><div class="login-card"><h1>Turnos · Grupo TX</h1><p>Tu cuenta (${esc(user.email||'')}) no tiene acceso al módulo de turnos. Pide acceso a Control de Gestión.</p><button class="btn btn-red" onclick="S.sb.auth.signOut()">Cerrar sesión</button></div></div>`; return; }
+    if(!(await TMfa.gate(S.sb,{requireEnrollment:!!(p.data&&p.data.rol==='admin')}))) return;
   }catch(e){ console.error(e); }
   document.body.classList.remove('auth-out');
   S.user=user; S.mode='db'; S.db=makeSupabaseDB(S.sb);

@@ -8,6 +8,7 @@
 <title>Grupo TX · Registro de Terreno</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="foto-archivada.js"></script>
+<script src="mfa-gate.js"></script>
 <script src="offline-core.js"></script>
 <script src="offline.js"></script>
 <script src="terreno-core.js"></script>
@@ -378,6 +379,8 @@ async function iniciar(){
       <button class="btn ghost" onclick="cerrarSesion()">Cerrar sesión</button></div></div>`;
     return;
   }
+  // 2FA: solo con señal (sin ella, TMfa.gate tampoco podría verificar nada). Si falla por red, no bloquea.
+  if (!soloCopia && !(await TMfa.gate(sb, { requireEnrollment: me.admin }))) return;
   $('#nav').hidden = false;
   $('#nav-accesos').hidden = !me.admin;
   $('#btn-salir').hidden = false;
