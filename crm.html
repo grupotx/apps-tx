@@ -773,7 +773,7 @@ function alertsFor(){
 /* ============ shell ============ */
 const NAV=[
  ['Operación',[['inicio','Inicio','home'],['clientes','Clientes','users'],['porvisitar','Clientes por visitar','alert'],['visitas','Visitas','pin'],['mapa','Mapa de cobertura','map'],['cotizaciones','Cotizaciones','doc'],['pipeline','Pipeline','funnel'],['agenda','Agenda','cal']]],
- ['Catálogo',[['productos','Productos','box'],['precios','Listas de precios','tag']]],
+ ['Catálogo',[['productos','Productos','box'],['precios','Listas de precios','tag'],['fichas','Fichas técnicas','file']]],
  ['Gestión',[['reportes','Dashboard gerencial','chart','dash_equipo'],['correos','Avisos por correo','mail'],['auditoria','Trazabilidad','hist'],['admin','Administración','gear','config']]]];
 function renderShell(){
  const route=(location.hash||'#inicio').slice(1).split('/')[0];
@@ -788,11 +788,11 @@ function renderShell(){
 function router(){
  $('#side').classList.remove('open');closeModal();$('#notif').hidden=true;
  const [r,arg]=(location.hash||'#inicio').slice(1).split('/');
- const V={inicio:vHome,clientes:vClients,cliente:vClient,porvisitar:vToVisit,visitas:vVisits,mapa:vMap,cotizaciones:vQuotes,cotizacion:vQuote,pipeline:vPipeline,agenda:vAgenda,productos:vProducts,precios:vPrices,reportes:vReports,correos:vMail,auditoria:vAudit,admin:vAdmin};
+ const V={inicio:vHome,clientes:vClients,cliente:vClient,porvisitar:vToVisit,visitas:vVisits,mapa:vMap,cotizaciones:vQuotes,cotizacion:vQuote,pipeline:vPipeline,agenda:vAgenda,productos:vProducts,precios:vPrices,fichas:vFichas,reportes:vReports,correos:vMail,auditoria:vAudit,admin:vAdmin};
  renderShell();
  const fn=V[r]||vHome;$('#main').innerHTML='';resetH();fn(arg);window.scrollTo(0,0);
 }
-function rerender(){const y=window.scrollY;const [r,arg]=(location.hash||'#inicio').slice(1).split('/');renderShell();resetH();const V={inicio:vHome,clientes:vClients,cliente:vClient,porvisitar:vToVisit,visitas:vVisits,mapa:vMap,cotizaciones:vQuotes,cotizacion:vQuote,pipeline:vPipeline,agenda:vAgenda,productos:vProducts,precios:vPrices,reportes:vReports,correos:vMail,auditoria:vAudit,admin:vAdmin};(V[r]||vHome)(arg);window.scrollTo(0,y)}
+function rerender(){const y=window.scrollY;const [r,arg]=(location.hash||'#inicio').slice(1).split('/');renderShell();resetH();const V={inicio:vHome,clientes:vClients,cliente:vClient,porvisitar:vToVisit,visitas:vVisits,mapa:vMap,cotizaciones:vQuotes,cotizacion:vQuote,pipeline:vPipeline,agenda:vAgenda,productos:vProducts,precios:vPrices,fichas:vFichas,reportes:vReports,correos:vMail,auditoria:vAudit,admin:vAdmin};(V[r]||vHome)(arg);window.scrollTo(0,y)}
 function resetH(){const m=M();m.onclick=m.onchange=m.oninput=m.onkeydown=m.ondragstart=m.ondragover=m.ondrop=null}
 function toast(msg,actLabel,act){const t=document.createElement('div');t.className='toast';t.innerHTML=`<span>${msg}</span>`+(actLabel?`<button>${actLabel}</button>`:'');if(act)t.querySelector('button').onclick=()=>{act();t.remove()};$('#toastRoot').innerHTML='';$('#toastRoot').appendChild(t);setTimeout(()=>t.remove(),5200)}
 function openModal(title,body,foot,cls=''){$('#modalRoot').innerHTML=`<div class="ov" id="ov"><div class="modal ${cls}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="mh"><h2>${title}</h2><button class="x" data-close aria-label="Cerrar">×</button></div><div class="mb">${body}</div>${foot?`<div class="mf">${foot}</div>`:''}</div></div>`;
@@ -1753,6 +1753,57 @@ function productForm(code){const p=code?P(code):null;const isNew=!p;const d=p||{
   if(isNew){const np={code:g('code').toUpperCase(),...data,active:true,createdBy:S.me,createdAt:nowIso(),updatedBy:S.me,updatedAt:nowIso()};$('#pOk').disabled=true;try{await dbIns('products',np);const its=Object.values(S.lists).map(l=>({list_id:l.id,code:np.code,price:Math.round(np.price*(l.f||1)/10)*10}));await dbRun(sb.from('crm_price_list_items').insert(its));its.forEach(i=>S.lists[i.list_id].prices[np.code]=i.price)}catch(e){return}S.products.push(np);audit('Producto',np.code,'Creado',`${np.name} · ${clp(np.price)} / ${np.unit}`);
    const m=sendMail('producto',`Nuevo producto creado – ${np.code} ${np.name}`,`Se creó un nuevo producto en el CRM.\n\nCódigo: ${np.code}\nNombre: ${np.name}\nFamilia: ${np.family}\nUnidad: ${np.unit}\nPrecio base neto: ${clp(np.price)}\nDescripción: ${np.desc}\n\nCreado por ${me().name} el ${fdt(np.createdAt)}`);closeModal();rerender();toast('Producto creado con precios en todas las listas.'+(m?' Aviso registrado para '+m.to.length+' cuenta(s).':''),m?'Ver aviso':null,()=>showMail(m.id))}
   else{const ch=Object.keys(data).filter(k=>data[k]!==p[k]).map(k=>`${k}: ${k==='price'?clp(p[k]):p[k]} → ${k==='price'?clp(data[k]):data[k]}`);Object.assign(p,data,{updatedBy:S.me,updatedAt:nowIso()});dbUpd('products',p,[...Object.keys(data),'updatedBy','updatedAt'],'code').catch(ignore);audit('Producto',p.code,'Modificado',ch.join(' · ')||'Sin cambios');closeModal();rerender();toast('Producto actualizado.')}};
+}
+
+/* ============ FICHAS TÉCNICAS ============ */
+let FS={pregunta:'',fichas:[]};
+async function cargarFichas(){const{data,error}=await sb.from('fichas_tecnicas').select('id,nombre,categoria,version').order('nombre');if(!error)FS.fichas=data||[]}
+function vFichas(){
+ M().innerHTML=`<div class="ph"><div><h1>Fichas técnicas</h1><p>Pregunta en lenguaje natural sobre los productos; el bot responde citando la ficha real.</p></div>${can('productos')?`<button class="btn pri" data-act="subirFicha">${ico('plus')}Subir ficha nueva</button>`:''}</div>
+ <div class="card"><div class="fld full"><label>Pregunta</label><div class="row"><input id="fi-q" placeholder="¿Este adhesivo sirve para exterior?" value="${esc(FS.pregunta)}" style="flex:1"><button class="btn pri" id="fi-ask">Preguntar</button></div></div><div id="fi-resp"></div></div>
+ <div class="card" style="margin-top:14px"><h2>Fichas disponibles</h2><div id="fi-lista"><div class="empty">Cargando…</div></div></div>`;
+ cargarFichas().then(drawFichasLista);
+ $('#fi-ask').onclick=preguntarFicha;
+ $('#fi-q').onkeydown=e=>{if(e.key==='Enter')preguntarFicha()};
+ M().onclick=e=>{if(e.target.closest('[data-act="subirFicha"]'))fichaForm();const r=e.target.closest('[data-act="reemplazarFicha"]');if(r)fichaForm(r.dataset.id)};
+}
+function drawFichasLista(){
+ const el=$('#fi-lista');if(!el)return;
+ if(!FS.fichas.length){el.innerHTML='<div class="empty">Sin fichas subidas todavía.</div>';return}
+ el.innerHTML=`<div class="tbl-w"><table><thead><tr><th>Nombre</th><th class="hide-m">Categoría</th><th>Versión</th>${can('productos')?'<th></th>':''}</tr></thead><tbody>${FS.fichas.map(f=>`<tr><td>${esc(f.nombre)}</td><td class="hide-m">${esc(f.categoria||'')}</td><td>${f.version}</td>${can('productos')?`<td><button class="btn sm" data-act="reemplazarFicha" data-id="${f.id}">Reemplazar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+async function preguntarFicha(){
+ const q=$('#fi-q').value.trim();if(!q)return;
+ FS.pregunta=q;const btn=$('#fi-ask');btn.disabled=true;btn.textContent='Preguntando…';
+ $('#fi-resp').innerHTML='<p class="small muted">Buscando en las fichas…</p>';
+ try{
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session)throw new Error('sin sesión');
+  const r=await fetch(SB_URL+'/functions/v1/fichas-preguntar',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pregunta:q})});
+  const j=await r.json().catch(()=>({error:'Respuesta inválida'}));
+  if(!r.ok||j.error){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>${esc(j.error||'No se pudo responder.')}</span></div>`;return}
+  if(j.sin_resultado){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>No encontré información sobre eso en las fichas técnicas.</span></div>`;return}
+  const links=await Promise.all((j.fichas||[]).map(async f=>{const{data}=await sb.storage.from('fichas-tecnicas').createSignedUrl(f.storage_path,3600);return`<a href="${data&&data.signedUrl||'#'}" target="_blank">${esc(f.nombre)}</a>`}));
+  $('#fi-resp').innerHTML=`<div class="note"><span>${esc(j.respuesta).replace(/\n/g,'<br>')}${links.length?`<br><span class="small muted">Fuente: ${links.join(', ')}</span>`:''}</span></div>`;
+ }catch(e){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>No se pudo conectar. Revisa tu conexión.</span></div>`}
+ finally{btn.disabled=false;btn.textContent='Preguntar'}
+}
+function fichaForm(fichaId){
+ const f=fichaId?FS.fichas.find(x=>x.id===fichaId):null;
+ openModal(f?'Reemplazar '+f.nombre:'Subir ficha nueva',`<form class="form"><div class="fld full"><label>Nombre <span class="req">*</span></label><input id="ff-nombre" value="${esc(f?f.nombre:'')}" ${f?'disabled':''}></div><div class="fld full"><label>Categoría</label><input id="ff-categoria" value="${esc(f?f.categoria||'':'')}" ${f?'disabled':''}></div><div class="fld full"><label>Archivo PDF <span class="req">*</span></label><input type="file" id="ff-pdf" accept="application/pdf"></div></form>`,`<button class="btn" data-close>Cancelar</button><button class="btn pri" id="ffOk">${f?'Reemplazar':'Subir'}</button>`);
+ $('#ffOk').onclick=async()=>{
+  const file=$('#ff-pdf').files[0];const nombre=$('#ff-nombre').value.trim();
+  if(!nombre||!file){toast('Nombre y PDF son obligatorios.');return}
+  const btn=$('#ffOk');btn.disabled=true;btn.textContent='Subiendo…';
+  try{
+   const b64=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(rd.result.split(',')[1]);rd.onerror=rej;rd.readAsDataURL(file)});
+   const{data:{session}}=await sb.auth.getSession();if(!session)throw new Error('sin sesión');
+   const r=await fetch(SB_URL+'/functions/v1/fichas-ingesta',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({ficha_id:fichaId||undefined,nombre,categoria:$('#ff-categoria').value.trim(),pdf_base64:b64})});
+   const j=await r.json().catch(()=>({error:'Respuesta inválida'}));
+   if(!r.ok||j.error){toast(j.error||'No se pudo subir la ficha.');btn.disabled=false;btn.textContent=f?'Reemplazar':'Subir';return}
+   toast(f?'Ficha reemplazada.':'Ficha subida.');closeModal();await cargarFichas();drawFichasLista();
+  }catch(e){toast('No se pudo subir la ficha: revisa tu conexión.');btn.disabled=false;btn.textContent=f?'Reemplazar':'Subir'}
+ };
 }
 
 /* ============ PRICE LISTS ============ */
