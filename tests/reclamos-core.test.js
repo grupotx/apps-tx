@@ -415,3 +415,21 @@ test('metricas: eventos con la misma hora se ordenan por id, no por el orden en 
   const m = RC.metricas(rs, eventos, {});
   assert.deepEqual(m.etapasDias, { ingresado_derivado: 0, derivado_decision: 0, decision_solucion: 0, solucion_comunicado: 3 });
 });
+
+// ── panel: enPeriodo y conteo por producto ──
+test('enPeriodo: sobre la fecha de recepción, extremos incluidos; los anulados no entran', () => {
+  const r = (f, estado = 'cerrado') => ({ fecha_recepcion: f, estado });
+  assert.equal(RC.enPeriodo(r('2026-11-01'), { desde: '2026-11-01', hasta: '2026-11-30' }), true);
+  assert.equal(RC.enPeriodo(r('2026-11-30'), { desde: '2026-11-01', hasta: '2026-11-30' }), true);
+  assert.equal(RC.enPeriodo(r('2026-10-31'), { desde: '2026-11-01', hasta: '2026-11-30' }), false);
+  assert.equal(RC.enPeriodo(r('2026-12-01'), { desde: '2026-11-01', hasta: '2026-11-30' }), false);
+  assert.equal(RC.enPeriodo(r('2026-05-05'), {}), true);
+  assert.equal(RC.enPeriodo(r('2026-05-05'), null), true);
+  assert.equal(RC.enPeriodo(r('2026-11-05', 'anulado'), {}), false);
+  assert.equal(RC.enPeriodo(r('2026-11-05T10:00:00Z'), { desde: '2026-11-05', hasta: '2026-11-05' }), true, 'acepta fecha con hora');
+});
+
+test('metricas: porProducto cuenta solo los reclamos con producto', () => {
+  const m = RC.metricas([R({ id: 'a', producto: 'P1' }), R({ id: 'b', producto: 'P1' }), R({ id: 'c', producto: 'P2' }), R({ id: 'd', producto: null }), R({ id: 'e', producto: 'P9', estado: 'anulado' })], [], {});
+  assert.deepEqual(m.porProducto, { P1: 2, P2: 1 });
+});

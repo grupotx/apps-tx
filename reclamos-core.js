@@ -239,18 +239,20 @@
   // fecha de recepción, extremos incluidos; vacío = todo). Los anulados no cuentan. Los costos solo suman reclamos con
   // compensación ya definida. Sin producto/planta no entran en esas vistas (solo en área y motivo).
   // Los resultados por clave son objetos { clave: valor }.
-  function metricas(reclamos, eventos, periodo) {
+  // ¿Cuenta en las métricas? No si está anulado; el período se mide sobre la fecha de recepción (extremos incluidos).
+  function enPeriodo(r, periodo) {
     const p = periodo || {};
-    const rs = (reclamos || []).filter((r) => {
-      if (r.estado === 'anulado') return false;
-      const f = String(r.fecha_recepcion || '').slice(0, 10);
-      if (p.desde && f < p.desde) return false;
-      if (p.hasta && f > p.hasta) return false;
-      return true;
-    });
+    if (!r || r.estado === 'anulado') return false;
+    const f = String(r.fecha_recepcion || '').slice(0, 10);
+    if (p.desde && f < p.desde) return false;
+    if (p.hasta && f > p.hasta) return false;
+    return true;
+  }
+  function metricas(reclamos, eventos, periodo) {
+    const rs = (reclamos || []).filter((r) => enPeriodo(r, periodo));
     const m = {
       total: rs.length, abiertos: 0, costoTotal: 0,
-      costoPorMotivo: {}, costoPorArea: {}, costoPorPlanta: {}, costoPorProducto: {},
+      costoPorMotivo: {}, costoPorArea: {}, costoPorPlanta: {}, costoPorProducto: {}, porProducto: {},
       respuestaDias: null,
       etapasDias: { ingresado_derivado: null, derivado_decision: null, decision_solucion: null, solucion_comunicado: null },
       porMotivo: {}, porArea: {}, porPlanta: {},
@@ -269,6 +271,7 @@
       suma(m.porMotivo, r.motivo, 1);
       suma(m.porArea, area, 1);
       if (planta) suma(m.porPlanta, planta, 1);
+      if (r.producto) suma(m.porProducto, r.producto, 1);
       if (r.compensacion != null) {
         const c = Number(r.compensacion) || 0;
         m.costoTotal += c;
@@ -290,7 +293,7 @@
     return m;
   }
 
-  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, labelDe, plantaDeFamilia, fechaValida, fechaCL, diasEntre, diaCL, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, metricas };
+  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, labelDe, plantaDeFamilia, fechaValida, fechaCL, diasEntre, diaCL, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, enPeriodo, metricas };
   if (typeof window !== 'undefined') g.RC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
