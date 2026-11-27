@@ -159,6 +159,7 @@ a.buscar{color:var(--mute);font-size:12px;text-decoration:underline dotted;text-
 .mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
 .mod{border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:grid;gap:6px;background:var(--sunk)}
 .mod.on{border-color:var(--ok)}
+.mod-g{grid-column:1/-1;margin-top:6px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--mute)}
 .mod-t{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700;font-size:13px}
 .mod select{padding:5px 8px;font-size:12.5px}
 .pill{font-size:11px;border:1px solid var(--line-strong);border-radius:99px;padding:2px 9px;color:var(--mute)}
@@ -186,7 +187,15 @@ const MODS=[
  {k:'tur',n:'Asignación de Turnos',roles:['lector','editor','admin']},
  {k:'rt',n:'Registro de Terreno',roles:null},
  {k:'cp',n:'Choque de precios',roles:['lector','editor']},
- {k:'mtto',n:'Mantención',roles:['lector','editor']}];
+ {k:'mtto',n:'Mantención',roles:['lector','editor']},
+ {k:'rep_resumen',n:'Resumen',roles:null,grupo:'Reportes TX'},
+ {k:'rep_comercial',n:'Comercial',roles:null,grupo:'Reportes TX'},
+ {k:'rep_logistica',n:'Logística',roles:null,grupo:'Reportes TX'},
+ {k:'rep_produccion',n:'Producción',roles:null,grupo:'Reportes TX'},
+ {k:'rep_estado_planta',n:'Estado de planta',roles:null,grupo:'Reportes TX'},
+ {k:'rep_rrhh',n:'RRHH',roles:null,grupo:'Reportes TX'},
+ {k:'rep_finanzas',n:'Finanzas y tesorería',roles:null,grupo:'Reportes TX'},
+ {k:'rep_costos',n:'Ver costos y márgenes',roles:null,grupo:'Reportes TX'}];
 const ROL_LBL={vendedor:'Vendedor',tecnico:'Técnico',supervisor:'Supervisor',admin:'Administrador',gerencia:'Gerencia',chofer:'Chofer',logistica:'Logística',cliente:'Cliente',lector:'Solo lectura',editor:'Editor'};
 let me=null,USERS=[],q='',solo='';
 function login(msg){
@@ -284,8 +293,8 @@ function pintar(){
         <label class="sw" title="Activar o desactivar la cuenta"><input type="checkbox" data-cuenta ${u.cuenta_activa?'checked':''} ${u.id===me.id?'disabled':''}><span></span></label>
         ${u.id===me.id?'':`<button type="button" class="mini" data-reset-mfa title="Si perdió el celular con su app de autenticación: borra su 2FA actual, para que pueda activarlo de nuevo desde cero">Resetear 2FA</button>`}</div>
     </div>
-    <div class="mods">${MODS.map(m=>{const s=u.modulos[m.k]||{};const on=!!s.activo;
-      return `<div class="mod ${on?'on':''}"><div class="mod-t"><span>${esc(m.n)}</span><label class="sw"><input type="checkbox" data-mod="${m.k}" ${on?'checked':''}><span></span></label></div>
+    <div class="mods">${MODS.map((m,i)=>{const s=u.modulos[m.k]||{};const on=!!s.activo;
+      return (m.grupo&&m.grupo!==MODS[i-1]?.grupo?`<div class="mod-g">${esc(m.grupo)}</div>`:'')+`<div class="mod ${on?'on':''}"><div class="mod-t"><span>${esc(m.n)}</span><label class="sw"><input type="checkbox" data-mod="${m.k}" ${on?'checked':''}><span></span></label></div>
       ${m.roles?`<select data-rol="${m.k}" ${on?'':'disabled'} aria-label="Rol en ${esc(m.n)}">${m.roles.map(r=>`<option value="${r}" ${(s.rol||m.roles[0])===r?'selected':''}>${ROL_LBL[r]}</option>`).join('')}</select>`:`<span class="small">${on?'Con acceso':'Sin acceso'}</span>`}</div>`}).join('')}</div></section>`).join('')||'<p class="sin">Ningún usuario coincide.</p>';
   if(keep){const i=$('#uq');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 }
