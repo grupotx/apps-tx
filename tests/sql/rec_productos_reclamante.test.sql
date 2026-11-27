@@ -1,8 +1,11 @@
 -- Correr con execute_sql: debe terminar con "OK_ROLLBACK" (no deja datos).
 -- Reclamos: varios productos por reclamo (lista `productos`, hasta 10) y quién reclama (vendedor del perfil o cliente):
---  · rec_crear / rec_actualizar con la lista y el reclamante, mismos mensajes que reclamos-core.js;
---  · rec_vendedores (lista para elegir), admin_set_telefono y admin_usuarios con teléfono;
---  · la derivación elige una planta cualquiera; permisos de ejecución y RLS sin cambios.
+--  · rec_crear / rec_actualizar con la lista y el reclamante, mismos mensajes que reclamos-core.js; un reclamo anterior
+--    sin reclamante recibe el primero;
+--  · rec_vendedores (lista para elegir; las cuentas de prueba zz.% solo las ve el administrador), admin_set_telefono y
+--    admin_usuarios con teléfono;
+--  · la derivación elige una planta cualquiera; permisos de ejecución y RLS sin cambios (también por planta con varios
+--    productos).
 create or replace function pg_temp.act(p_uid uuid) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claims', json_build_object('sub', p_uid, 'role', 'authenticated')::text, true);
@@ -48,14 +51,14 @@ end $$;
 
 do $$
 declare
-  uids uuid[]; vids uuid[];
-  sc uuid; as1 uuid; sin uuid; adm uuid; vend uuid; vend_inact uuid; vend_sn uuid;
+  uids uuid[]; vids uuid[]; encs uuid[];
+  sc uuid; as1 uuid; sin uuid; adm uuid; vend uuid; vend_inact uuid; vend_sn uuid; vz uuid; enc_p uuid; enc_a uuid;
   cli uuid; p_a text; p_p text; p_m text; once text[];
   hoy date := (now() at time zone 'America/Santiago')::date;
   rc jsonb := '{"tipo":"cliente","nombre":"Persona de prueba","telefono":"+56 9 1234 5678"}'::jsonb;
   pf public.profiles;
-  a uuid; b uuid; c uuid; tok timestamptz; tok2 timestamptz;
-  v_msg text; v_n int; v_txt text; v_arr text[]; v_arr2 text[];
+  a uuid; b uuid; c uuid; d uuid; viejo uuid; tok timestamptz; tok2 timestamptz;
+  v_msg text; v_n int; v_n2 int; v_txt text; v_arr text[]; v_arr2 text[];
   r public.rec_reclamos; ev public.rec_eventos;
   conflicto text := 'El reclamo fue modificado por otra persona mientras lo mirabas. Actualiza la pantalla y revisa antes de continuar.';
   tel_mal text := 'El teléfono debe tener al menos 7 dígitos.';
@@ -216,20 +219,33 @@ begin
   end if;
 
   -- ── (5) rec_vendedores ──
+  -- Una cuenta de prueba (correo zz.%) activa como vendedor: solo el administrador la ve en la lista (como en admin_usuarios).
+  select id into vz from public.profiles where email like 'zz.%' and rol::text <> 'admin' and id <> all(uids)
+   order by (activo and rol::text = 'vendedor') desc, id limit 1;
+  if vz is null then raise exception 'falta una cuenta de prueba zz.%% para la prueba'; end if;
+  update public.profiles set activo = true, rol = 'vendedor' where id = vz;
   perform pg_temp.act(sc);
   select count(*) into v_n from (
-    (select id from public.rec_vendedores() except select id from public.profiles where activo and rol::text = 'vendedor')
+    (select id from public.rec_vendedores() except select id from public.profiles where activo and rol::text = 'vendedor' and email not like 'zz.%')
     union all
-    (select id from public.profiles where activo and rol::text = 'vendedor' except select id from public.rec_vendedores())) t;
-  if v_n <> 0 then raise exception 'caso 5a: rec_vendedores debe traer exactamente los vendedores activos (% diferencias)', v_n; end if;
-  if exists (select 1 from public.rec_vendedores() where id in (adm, sc, vend_inact)) then raise exception 'caso 5b: no debe traer admin, pendientes ni inactivos'; end if;
+    (select id from public.profiles where activo and rol::text = 'vendedor' and email not like 'zz.%' except select id from public.rec_vendedores())) t;
+  if v_n <> 0 then raise exception 'caso 5a: rec_vendedores debe traer exactamente los vendedores activos que no son cuentas de prueba (% diferencias)', v_n; end if;
+  if exists (select 1 from public.rec_vendedores() where id in (adm, sc, vend_inact, vz)) then raise exception 'caso 5b: no debe traer admin, pendientes, inactivos ni cuentas de prueba'; end if;
   select array_agg(coalesce(t.nombre, t.email) order by t.o) into v_arr from public.rec_vendedores() with ordinality t(id, nombre, email, telefono, o);
-  select array_agg(coalesce(p.nombre, p.email) order by coalesce(p.nombre, p.email)) into v_arr2 from public.profiles p where p.activo and p.rol::text = 'vendedor';
+  select array_agg(coalesce(p.nombre, p.email) order by coalesce(p.nombre, p.email)) into v_arr2 from public.profiles p
+   where p.activo and p.rol::text = 'vendedor' and p.email not like 'zz.%';
   if v_arr is distinct from v_arr2 then raise exception 'caso 5c: rec_vendedores debe venir ordenado por nombre (o correo)'; end if;
   if (select telefono from public.rec_vendedores() where id = vend) is distinct from '+56 2 2345 6789' then raise exception 'caso 5d: rec_vendedores incluye el teléfono'; end if;
   perform pg_temp.act(sin);
   v_msg := pg_temp.falla('select * from public.rec_vendedores()');
   perform pg_temp.espera('5e', v_msg, 'No tienes acceso al módulo de Reclamos.');
+  perform pg_temp.act(adm);
+  select count(*) into v_n from (
+    (select id from public.rec_vendedores() except select id from public.profiles where activo and rol::text = 'vendedor')
+    union all
+    (select id from public.profiles where activo and rol::text = 'vendedor' except select id from public.rec_vendedores())) t;
+  if v_n <> 0 then raise exception 'caso 5f: el administrador ve todos los vendedores activos, también las cuentas de prueba (% diferencias)', v_n; end if;
+  if not exists (select 1 from public.rec_vendedores() where id = vz) then raise exception 'caso 5g: el administrador ve la cuenta de prueba zz.%%'; end if;
 
   -- ── (6) admin_set_telefono y admin_usuarios ──
   perform pg_temp.act(sc);
@@ -283,6 +299,63 @@ begin
   select count(*) into v_n from public.rec_reclamos where id = a and productos <> '[]'::jsonb and reclamante_nombre is not null;
   reset role;
   if v_n <> 1 then raise exception 'caso 8f: servicio al cliente ve el reclamo y las columnas nuevas'; end if;
+
+  -- ── (9) los permisos por planta no cambian con varios productos ──
+  -- Dos encargados de calidad (pinturas y adhesivos) que no son de la cartera del cliente. d tiene un producto de
+  -- adhesivos (el primero) y uno de pinturas y se deriva a calidad de pinturas: lo ve solo el de pinturas. b (pinturas y
+  -- adhesivos, derivado en 7b a calidad de adhesivos) lo ve solo el de adhesivos. Manda la planta de destino.
+  select array_agg(id order by id) into encs from (
+    select p.id from public.profiles p
+     where p.activo and p.rol::text = 'pendiente' and p.id <> all(uids) and p.id not in (select id from public.rec_usuarios)
+       and not exists (select 1 from public.crm_clients x where x.id = cli and p.id = any(coalesce(x.sellers, '{}')))
+     order by p.id limit 2) t;
+  if coalesce(cardinality(encs), 0) < 2 then raise exception 'faltan perfiles activos (pendientes) para la prueba de plantas'; end if;
+  enc_p := encs[1]; enc_a := encs[2];
+  insert into public.rec_usuarios (id, activo) values (enc_p, true), (enc_a, true);
+  insert into public.rec_alcances (usuario_id, rol, area, planta)
+    values (enc_p, 'encargado_calidad', null, 'pinturas'), (enc_a, 'encargado_calidad', null, 'adhesivos');
+  perform pg_temp.act(sc);
+  d := public.rec_crear(cli, array[p_a, p_p], 'calidad_producto', 'Adhesivos y pinturas', hoy, '{}'::jsonb, rc);
+  perform public.rec_derivar(d, 'calidad', 'pinturas');
+  select * into r from public.rec_reclamos where id = d;
+  if r.planta <> 'adhesivos' or r.area_destino <> 'calidad' or r.planta_destino <> 'pinturas' or jsonb_array_length(r.productos) <> 2
+     or (select planta_destino from public.rec_reclamos where id = b) <> 'adhesivos' then
+    raise exception 'caso 9a: preparación: %', to_jsonb(r);
+  end if;
+  perform pg_temp.act(enc_p);
+  set local role authenticated;
+  select count(*) into v_n from public.rec_reclamos where id = d;
+  select count(*) into v_n2 from public.rec_reclamos where id = b;
+  reset role;
+  if v_n <> 1 then raise exception 'caso 9b: el encargado de calidad de pinturas ve el reclamo derivado a pinturas (ve %)', v_n; end if;
+  if v_n2 <> 0 then raise exception 'caso 9c: el encargado de calidad de pinturas no ve el reclamo derivado a adhesivos aunque tenga un producto de pinturas (ve %)', v_n2; end if;
+  perform pg_temp.act(enc_a);
+  set local role authenticated;
+  select count(*) into v_n from public.rec_reclamos where id = d;
+  select count(*) into v_n2 from public.rec_reclamos where id = b;
+  reset role;
+  if v_n <> 0 then raise exception 'caso 9d: el encargado de calidad de adhesivos no ve el reclamo derivado a pinturas aunque su primer producto sea de adhesivos (ve %)', v_n; end if;
+  if v_n2 <> 1 then raise exception 'caso 9e: el encargado de calidad de adhesivos ve el reclamo derivado a adhesivos (ve %)', v_n2; end if;
+
+  -- ── (10) un reclamo anterior, sin reclamante, recibe el primero con rec_actualizar (servicio al cliente) ──
+  perform pg_temp.act(sc);
+  viejo := public.rec_crear(cli, array[p_m], 'calidad_producto', 'Reclamo anterior', hoy, '{}'::jsonb, rc);
+  -- se simula un reclamo de antes de esta migración: columnas del reclamante vacías
+  update public.rec_reclamos
+     set reclamante_tipo = null, reclamante_id = null, reclamante_nombre = null, reclamante_correo = null, reclamante_telefono = null
+   where id = viejo;
+  select actualizado_en into tok from public.rec_reclamos where id = viejo;
+  perform public.rec_actualizar(viejo, null, null, tok, jsonb_build_object('tipo', 'cliente', 'nombre', '  Rita Díaz ', 'correo', 'rita@cliente.cl'));
+  select * into r from public.rec_reclamos where id = viejo;
+  if r.reclamante_tipo is distinct from 'cliente' or r.reclamante_id is not null or r.reclamante_nombre is distinct from 'Rita Díaz'
+     or r.reclamante_correo is distinct from 'rita@cliente.cl' or r.reclamante_telefono is not null or r.producto is distinct from p_m then
+    raise exception 'caso 10a: el reclamo anterior guarda su primer reclamante y conserva su producto: %', to_jsonb(r);
+  end if;
+  select count(*) into v_n from public.rec_eventos where reclamo_id = viejo and tipo = 'datos_actualizados';
+  select * into ev from public.rec_eventos where reclamo_id = viejo and tipo = 'datos_actualizados' order by id desc limit 1;
+  if v_n <> 1 or ev.detalle->'reclamante_anterior' is distinct from 'null'::jsonb then
+    raise exception 'caso 10b: un evento datos_actualizados con reclamante_anterior nulo (% eventos): %', v_n, ev.detalle;
+  end if;
 
   raise exception 'OK_ROLLBACK';
 end $$;
