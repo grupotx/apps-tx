@@ -23,17 +23,17 @@
   --brand:#e4032e; --brand-ink:#fff; --brand-soft:#fde7eb;
   --bg:#f2f2f0; --surface:#fff; --sunk:#eaeae7; --ink:#121212; --muted:#5e6066; --line:#dfdfdb;
   --ok:#18864a; --ok-soft:#ddf2e5; --warn:#b86e00; --warn-soft:#fbeed6; --bad:#c4121f; --bad-soft:#fbe1e3;
-  --c-crm:#2459a8; --c-silos:#e4032e; --c-ent:#18864a; --c-pro:#8a4fbf; --c-tur:#c27a06; --c-rt:#0f8b8d; --c-cp:#c2410c; --c-mtto:#b4231f; --c-adm:#475569;
+  --c-crm:#2459a8; --c-silos:#e4032e; --c-ent:#18864a; --c-pro:#8a4fbf; --c-tur:#c27a06; --c-rt:#0f8b8d; --c-cp:#c2410c; --c-mtto:#b4231f; --c-rec:#a21d6b; --c-adm:#475569;
   --f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --brand:#ff2a4d; --brand-soft:#3a0f18; --bg:#0c0d0f; --surface:#15171a; --sunk:#1d2024; --ink:#f1f1f1; --muted:#9a9da4; --line:#2a2d32;
   --ok:#4fd18a; --ok-soft:#13301f; --warn:#f2b04a; --warn-soft:#352813; --bad:#ff6670; --bad-soft:#3b1519;
-  --c-crm:#79a8f0; --c-silos:#ff2a4d; --c-ent:#4fd18a; --c-pro:#b98be6; --c-tur:#f0b44a; --c-rt:#4cc9cb; --c-cp:#ff8a4c; --c-mtto:#ff6b5e; --c-adm:#a8b3c7; color-scheme:dark}}
+  --c-crm:#79a8f0; --c-silos:#ff2a4d; --c-ent:#4fd18a; --c-pro:#b98be6; --c-tur:#f0b44a; --c-rt:#4cc9cb; --c-cp:#ff8a4c; --c-mtto:#ff6b5e; --c-rec:#ec7ab8; --c-adm:#a8b3c7; color-scheme:dark}}
 :root[data-theme="dark"]{
   --brand:#ff2a4d; --brand-soft:#3a0f18; --bg:#0c0d0f; --surface:#15171a; --sunk:#1d2024; --ink:#f1f1f1; --muted:#9a9da4; --line:#2a2d32;
   --ok:#4fd18a; --ok-soft:#13301f; --warn:#f2b04a; --warn-soft:#352813; --bad:#ff6670; --bad-soft:#3b1519;
-  --c-crm:#79a8f0; --c-silos:#ff2a4d; --c-ent:#4fd18a; --c-pro:#b98be6; --c-tur:#f0b44a; --c-rt:#4cc9cb; --c-cp:#ff8a4c; --c-mtto:#ff6b5e; --c-adm:#a8b3c7; color-scheme:dark}
+  --c-crm:#79a8f0; --c-silos:#ff2a4d; --c-ent:#4fd18a; --c-pro:#b98be6; --c-tur:#f0b44a; --c-rt:#4cc9cb; --c-cp:#ff8a4c; --c-mtto:#ff6b5e; --c-rec:#ec7ab8; --c-adm:#a8b3c7; color-scheme:dark}
 [hidden]{display:none!important}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -224,6 +224,10 @@ const APPS = [
     desc:'Activos, checklists con QR, repuestos, órdenes de trabajo y alertas de las plantas.',
     icon:ic('<path d="M14.7 6.3a4 4 0 0 0 5 5L12 20l-4-4 8.7-8.7z"/><path d="M5 3l3 3"/>'),
     check: async uid => { const { data } = await sb.rpc('mtto_tengo_acceso'); return !!data; } },
+  { id:'rec', name:'Reclamos', short:'Reclamos', color:'var(--c-rec)', url:'reclamos.html',
+    desc:'Reclamos de clientes de punta a punta: ingreso, derivación, decisión, solución y cierre, con costos y tiempos de respuesta.',
+    icon:ic('<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-8l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M12 8.5v3.5M12 14.5h.01"/>'),
+    check: async uid => { const { data } = await sb.rpc('rec_tengo_acceso'); return !!data; } },
   { id:'adm', name:'Usuarios y accesos', short:'Usuarios', color:'var(--c-adm)', url:'usuarios.html',
     desc:'Administración central: nombre, correo, cargo y acceso a cada módulo.',
     icon:ic('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M17 8v6M14 11h6"/>'),
