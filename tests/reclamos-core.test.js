@@ -317,3 +317,101 @@ test('metricas: la mediana de un número par de casos y los días nunca son nega
   // días: 1, 3, 9, 0 → promedio 3,25 → 3,3 ; mediana (1+3)/2 = 2
   assert.deepEqual(m.respuestaDias, { promedio: 3.3, mediana: 2, n: 4 });
 });
+
+// ── pendienteDeMi / esInformado (bandeja) ──
+test('pendienteDeMi: servicio al cliente tiene pendiente lo que depende de él, no lo que espera a otros', () => {
+  const p = (estado, extra) => RC.pendienteDeMi(rec({ estado, ...extra }), SC, false, 'sc1');
+  assert.equal(p('ingresado'), true);
+  assert.equal(p('derivado', { area_destino: 'calidad' }), false);
+  assert.equal(p('en_verificacion', { area_destino: 'calidad', asesor_id: 'as1' }), false);
+  assert.equal(p('aprobado'), true);
+  assert.equal(p('rechazado'), true);
+  assert.equal(p('solucion_definida'), true);
+  assert.equal(p('comunicado'), true);
+  assert.equal(p('cerrado'), false);
+  assert.equal(p('anulado'), false);
+});
+
+test('pendienteDeMi: asesor, encargado de área y el resto', () => {
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'derivado', area_destino: 'calidad' }), ASESOR, false, 'as1'), true);
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'en_verificacion', area_destino: 'calidad', asesor_id: 'as1' }), ASESOR, false, 'as1'), true);
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'en_verificacion', area_destino: 'calidad', asesor_id: 'as2' }), ASESOR, false, 'as1'), false);
+  const ENC = [{ rol: 'encargado_area', area: 'produccion', planta: 'morteros' }];
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'derivado', area_destino: 'produccion', planta_destino: 'morteros' }), ENC, false, 'e1'), true);
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'derivado', area_destino: 'produccion', planta_destino: 'adhesivos' }), ENC, false, 'e1'), false);
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'aprobado', area_destino: 'produccion', planta_destino: 'morteros' }), ENC, false, 'e1'), false, 'ya decidió');
+  const CAL = [{ rol: 'encargado_calidad', area: null, planta: 'morteros' }];
+  const GER = [{ rol: 'gerencia', area: null, planta: null }];
+  for (const e of RC.ESTADOS.map((x) => x.id)) {
+    const r = rec({ estado: e, area_destino: 'calidad', planta_destino: 'morteros' });
+    assert.equal(RC.pendienteDeMi(r, CAL, false, 'c1'), false);
+    assert.equal(RC.pendienteDeMi(r, GER, false, 'g1'), false);
+    assert.equal(RC.pendienteDeMi(r, [], false, 'vend1'), false);
+  }
+});
+
+test('pendienteDeMi: el administrador sin alcance de servicio al cliente no acumula pendientes', () => {
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'ingresado' }), [], true, 'adm'), false);
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'comunicado' }), SC, true, 'adm'), true, 'si además tiene el rol de servicio al cliente, sí');
+  assert.equal(RC.pendienteDeMi(rec({ estado: 'comunicado' }), SC, false, 'sc1'), true);
+});
+
+test('esInformado: el encargado de calidad de la planta ve los de calidad de su planta', () => {
+  const CAL = [{ rol: 'encargado_calidad', area: null, planta: 'morteros' }];
+  assert.equal(RC.esInformado(rec({ area_destino: 'calidad', planta_destino: 'morteros' }), CAL), true);
+  assert.equal(RC.esInformado(rec({ area_destino: 'calidad', planta_destino: 'pinturas' }), CAL), false);
+  assert.equal(RC.esInformado(rec({ area_destino: 'produccion', planta_destino: 'morteros' }), CAL), false);
+  assert.equal(RC.esInformado(rec({ area_destino: 'calidad', planta_destino: 'morteros', estado: 'anulado' }), CAL), false);
+  assert.equal(RC.esInformado(rec({ area_destino: 'calidad', planta_destino: 'morteros' }), SC), false);
+  assert.equal(RC.esInformado(rec({ area_destino: null }), CAL), false);
+});
+
+// ── ajustes de la revisión: completar_datos, validarMonto, fecha antigua, desempate de eventos ──
+test('acciones: completar_datos lo tienen servicio al cliente/admin (salvo cerrado/anulado) y el asesor asignado en verificación', () => {
+  for (const e of ['ingresado', 'derivado', 'en_verificacion', 'aprobado', 'rechazado', 'solucion_definida', 'comunicado']) {
+    assert.ok(RC.accionesPermitidas(rec({ estado: e }), SC, false, 'sc1').includes('completar_datos'), 'servicio al cliente en ' + e);
+  }
+  assert.ok(!RC.accionesPermitidas(rec({ estado: 'cerrado' }), SC, false, 'sc1').includes('completar_datos'));
+  assert.ok(!RC.accionesPermitidas(rec({ estado: 'anulado' }), [], true, 'adm').includes('completar_datos'));
+  assert.ok(RC.accionesPermitidas(rec({ estado: 'ingresado' }), [], true, 'adm').includes('completar_datos'));
+  const r = rec({ estado: 'en_verificacion', area_destino: 'calidad', asesor_id: 'as1' });
+  assert.ok(RC.accionesPermitidas(r, ASESOR, false, 'as1').includes('completar_datos'));
+  assert.ok(!RC.accionesPermitidas(r, ASESOR, false, 'as2').includes('completar_datos'));
+  assert.ok(!RC.accionesPermitidas(rec({ estado: 'derivado', area_destino: 'calidad' }), ASESOR, false, 'as1').includes('completar_datos'), 'el asesor solo durante la verificación');
+});
+
+test('validarMonto: entero en pesos, no negativo, acepta puntos de miles', () => {
+  assert.deepEqual(RC.validarMonto('45000'), { valor: 45000, error: null });
+  assert.deepEqual(RC.validarMonto(' 45.000 '), { valor: 45000, error: null });
+  assert.deepEqual(RC.validarMonto('1.234.567'), { valor: 1234567, error: null });
+  assert.deepEqual(RC.validarMonto(0), { valor: 0, error: null });
+  assert.deepEqual(RC.validarMonto('0'), { valor: 0, error: null });
+  for (const malo of ['12,5', '12.5', '12.50', '-1', '-0', 'abc', '1e3', '$ 100']) {
+    const r = RC.validarMonto(malo);
+    assert.equal(r.valor, null, malo);
+    assert.ok(r.error && r.error.length > 0, malo);
+  }
+  assert.match(RC.validarMonto('').error, /monto/i);
+  assert.match(RC.validarMonto(null).error, /monto/i);
+  assert.match(RC.validarMonto('12,5').error, /entero/i);
+  assert.match(RC.validarMonto('-5').error, /negativ/i);
+});
+
+test('validarCrear: una fecha de recepción de más de un año atrás se rechaza', () => {
+  assert.match(RC.validarCrear({ ...valido, fecha_recepcion: '2025-11-26' }, MOTIVOS, HOY).join(' '), /año/i);
+  assert.deepEqual(RC.validarCrear({ ...valido, fecha_recepcion: '2025-11-27' }, MOTIVOS, HOY), []);
+});
+
+test('metricas: eventos con la misma hora se ordenan por id, no por el orden en que llegan', () => {
+  const rs = [R({ id: 'r', estado: 'comunicado', fecha_recepcion: '2026-11-01', comunicado_en: '2026-11-05T12:00:00Z' })];
+  const t = '2026-11-02T12:00:00Z';
+  const eventos = [
+    { id: 4, reclamo_id: 'r', tipo: 'cambio', a_estado: 'solucion_definida', creado_en: t },
+    { id: 3, reclamo_id: 'r', tipo: 'cambio', a_estado: 'aprobado', creado_en: t },
+    { id: 2, reclamo_id: 'r', tipo: 'cambio', a_estado: 'derivado', creado_en: t },
+    { id: 1, reclamo_id: 'r', tipo: 'creado', a_estado: 'ingresado', creado_en: t },
+    { id: 5, reclamo_id: 'r', tipo: 'cambio', a_estado: 'comunicado', creado_en: '2026-11-05T12:00:00Z' },
+  ];
+  const m = RC.metricas(rs, eventos, {});
+  assert.deepEqual(m.etapasDias, { ingresado_derivado: 0, derivado_decision: 0, decision_solucion: 0, solucion_comunicado: 3 });
+});

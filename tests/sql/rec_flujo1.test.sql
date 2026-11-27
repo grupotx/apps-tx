@@ -168,10 +168,14 @@ begin
   perform public.rec_derivar(b, 'logistica');   -- logística no lleva planta
   select * into r from public.rec_reclamos where id = b;
   if r.estado <> 'derivado' or r.area_destino <> 'logistica' or r.planta_destino is not null then raise exception 'caso 8f: derivación a logística inesperada: %', to_jsonb(r); end if;
-  perform public.rec_derivar(b, 'produccion', 'adhesivos');   -- re-derivar con planta explícita (corregida a mano)
+  -- Producción exige producto (de él sale la planta): se completa y recién entonces se puede derivar
+  v_msg := pg_temp.falla(format('select public.rec_derivar(%L, %L, %L)', b, 'produccion', 'adhesivos'));
+  if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 8g: producción sin producto debía fallar con mensaje de producto, dio %', v_msg; end if;
+  perform public.rec_actualizar(b, p_a);
+  perform public.rec_derivar(b, 'produccion', 'adhesivos');   -- re-derivar con planta explícita (la del producto o una corregida a mano)
   select * into r from public.rec_reclamos where id = b;
-  if r.area_destino <> 'produccion' or r.planta_destino <> 'adhesivos' then raise exception 'caso 8g: re-derivación inesperada: %', to_jsonb(r); end if;
-  if pg_temp.hist(b) <> 'creado:->ingresado,derivado:ingresado>derivado,derivado:derivado>derivado' then raise exception 'caso 8h: historia de re-derivación inesperada: %', pg_temp.hist(b); end if;
+  if r.area_destino <> 'produccion' or r.planta_destino <> 'adhesivos' or r.producto <> p_a or r.planta <> 'adhesivos' then raise exception 'caso 8h: re-derivación inesperada: %', to_jsonb(r); end if;
+  if pg_temp.hist(b) <> 'creado:->ingresado,derivado:ingresado>derivado,datos_actualizados:derivado>derivado,derivado:derivado>derivado' then raise exception 'caso 8i: historia de re-derivación inesperada: %', pg_temp.hist(b); end if;
 
   -- ── (9) devolver: el encargado responde "no es mío" → vuelve a ingresado y limpia el destino ──
   perform pg_temp.act(enc_m);

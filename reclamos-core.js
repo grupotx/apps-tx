@@ -96,7 +96,20 @@
     if (!x.fecha_recepcion) e.push('Indica la fecha de recepción.');
     else if (!fechaValida(x.fecha_recepcion)) e.push('La fecha de recepción no es válida.');
     else if (fechaValida(hoy) && x.fecha_recepcion > hoy) e.push('La fecha de recepción no puede ser futura.');
+    else if (fechaValida(hoy) && diasEntre(x.fecha_recepcion, hoy) > 365) e.push('La fecha de recepción tiene más de un año de antigüedad; revísala.');
     return e;
+  }
+
+  // Monto de compensación: entero en pesos, no negativo. Acepta puntos de miles ("45.000"). Devuelve { valor, error }.
+  function validarMonto(v) {
+    const s = String(v == null ? '' : v).trim();
+    if (s === '') return { valor: null, error: 'Indica el monto de la compensación (0 si no hay).' };
+    if (/^-\s*\d/.test(s)) return { valor: null, error: 'El monto no puede ser negativo.' };
+    if (/^\d+$/.test(s) || /^\d{1,3}(\.\d{3})+$/.test(s)) {
+      const n = Number(s.replace(/\./g, ''));
+      if (Number.isSafeInteger(n)) return { valor: n, error: null };
+    }
+    return { valor: null, error: 'El monto debe ser un número entero en pesos, sin decimales ni símbolos.' };
   }
 
   // ── Acciones que se muestran para un reclamo ──
@@ -123,6 +136,7 @@
 
     if (sc && ['ingresado', 'derivado', 'en_verificacion'].includes(e)) out.push('derivar');
     if (sc && area === 'calidad' && e === 'derivado') out.push('pedir_verificacion');
+    if ((sc && e !== 'cerrado' && e !== 'anulado') || (e === 'en_verificacion' && esAsesor && r.asesor_id === uid)) out.push('completar_datos');
     if (e === 'en_verificacion' && (sc || (esAsesor && r.asesor_id === uid))) out.push('reasignar_asesor');
     if (e === 'en_verificacion' && esAsesor && r.asesor_id === uid) out.push('informe');
     if (decide) out.push('decidir');
@@ -134,6 +148,22 @@
     if (sc && e !== 'cerrado' && e !== 'anulado') out.push('anular');
     if (esAdmin && (e === 'cerrado' || e === 'anulado')) out.push('reabrir');
     return out;
+  }
+
+  // ── Bandeja ──
+  // "Pendiente de mí": hay algo que depende de esta persona POR SU ROL para que el reclamo avance (derivar uno recién
+  // ingresado, informar, decidir, definir la solución, comunicar, cerrar). No cuenta lo optativo (anular, pedir visita,
+  // corregir) ni lo que espera a otros, y el administrador solo acumula pendientes si además tiene el rol.
+  const AVANCE = ['informe', 'decidir', 'definir_solucion', 'comunicar', 'cerrar'];
+  function pendienteDeMi(r, alcances, esAdmin, uid) {
+    if (!r) return false;
+    const acc = accionesPermitidas(r, alcances, false, uid);
+    return acc.some((a) => AVANCE.includes(a) || (a === 'derivar' && r.estado === 'ingresado'));
+  }
+  // "Informados": el encargado de calidad de una planta recibe copia de los reclamos de calidad de su planta (sin acciones).
+  function esInformado(r, alcances) {
+    if (!r || r.estado === 'anulado' || r.area_destino !== 'calidad' || !r.planta_destino) return false;
+    return (Array.isArray(alcances) ? alcances : []).some((a) => a.rol === 'encargado_calidad' && a.planta === r.planta_destino);
   }
 
   // ── Mensaje al cliente (decisión, razones, solución y monto) ──
@@ -177,7 +207,7 @@
     const evs = eventosDelReclamo
       .map((ev, i) => ({ ev, i, t: new Date(ev.creado_en).getTime() }))
       .filter((o) => Number.isFinite(o.t))
-      .sort((a, b) => a.t - b.t || a.i - b.i)
+      .sort((a, b) => a.t - b.t || (Number.isFinite(Number(a.ev.id)) && Number.isFinite(Number(b.ev.id)) ? Number(a.ev.id) - Number(b.ev.id) : 0) || a.i - b.i)
       .map((o) => o.ev);
     let ini = 0;
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i].tipo === 'reabierto') { ini = i; break; }
@@ -260,7 +290,7 @@
     return m;
   }
 
-  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, labelDe, plantaDeFamilia, fechaValida, fechaCL, diasEntre, diaCL, validarCrear, accionesPermitidas, clp, mensajeCliente, metricas };
+  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, labelDe, plantaDeFamilia, fechaValida, fechaCL, diasEntre, diaCL, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, metricas };
   if (typeof window !== 'undefined') g.RC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
