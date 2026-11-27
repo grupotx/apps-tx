@@ -379,9 +379,9 @@ function mostrar(){
 }
 
 /* ===================== Bandeja ===================== */
-// Texto sobre el que busca la bandeja: todos los productos (también los reclamos antiguos) y el reclamante.
+// Texto sobre el que busca la bandeja: todos los productos, por nombre y por código (también los reclamos antiguos), y el reclamante.
 function textoBusqueda(r){
-  return [r.folio, r.cliente_nombre, RC.textoProductos(r), r.producto, r.descripcion, labelMotivo(r.motivo), r.reclamante_nombre].join(' ').toLowerCase();
+  return [r.folio, r.cliente_nombre, RC.textoProductos(r), ...RC.productosDe(r).map(p => p.code), r.producto, r.descripcion, labelMotivo(r.motivo), r.reclamante_nombre].join(' ').toLowerCase();
 }
 function visibles(){
   const q = F.q.trim().toLowerCase();
@@ -545,48 +545,54 @@ async function cargarVendedores(){
 }
 // Quién reclama: Vendedor (se elige de la lista; nombre y correo de solo lectura, teléfono editable) o Cliente (tres campos libres).
 // propio: preselecciona al usuario si está en la lista. alCambiar({tipo,id,nombre,correo,telefono}).
+// Cada editor usa ids y grupo de radios propios (prefijo rc<n>-): el formulario de ingreso sigue en la página, oculto,
+// mientras se usa «Completar datos», y sus etiquetas no deben apuntar a los campos del otro.
+let nReclamante = 0;
 function montarReclamante(el, inicial, alCambiar, propio){
+  const k = 'rc' + (++nReclamante) + '-';
   const ini = inicial || {};
   const S = { tipo: ini.tipo || 'vendedor', id: ini.id || '', nombre: ini.nombre || '', correo: ini.correo || '', telefono: ini.telefono || '' };
   let lista = null, fallo = false;
   const avisar = () => alCambiar(Object.assign({}, S));
   const campos = () => {
-    const c = el.querySelector('#rc-campos');
-    const tel = `<label for="rc-tel">Teléfono <small>(opcional)</small></label><input id="rc-tel" maxlength="30" inputmode="tel" autocomplete="off" value="${esc(S.telefono)}">`;
+    const c = el.querySelector('#' + k + 'campos');
+    const tel = `<label for="${k}tel">Teléfono <small>(opcional)</small></label><input id="${k}tel" maxlength="30" inputmode="tel" autocomplete="off" value="${esc(S.telefono)}">`;
     if(S.tipo === 'vendedor'){
       if(lista === null && !fallo){ c.innerHTML = '<div class="hint">Cargando vendedores…</div>'; return; }
       if(fallo){ c.innerHTML = '<div class="hint">No se pudo cargar la lista de vendedores. Puedes ingresar los datos con «Cliente».</div>'; return; }
       const fuera = S.id && !lista.some(v => v.id === S.id);
-      c.innerHTML = `<label for="rc-vend">Vendedor</label><select id="rc-vend"><option value="">Elige el vendedor</option>${fuera ? `<option value="${esc(S.id)}" selected>${esc(S.nombre || S.correo)}</option>` : ''}${lista.map(v => `<option value="${esc(v.id)}"${v.id === S.id ? ' selected' : ''}>${esc(v.nombre)}</option>`).join('')}</select>
-        <div class="fila2"><div><label for="rc-nom">Nombre</label><input id="rc-nom" readonly tabindex="-1" maxlength="200" value="${esc(S.nombre)}"></div><div><label for="rc-cor">Correo</label><input id="rc-cor" readonly tabindex="-1" maxlength="200" value="${esc(S.correo)}"></div></div>${tel}`;
-      c.querySelector('#rc-vend').onchange = e => {
+      c.innerHTML = `<label for="${k}vend">Vendedor</label><select id="${k}vend"><option value="">Elige el vendedor</option>${fuera ? `<option value="${esc(S.id)}" selected>${esc(S.nombre || S.correo)}</option>` : ''}${lista.map(v => `<option value="${esc(v.id)}"${v.id === S.id ? ' selected' : ''}>${esc(v.nombre)}</option>`).join('')}</select>
+        <div class="fila2"><div><label for="${k}nom">Nombre</label><input id="${k}nom" readonly tabindex="-1" maxlength="200" value="${esc(S.nombre)}"></div><div><label for="${k}cor">Correo</label><input id="${k}cor" readonly tabindex="-1" maxlength="200" value="${esc(S.correo)}"></div></div>${tel}`;
+      c.querySelector('#' + k + 'vend').onchange = e => {
         const v = lista.find(x => x.id === e.target.value);
         Object.assign(S, v ? { id: v.id, nombre: v.nombre, correo: v.correo, telefono: v.telefono } : { id: '', nombre: '', correo: '', telefono: '' });
         campos(); avisar();
       };
     }else{
-      c.innerHTML = `<label for="rc-nom">Nombre de quien reclama</label><input id="rc-nom" maxlength="200" autocomplete="off" value="${esc(S.nombre)}">
-        <div class="fila2"><div><label for="rc-cor">Correo</label><input id="rc-cor" type="email" maxlength="200" autocomplete="off" value="${esc(S.correo)}"></div><div>${tel}</div></div>`;
-      c.querySelector('#rc-nom').oninput = e => { S.nombre = e.target.value; avisar(); };
-      c.querySelector('#rc-cor').oninput = e => { S.correo = e.target.value; avisar(); };
+      c.innerHTML = `<label for="${k}nom">Nombre de quien reclama</label><input id="${k}nom" maxlength="200" autocomplete="off" value="${esc(S.nombre)}">
+        <div class="fila2"><div><label for="${k}cor">Correo</label><input id="${k}cor" type="email" maxlength="200" autocomplete="off" value="${esc(S.correo)}"></div><div>${tel}</div></div>`;
+      c.querySelector('#' + k + 'nom').oninput = e => { S.nombre = e.target.value; avisar(); };
+      c.querySelector('#' + k + 'cor').oninput = e => { S.correo = e.target.value; avisar(); };
     }
-    c.querySelector('#rc-tel').oninput = e => { S.telefono = e.target.value; avisar(); };
+    c.querySelector('#' + k + 'tel').oninput = e => { S.telefono = e.target.value; avisar(); };
     c.querySelectorAll('input').forEach(i => { i.onkeydown = noEnter; });
   };
-  el.innerHTML = `<div class="radios">${RC.RECLAMANTES.map(t => `<label><input type="radio" name="rc-tipo" value="${esc(t.id)}"${S.tipo === t.id ? ' checked' : ''}> ${esc(t.label)}</label>`).join('')}</div><div id="rc-campos"></div>`;
-  el.querySelectorAll('input[name=rc-tipo]').forEach(r => { r.onchange = () => {
+  el.innerHTML = `<div class="radios">${RC.RECLAMANTES.map(t => `<label><input type="radio" name="${k}tipo" value="${esc(t.id)}"${S.tipo === t.id ? ' checked' : ''}> ${esc(t.label)}</label>`).join('')}</div><div id="${k}campos"></div>`;
+  el.querySelectorAll(`input[name="${k}tipo"]`).forEach(r => { r.onchange = () => {
     if(!r.checked || S.tipo === r.value) return;
     Object.assign(S, { tipo: r.value, id: '', nombre: '', correo: '', telefono: '' }); campos(); avisar();
   }; });
   campos();
+  // Si la lista llega cuando el editor ya no está en la página (se salió de #nuevo o se cerró el diálogo), no se toca nada.
   cargarVendedores().then(l => {
+    if(!el.isConnected) return;
     lista = l;
     if(propio && S.tipo === 'vendedor' && !S.id){
       const yo = l.find(v => v.id === me.id);
       if(yo){ Object.assign(S, { id: yo.id, nombre: yo.nombre, correo: yo.correo, telefono: yo.telefono }); avisar(); }
     }
     campos();
-  }).catch(() => { fallo = true; toast('No se pudo cargar la lista de vendedores. Puedes ingresar al reclamante como Cliente.'); campos(); });
+  }).catch(() => { if(!el.isConnected) return; fallo = true; toast('No se pudo cargar la lista de vendedores. Puedes ingresar al reclamante como Cliente.'); campos(); });
 }
 // Buscador de cliente (la base devuelve hasta 20 coincidencias por nombre, razón social o RUT).
 function montarBuscadorCliente(el, alElegir){
@@ -1159,6 +1165,7 @@ function pintarPanel(el){
           <p class="small" style="margin-top:8px">Promedio en días corridos. En un reclamo reabierto las etapas cuentan solo el último ciclo; el tiempo de respuesta total llega hasta la nueva comunicación.</p>
         </div>
         ${tabla('Por producto', m.porProducto, m.costoPorProducto, nomProd)}
+        <p class="small">El costo de un reclamo con varios productos se reparte entre ellos: sus partes suman la compensación completa, que es la que cuenta el indicador «Costo de compensaciones».</p>
         <p class="small">Los reclamos sin producto o sin planta solo entran en las vistas por área y por motivo.</p>
       </div>
     </div>`;

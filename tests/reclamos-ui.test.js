@@ -175,6 +175,116 @@ test('contactoReclamante: une solo lo que existe', () => {
   assert.equal(f({}), '');
 });
 
+// ── montarReclamante (la función real) sobre un DOM de mentira con solo lo que ella usa ──
+// querySelector('#id') solo encuentra un id escrito en el innerHTML del elemento (así se comprueba que la función busca
+// los mismos ids que escribe); querySelectorAll da los radios de un name (siempre los mismos objetos) y los inputs.
+function falso() {
+  let h = '', hijos = new Map(), listas = new Map();
+  return {
+    isConnected: true,
+    get innerHTML() { return h; },
+    set innerHTML(v) { h = String(v); hijos = new Map(); listas = new Map(); },
+    querySelector(sel) {
+      const m = /^#([\w-]+)$/.exec(sel);
+      assert.ok(m, 'selector no previsto: ' + sel);
+      if (!h.includes('id="' + m[1] + '"')) return null;
+      if (!hijos.has(sel)) hijos.set(sel, falso());
+      return hijos.get(sel);
+    },
+    querySelectorAll(sel) {
+      const n = /^input\[name="?([\w-]+)"?\]$/.exec(sel);
+      const clave = n ? 'radio:' + n[1] : sel;
+      if (!listas.has(clave)) {
+        if (n) listas.set(clave, [...h.matchAll(/<input type="radio" name="([^"]*)" value="([^"]*)"/g)].filter((x) => x[1] === n[1]).map((x) => ({ value: x[2], checked: false, onchange: null })));
+        else if (sel === 'input') listas.set(clave, [...h.matchAll(/<input/g)].map(() => ({})));
+        else assert.fail('selector no previsto: ' + sel);
+      }
+      return listas.get(clave);
+    },
+  };
+}
+const escHtml = new Function(linea('esc') + '; return esc;')();
+// Cada carga de vendedores queda pendiente hasta que la prueba la resuelve o la rechaza (cargas[i], en orden de montaje).
+function arnesReclamante() {
+  const cargas = [], toasts = [];
+  const montar = new Function('RC', 'esc', 'noEnter', 'toast', 'me', 'cargarVendedores',
+    'let nReclamante = 0;\n' + funcion('montarReclamante') + '; return montarReclamante;')(
+    RC, escHtml, () => {}, (m) => toasts.push(m), { id: 'yo' },
+    () => new Promise((resolve, reject) => cargas.push({ resolve, reject })));
+  return { montar, cargas, toasts };
+}
+const tick = () => new Promise((r) => setImmediate(r));
+const camposDe = (el) => el.querySelector('#' + /<div id="([^"]+)"><\/div>$/.exec(el.innerHTML)[1]);
+
+test('montarReclamante: la lista de vendedores que llega cuando el editor ya salió de la página no cambia el reclamante ni avisa', async () => {
+  const { montar, cargas, toasts } = arnesReclamante();
+  const yo = { id: 'yo', nombre: 'Yo Mismo', correo: 'yo@tx.cl', telefono: '+56 9 1234 5678' };
+  // Ingreso: al llegar la lista se preselecciona al usuario. Si la persona salió de #nuevo y volvió, renderNuevo ya creó
+  // otro editor y este quedó fuera de la página: no debe escribir NEW.reclamante (que ahora es el del formulario nuevo).
+  const viejo = falso(), cambiosViejo = [];
+  montar(viejo, null, (x) => cambiosViejo.push(x), true);
+  viejo.isConnected = false;
+  cargas[0].resolve([yo]);
+  await tick();
+  assert.deepEqual(cambiosViejo, [], 'el editor viejo no avisa cambios');
+  assert.match(camposDe(viejo).innerHTML, /Cargando vendedores/, 'ni se vuelve a pintar');
+  // Si la carga falla con el editor ya fuera de la página (diálogo cerrado), no hay aviso.
+  const cerrado = falso();
+  montar(cerrado, null, () => {});
+  cerrado.isConnected = false;
+  cargas[1].reject(new Error('sin red'));
+  await tick();
+  assert.deepEqual(toasts, [], 'sin aviso de un editor que ya no está');
+  // Control: con el editor en la página sí preselecciona al usuario y sí avisa del fallo.
+  const vivo = falso(), cambiosVivo = [];
+  montar(vivo, null, (x) => cambiosVivo.push(x), true);
+  cargas[2].resolve([yo]);
+  await tick();
+  assert.deepEqual(cambiosVivo, [{ tipo: 'vendedor', id: 'yo', nombre: 'Yo Mismo', correo: 'yo@tx.cl', telefono: '+56 9 1234 5678' }]);
+  assert.match(camposDe(vivo).innerHTML, /<select/);
+  const abierto = falso();
+  montar(abierto, null, () => {});
+  cargas[3].reject(new Error('sin red'));
+  await tick();
+  assert.equal(toasts.length, 1);
+  assert.match(camposDe(abierto).innerHTML, /No se pudo cargar la lista de vendedores/);
+});
+
+test('montarReclamante: cada editor tiene sus propios ids, etiquetas y grupo de radios (el ingreso oculto no choca con «Completar datos»)', async () => {
+  const { montar, cargas } = arnesReclamante();
+  const vera = { id: 'v1', nombre: 'Vera Vend', correo: 'vera@tx.cl', telefono: '' };
+  const ingreso = falso(), dialogo = falso(), cambios = [];
+  montar(ingreso, null, () => {}, true);
+  montar(dialogo, null, (x) => cambios.push(x));
+  cargas.forEach((c) => c.resolve([vera]));
+  await tick();
+  const ids = (el) => [...(el.innerHTML + camposDe(el).innerHTML).matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  const fors = (el) => [...camposDe(el).innerHTML.matchAll(/ for="([^"]+)"/g)].map((m) => m[1]);
+  const grupo = (el) => [...new Set([...el.innerHTML.matchAll(/type="radio" name="([^"]+)"/g)].map((m) => m[1]))];
+  const etiquetasPropias = (el) => {
+    assert.ok(fors(el).length >= 3, 'nombre, correo y teléfono llevan etiqueta');
+    for (const f of fors(el)) assert.ok(ids(el).includes(f), 'la etiqueta ' + f + ' apunta a un campo del mismo editor');
+  };
+  for (const el of [ingreso, dialogo]) { etiquetasPropias(el); assert.equal(grupo(el).length, 1, 'un solo grupo de radios'); }
+  assert.deepEqual(ids(ingreso).filter((i) => ids(dialogo).includes(i)), [], 'sin ids repetidos entre editores');
+  assert.notEqual(grupo(ingreso)[0], grupo(dialogo)[0], 'cada editor con su propio grupo de radios');
+
+  // El editor funciona igual que antes: elegir vendedor, pasar a Cliente y escribir.
+  const c = () => camposDe(dialogo);
+  c().querySelector('#' + / id="([^"]+)"/.exec(c().innerHTML.match(/<select[^>]*>/)[0])[1]).onchange({ target: { value: 'v1' } });
+  assert.deepEqual(cambios.at(-1), { tipo: 'vendedor', id: 'v1', nombre: 'Vera Vend', correo: 'vera@tx.cl', telefono: '' });
+  assert.match(c().innerHTML, /readonly[^>]*value="Vera Vend"/);
+  const radio = dialogo.querySelectorAll('input[name="' + grupo(dialogo)[0] + '"]').find((r) => r.value === 'cliente');
+  radio.checked = true; radio.onchange();
+  assert.deepEqual(cambios.at(-1), { tipo: 'cliente', id: '', nombre: '', correo: '', telefono: '' });
+  assert.match(c().innerHTML, /Nombre de quien reclama/);
+  etiquetasPropias(dialogo);
+  const idNombre = /<label for="([^"]+)">Nombre de quien reclama<\/label>/.exec(c().innerHTML)[1];
+  c().querySelector('#' + idNombre).oninput({ target: { value: 'Luis' } });
+  assert.equal(cambios.at(-1).nombre, 'Luis');
+  assert.match(html, /^let nReclamante = 0;/m, 'el contador de editores está declarado en la página');
+});
+
 // ── Bandeja, panel y CSV: funciones puras extraídas y ejecutadas ──
 const nuevoR = { id: 'n', folio: 'R-2', cliente_nombre: 'Cli Dos', motivo: 'calidad', estado: 'comunicado', fecha_recepcion: '2026-11-01', comunicado_en: '2026-11-05T15:00:00Z', compensacion: 1001, area_destino: 'planta', planta_destino: 'osorno', planta: null, producto: 'P1', producto_nombre: 'Alfa',
   productos: [{ code: 'P1', nombre: 'Alfa', planta: 'osorno' }, { code: 'P2', nombre: 'Beta', planta: 'osorno' }],
@@ -182,9 +292,13 @@ const nuevoR = { id: 'n', folio: 'R-2', cliente_nombre: 'Cli Dos', motivo: 'cali
 const viejoR = { id: 'v', folio: 'R-1', cliente_nombre: 'Cli Uno', motivo: 'otro', estado: 'ingresado', fecha_recepcion: '2026-10-01', producto: 'P3', producto_nombre: 'Gamma', planta: 'osorno', productos: null, reclamante_tipo: null };
 const sinProd = { id: 's', folio: 'R-3', motivo: 'otro', estado: 'ingresado', fecha_recepcion: '2026-10-02' };
 
-test('textoBusqueda: incluye todos los productos y el reclamante, y no falla con reclamos antiguos', () => {
+test('textoBusqueda: incluye todos los productos (nombres y códigos) y el reclamante, y no falla con reclamos antiguos', () => {
   const f = new Function('RC', 'labelMotivo', funcion('textoBusqueda') + '; return textoBusqueda;')(RC, id => id || '');
   assert.match(f(nuevoR), /beta/, 'el segundo producto se busca');
+  assert.ok(f(nuevoR).includes('p2'), 'el código del segundo producto se busca');
+  const tres = Object.assign({}, nuevoR, { productos: [...nuevoR.productos, { code: 'ZX-300', nombre: 'Delta', planta: 'osorno' }] });
+  assert.ok(f(tres).includes('zx-300') && f(tres).includes('delta'), 'el código y el nombre de cualquier posición se buscan');
+  assert.ok(f(tres).includes('p1') && f(tres).includes('alfa'), 'el primero se sigue buscando');
   assert.match(f(nuevoR), /hyperlink/, 'el nombre del reclamante se busca');
   assert.match(f(viejoR), /gamma/, 'reclamo antiguo: producto de las columnas antiguas');
   assert.equal(typeof f(sinProd), 'string');
@@ -214,6 +328,17 @@ test('pintarPanel resuelve nombres con productosPanel (no con producto_nombre)',
   const c = cuerpo('pintarPanel');
   assert.match(c, /productosPanel\(RECS\)/);
   assert.doesNotMatch(c, /r\.producto_nombre/);
+});
+
+test('bajo «Por producto» el panel explica que el costo de un reclamo con varios productos se reparte entre ellos', () => {
+  const lineas = cuerpo('pintarPanel').split(/\r?\n/);
+  const i = lineas.findIndex((l) => l.includes("tabla('Por producto'"));
+  assert.ok(i >= 0, 'falta la tabla Por producto');
+  const nota = lineas[i + 1];
+  assert.match(nota, /^\s*<p class="small">[^<]*<\/p>\s*$/, 'una línea de nota justo debajo de la tabla');
+  assert.match(nota, /varios productos/);
+  assert.match(nota, /se reparte entre ellos/);
+  assert.match(nota, /«Costo de compensaciones»/);
 });
 
 test('la tarjeta de la bandeja muestra el resumen de productos', () => {
