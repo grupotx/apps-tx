@@ -114,8 +114,8 @@ begin
   -- (8) RLS habilitada en todas las tablas rec_*
   select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind = 'r' and c.relname in
-      ('rec_usuarios','rec_alcances','rec_motivos','rec_reclamos','rec_eventos','rec_adjuntos','rec_folios');
-  if v_n <> 7 then raise exception 'caso 8a: se esperaban 7 tablas rec_*, hay %', v_n; end if;
+      ('rec_usuarios','rec_alcances','rec_motivos','rec_reclamos','rec_eventos','rec_adjuntos','rec_folios','rec_accesos_log');
+  if v_n <> 8 then raise exception 'caso 8a: se esperaban 8 tablas rec_*, hay %', v_n; end if;
   select count(*) into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'rec\_%' and not c.relrowsecurity;
   if v_n <> 0 then raise exception 'caso 8b: % tablas rec_* sin RLS habilitada', v_n; end if;
