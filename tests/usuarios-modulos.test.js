@@ -62,7 +62,7 @@ test('usuarios.html: MODS trae los 8 módulos rep_* con su nombre, sin rol y agr
 
 test('usuarios.html: los módulos de antes no cambian ni quedan en el grupo Reportes TX', () => {
   const previos = leerMODS().filter(m => !m.k.startsWith('rep_'));
-  assert.deepEqual(previos.map(m => m.k), ['silos', 'crm', 'ent', 'tur', 'rt', 'cp', 'mtto']);
+  assert.deepEqual(previos.map(m => m.k), ['silos', 'crm', 'ent', 'tur', 'rt', 'rec', 'cp', 'mtto']);
   for (const m of previos) assert.equal(m.grupo, undefined, `${m.k} no debe tener grupo`);
 });
 
