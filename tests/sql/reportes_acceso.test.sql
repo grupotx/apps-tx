@@ -11,15 +11,15 @@
 -- segura porque el "raise exception 'OK_ROLLBACK'" del final aborta el bloque y lo deshace todo: NUNCA
 -- quitar esa línea ni agregar nada después de ella (sin ella los cambios quedarían guardados).
 -- MANTENIMIENTO: si se agrega un módulo a admin_usuarios, hay que actualizar el caso 7c (hoy exige
--- exactamente 15 claves en "modulos": las 7 de antes + las 8 rep_*), las listas claves_old / claves_rep y
--- la comparación del caso 7h con la fórmula original de las 7 claves anteriores; si no, la prueba falla.
+-- exactamente 16 claves en "modulos": las 8 de antes, con rec, + las 8 rep_*), las listas claves_old / claves_rep y
+-- la comparación del caso 7h con la fórmula original de las 8 claves anteriores; si no, la prueba falla.
 do $$
 declare
   adm uuid; usr uuid; nad uuid; vis uuid;
   fantasma uuid := gen_random_uuid();
   claves_rep text[] := array['rep_resumen','rep_comercial','rep_logistica','rep_produccion',
                              'rep_estado_planta','rep_rrhh','rep_finanzas','rep_costos'];
-  claves_old text[] := array['silos','crm','ent','tur','rt','cp','mtto'];
+  claves_old text[] := array['silos','crm','ent','tur','rt','rec','cp','mtto'];
   k text; mods text[]; ok boolean; n int; n0 int; antes jsonb; despues jsonb; fila jsonb; t timestamptz;
 begin
   select id into adm from public.profiles where email = 'zz.prueba.crm@grupotx.cl';
@@ -210,7 +210,7 @@ begin
   assert ok, 'caso 6c: anon no debe ejecutar rep_mis_modulos';
   reset role;
 
-  -- ===== 7) admin_usuarios(): 8 claves rep_* nuevas y las 7 de antes sin cambios =====
+  -- ===== 7) admin_usuarios(): 8 claves rep_* nuevas y las 8 de antes sin cambios =====
   perform set_config('request.jwt.claims', json_build_object('sub', vis, 'role', 'authenticated')::text, true);
   set local role authenticated;
   antes := (select jsonb_agg(to_jsonb(u)) from public.admin_usuarios() u);
@@ -235,11 +235,11 @@ begin
   select e into fila from jsonb_array_elements(despues) e where (e->>'id')::uuid = vis;
   assert (fila->'modulos'->'rep_finanzas'->>'activo')::boolean and (fila->'modulos'->'rep_costos'->>'activo')::boolean
      and not (fila->'modulos'->'rep_resumen'->>'activo')::boolean, 'caso 7f: rep_finanzas y rep_costos activos, rep_resumen no';
-  -- las 7 claves de antes: iguales antes/después del cambio de rep_* ...
+  -- las 8 claves de antes: iguales antes/después del cambio de rep_* ...
   assert (select jsonb_agg((e->'modulos') - claves_rep order by o) from jsonb_array_elements(antes) with ordinality t(e, o))
        = (select jsonb_agg((e->'modulos') - claves_rep order by o) from jsonb_array_elements(despues) with ordinality t(e, o)),
-    'caso 7g: las 7 claves de antes no deben cambiar (ni su orden de filas)';
-  -- ... e iguales a lo que da la fórmula original (silos, crm, ent, tur, rt, cp, mtto) desde las tablas base
+    'caso 7g: las 8 claves de antes no deben cambiar (ni su orden de filas)';
+  -- ... e iguales a lo que da la fórmula original (silos, crm, ent, tur, rt, rec, cp, mtto) desde las tablas base
   select count(*) into n
   from jsonb_array_elements(despues) e
   join public.profiles p on p.id = (e->>'id')::uuid
@@ -247,6 +247,7 @@ begin
   left join public.ent_usuarios en on en.id = p.id
   left join public.tur_usuarios tu on tu.id = p.id
   left join public.rt_usuarios r on r.id = p.id
+  left join public.rec_usuarios rc on rc.id = p.id
   left join public.cp_usuarios q on q.id = p.id
   left join public.mtto_usuarios m on m.id = p.id
   where (e->'modulos') - claves_rep is distinct from jsonb_build_object(
@@ -255,9 +256,10 @@ begin
       'ent',   jsonb_build_object('activo', coalesce(en.activo,false) and coalesce(en.rol,'pendiente') <> 'pendiente', 'rol', en.rol),
       'tur',   jsonb_build_object('activo', coalesce(tu.activo,false), 'rol', tu.rol),
       'rt',    jsonb_build_object('activo', coalesce(r.activo,false), 'rol', null),
+      'rec',   jsonb_build_object('activo', coalesce(rc.activo,false), 'rol', null),
       'cp',    jsonb_build_object('activo', coalesce(q.activo,false), 'rol', q.rol),
       'mtto',  jsonb_build_object('activo', coalesce(m.activo,false), 'rol', m.rol));
-  assert n = 0, 'caso 7h: ' || n || ' usuarios con las 7 claves de antes distintas de la fórmula original';
+  assert n = 0, 'caso 7h: ' || n || ' usuarios con las 8 claves de antes distintas de la fórmula original';
 
   -- ===== 8) Las ramas existentes de admin_set_modulo siguen igual (rt, mtto, cp y su validación de rol) =====
   select count(*) into n0 from public.cp_usuarios where id = usr and activo;
