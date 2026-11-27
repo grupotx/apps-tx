@@ -20,6 +20,18 @@ create or replace function pg_temp.hist(p_id uuid) returns text language sql as 
     from public.rec_eventos where reclamo_id = p_id
 $$;
 
+-- Envoltorios con la firma anterior (un producto): rec_crear exige la lista de productos y el reclamante.
+create or replace function pg_temp.crear(p_cli uuid, p_prod text, p_motivo text, p_desc text, p_fecha date, p_datos jsonb default '{}')
+returns uuid language sql as $$
+  select public.rec_crear(p_cli, case when p_prod is null then null else array[p_prod] end, p_motivo, p_desc, p_fecha, p_datos,
+    '{"tipo":"cliente","nombre":"Persona de prueba","telefono":"+56 9 1234 5678"}'::jsonb)
+$$;
+
+create or replace function pg_temp.actualizar(p_id uuid, p_producto text default null, p_datos jsonb default null, p_version timestamptz default null)
+returns void language sql as $$
+  select public.rec_actualizar(p_id, case when p_producto is null then null else array[p_producto] end, p_datos, p_version, null)
+$$;
+
 do $$
 declare
   uids uuid[];
@@ -28,6 +40,7 @@ declare
   hoy date := (now() at time zone 'America/Santiago')::date;
   a uuid; b uuid; c uuid; d uuid;
   v_msg text; v_n int; v_n2 int; r public.rec_reclamos; ev public.rec_eventos; v_ok boolean;
+  v_log0 int := (select count(*) from public.rec_accesos_log);   -- registros reales previos de la bitácora
 begin
   -- ── actores ──
   select array_agg(id order by id) into uids from (select id from public.profiles where activo and rol::text <> 'admin' order by id limit 6) t;
@@ -42,7 +55,7 @@ begin
 
   -- reclamo "a": ingresado → derivado → aprobado, listo para la solución
   perform pg_temp.act(v1);
-  a := public.rec_crear(cli, null, 'atraso_despacho', 'El camión llegó dos días tarde', hoy);
+  a := pg_temp.crear(cli, null, 'atraso_despacho', 'El camión llegó dos días tarde', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(a, 'logistica');
   perform pg_temp.act(enc_l);
@@ -93,7 +106,7 @@ begin
 
   -- ── (3) corregir compensación: servicio al cliente hasta antes de cerrar, después solo admin ──
   perform pg_temp.act(v1);
-  b := public.rec_crear(cli, null, 'facturacion_cobro', 'Cobro duplicado en la factura', hoy);
+  b := pg_temp.crear(cli, null, 'facturacion_cobro', 'Cobro duplicado en la factura', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(b, 'logistica');
   perform pg_temp.act(enc_l);
@@ -113,7 +126,7 @@ begin
   if v_msg is null then raise exception 'caso 3f: una explicación sin compensación no admite monto'; end if;
   -- reclamo "c" con compensación corregible
   perform pg_temp.act(v1);
-  c := public.rec_crear(cli, null, 'atraso_despacho', 'Despacho incompleto', hoy);
+  c := pg_temp.crear(cli, null, 'atraso_despacho', 'Despacho incompleto', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(c, 'logistica');
   perform pg_temp.act(enc_l);
@@ -138,7 +151,7 @@ begin
 
   -- ── (4) anular: motivo obligatorio, un cerrado no se anula, el vendedor no anula ──
   perform pg_temp.act(v1);
-  d := public.rec_crear(cli, null, 'otro', 'Reclamo duplicado', hoy);
+  d := pg_temp.crear(cli, null, 'otro', 'Reclamo duplicado', hoy);
   v_msg := pg_temp.falla(format('select public.rec_anular(%L, %L)', d, 'duplicado'));
   if v_msg is null or v_msg !~* 'servicio al cliente' then raise exception 'caso 4a: el vendedor no anula, dio %', v_msg; end if;
   perform pg_temp.act(sc);
@@ -157,7 +170,7 @@ begin
   if v_msg is null then raise exception 'caso 4h: un anulado no se deriva'; end if;
   -- anular en un estado intermedio (derivado) también vale
   perform pg_temp.act(v1);
-  d := public.rec_crear(cli, null, 'otro', 'Se equivocó de cliente', hoy);
+  d := pg_temp.crear(cli, null, 'otro', 'Se equivocó de cliente', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(d, 'comercial');
   perform public.rec_anular(d, 'Ingresado al cliente equivocado');
@@ -250,11 +263,11 @@ begin
   perform public.rec_set_motivo('motivo_prueba', 'Motivo renombrado', false, 3, true);
   if not exists (select 1 from public.rec_motivos where id = 'motivo_prueba' and nombre = 'Motivo renombrado' and not requiere_producto and orden = 3) then raise exception 'caso 7e: el motivo debía actualizarse'; end if;
   perform pg_temp.act(v1);
-  c := public.rec_crear(cli, null, 'motivo_prueba', 'Con el motivo nuevo', hoy);   -- un motivo nuevo ya sirve en el ingreso
+  c := pg_temp.crear(cli, null, 'motivo_prueba', 'Con el motivo nuevo', hoy);   -- un motivo nuevo ya sirve en el ingreso
   perform pg_temp.act(adm);
   perform public.rec_set_motivo('motivo_prueba', 'Motivo renombrado', false, 3, false);
   perform pg_temp.act(v1);
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'motivo_prueba', 'Con el motivo desactivado', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'motivo_prueba', 'Con el motivo desactivado', hoy));
   if v_msg is null or v_msg !~* 'motivo' then raise exception 'caso 7f: un motivo desactivado no sirve para ingresar, dio %', v_msg; end if;
   if (select count(*) from public.rec_motivos) <> 8 then raise exception 'caso 7g: debía haber 8 motivos (7 + el de prueba)'; end if;
   select count(*) into v_n from public.rec_accesos_log where tipo = 'motivo' and usuario = adm;
@@ -273,7 +286,7 @@ begin
   set local role authenticated;
   select count(*) into v_n from public.rec_accesos_log;
   reset role;
-  if v_n <> 7 then raise exception 'caso 8c: el admin debía leer los 7 registros de la bitácora (4 de alcance y 3 de motivo), ve %', v_n; end if;
+  if v_n <> v_log0 + 7 then raise exception 'caso 8c: el admin debía leer los % registros previos más los 7 de la prueba (4 de alcance y 3 de motivo), ve %', v_log0, v_n; end if;
   perform pg_temp.act(sc);
   set local role authenticated;
   select count(*) into v_n from public.rec_accesos_log;

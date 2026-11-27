@@ -22,6 +22,18 @@ create or replace function pg_temp.hist(p_id uuid) returns text language sql as 
     from public.rec_eventos where reclamo_id = p_id
 $$;
 
+-- Envoltorios con la firma anterior (un producto): rec_crear exige la lista de productos y el reclamante.
+create or replace function pg_temp.crear(p_cli uuid, p_prod text, p_motivo text, p_desc text, p_fecha date, p_datos jsonb default '{}')
+returns uuid language sql as $$
+  select public.rec_crear(p_cli, case when p_prod is null then null else array[p_prod] end, p_motivo, p_desc, p_fecha, p_datos,
+    '{"tipo":"cliente","nombre":"Persona de prueba","telefono":"+56 9 1234 5678"}'::jsonb)
+$$;
+
+create or replace function pg_temp.actualizar(p_id uuid, p_producto text default null, p_datos jsonb default null, p_version timestamptz default null)
+returns void language sql as $$
+  select public.rec_actualizar(p_id, case when p_producto is null then null else array[p_producto] end, p_datos, p_version, null)
+$$;
+
 do $$
 declare
   uids uuid[];
@@ -50,32 +62,32 @@ begin
 
   -- ── (1) rec_crear: validaciones ──
   perform pg_temp.act(v1);
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'calidad_producto', 'sin producto', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'calidad_producto', 'sin producto', hoy));
   if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 1a: calidad_producto sin producto debía fallar con mensaje de producto, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'mañana', hoy + 1));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'mañana', hoy + 1));
   if v_msg is null or v_msg !~* 'futura' then raise exception 'caso 1b: fecha de mañana debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', '   ', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', '   ', hoy));
   if v_msg is null or v_msg !~* 'descripci' then raise exception 'caso 1c: descripción en blanco debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'no_existe', 'x', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'no_existe', 'x', hoy));
   if v_msg is null or v_msg !~* 'motivo' then raise exception 'caso 1d: motivo inexistente debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', gen_random_uuid(), 'atraso_despacho', 'x', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', gen_random_uuid(), 'atraso_despacho', 'x', hoy));
   if v_msg is null or v_msg !~* 'cliente' then raise exception 'caso 1e: cliente inexistente debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, %L, %L, %L, %L)', cli, 'NO-EXISTE-XYZ', 'calidad_producto', 'x', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, %L, %L, %L, %L)', cli, 'NO-EXISTE-XYZ', 'calidad_producto', 'x', hoy));
   if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 1h: producto inexistente debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, %L, %L, %L, %L, %L)', cli, p_m, 'calidad_producto', 'x', hoy, '[1,2]'));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, %L, %L, %L, %L, %L)', cli, p_m, 'calidad_producto', 'x', hoy, '[1,2]'));
   if v_msg is null or v_msg !~* 'datos' then raise exception 'caso 1f: datos que no son un objeto debían fallar, dio %', v_msg; end if;
   perform pg_temp.act(sin_acceso);
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'x', hoy));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'x', hoy));
   if v_msg is null or v_msg !~* 'acceso' then raise exception 'caso 1g: sin acceso al módulo no ingresa, dio %', v_msg; end if;
 
   -- ── (2) rec_crear: camino válido (con producto → planta; sin producto → planta nula) ──
   perform pg_temp.act(v1);
-  a := public.rec_crear(cli, p_m, 'calidad_producto', 'El producto llegó con grumos', hoy, '{"obra":"Edificio Centro"}'::jsonb);
+  a := pg_temp.crear(cli, p_m, 'calidad_producto', 'El producto llegó con grumos', hoy, '{"obra":"Edificio Centro"}'::jsonb);
   select * into r from public.rec_reclamos where id = a;
   if r.estado <> 'ingresado' or r.planta <> 'morteros' or r.creado_por <> v1 or r.folio !~ '^REC-[0-9]{4}-[0-9]{4}$' or r.datos->>'obra' <> 'Edificio Centro'
      then raise exception 'caso 2a: reclamo creado con datos inesperados: %', to_jsonb(r); end if;
   if pg_temp.hist(a) <> 'creado:->ingresado' then raise exception 'caso 2b: historia inicial inesperada: %', pg_temp.hist(a); end if;
-  b := public.rec_crear(cli, null, 'atraso_despacho', 'El camión llegó tarde', hoy);
+  b := pg_temp.crear(cli, null, 'atraso_despacho', 'El camión llegó tarde', hoy);
   select * into r from public.rec_reclamos where id = b;
   if r.planta is not null or r.producto is not null then raise exception 'caso 2c: sin producto la planta debía quedar nula'; end if;
   if (select folio from public.rec_reclamos where id = a) = (select folio from public.rec_reclamos where id = b) then raise exception 'caso 2d: folio repetido'; end if;
@@ -127,7 +139,7 @@ begin
 
   -- ── (6) calidad sin visita: la decide el asesor (cualquiera si no hay asesor asignado) ──
   perform pg_temp.act(v1);
-  c := public.rec_crear(cli, p_m, 'calidad_producto', 'Color distinto al muestrario', hoy);
+  c := pg_temp.crear(cli, p_m, 'calidad_producto', 'Color distinto al muestrario', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(c, 'calidad', null, 'Revisar con el lote');
   perform pg_temp.act(sc);
@@ -143,7 +155,7 @@ begin
 
   -- ── (7) producción: decide el encargado de la planta del reclamo, no el de otra planta ──
   perform pg_temp.act(v1);
-  d := public.rec_crear(cli, p_m, 'calidad_producto', 'Falla de envasado', hoy);
+  d := pg_temp.crear(cli, p_m, 'calidad_producto', 'Falla de envasado', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(d, 'produccion');   -- planta del reclamo: morteros
   if (select planta_destino from public.rec_reclamos where id = d) <> 'morteros' then raise exception 'caso 7a: planta destino debía ser morteros'; end if;
@@ -171,7 +183,7 @@ begin
   -- Producción exige producto (de él sale la planta): se completa y recién entonces se puede derivar
   v_msg := pg_temp.falla(format('select public.rec_derivar(%L, %L, %L)', b, 'produccion', 'adhesivos'));
   if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 8g: producción sin producto debía fallar con mensaje de producto, dio %', v_msg; end if;
-  perform public.rec_actualizar(b, p_a);
+  perform pg_temp.actualizar(b, p_a);
   perform public.rec_derivar(b, 'produccion', 'adhesivos');   -- re-derivar con planta explícita (la del producto o una corregida a mano)
   select * into r from public.rec_reclamos where id = b;
   if r.area_destino <> 'produccion' or r.planta_destino <> 'adhesivos' or r.producto <> p_a or r.planta <> 'adhesivos' then raise exception 'caso 8h: re-derivación inesperada: %', to_jsonb(r); end if;
@@ -193,13 +205,13 @@ begin
 
   -- ── (10) verificación: solo calidad y solo desde derivado; reasignar asesor ──
   perform pg_temp.act(v1);
-  e := public.rec_crear(cli, p_a, 'dano_transporte', 'Pallet golpeado', hoy);
+  e := pg_temp.crear(cli, p_a, 'dano_transporte', 'Pallet golpeado', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(e, 'logistica');
   v_msg := pg_temp.falla(format('select public.rec_pedir_verificacion(%L, %L)', e, as1));
   if v_msg is null or v_msg !~* 'calidad' then raise exception 'caso 10a: pedir visita fuera de calidad debía fallar, dio %', v_msg; end if;
   perform pg_temp.act(v1);
-  f := public.rec_crear(cli, p_a, 'calidad_producto', 'Adhesivo no pega', hoy);
+  f := pg_temp.crear(cli, p_a, 'calidad_producto', 'Adhesivo no pega', hoy);
   perform pg_temp.act(v1);
   v_msg := pg_temp.falla(format('select public.rec_pedir_verificacion(%L, %L)', f, as1));
   if v_msg is null then raise exception 'caso 10b: el vendedor no puede pedir visita'; end if;
@@ -238,7 +250,7 @@ begin
   v_msg := pg_temp.falla(format('select public.rec_adjuntar(%L, %L, %L)', a, 'video', v_ruta));
   if v_msg is null then raise exception 'caso 11e: tipo inválido debía fallar'; end if;
   perform pg_temp.act(sc);
-  h := public.rec_crear(cli, null, 'atraso_despacho', 'Reclamo ingresado por servicio al cliente', hoy);   -- v1 no lo ve
+  h := pg_temp.crear(cli, null, 'atraso_despacho', 'Reclamo ingresado por servicio al cliente', hoy);   -- v1 no lo ve
   insert into storage.objects (bucket_id, name) values ('reclamos', h::text || '/x.jpg');
   perform pg_temp.act(v1);
   v_msg := pg_temp.falla(format('select public.rec_adjuntar(%L, %L, %L)', h, 'foto', h::text || '/x.jpg'));
@@ -258,7 +270,7 @@ begin
   -- humo con el rol real: un usuario autenticado ingresa un reclamo
   perform pg_temp.act(v1);
   set local role authenticated;
-  perform public.rec_crear(cli, null, 'atraso_despacho', 'Prueba con rol authenticated', hoy);
+  perform pg_temp.crear(cli, null, 'atraso_despacho', 'Prueba con rol authenticated', hoy);
   reset role;
 
   -- ── (13) lista de asesores para elegir (solo servicio al cliente / admin) ──
@@ -278,7 +290,7 @@ begin
 
   -- ── (14) el administrador hace lo de servicio al cliente pero no decide sin alcance ──
   perform pg_temp.act(v1);
-  g := public.rec_crear(cli, p_m, 'calidad_producto', 'Reclamo para admin', hoy);
+  g := pg_temp.crear(cli, p_m, 'calidad_producto', 'Reclamo para admin', hoy);
   perform pg_temp.act(adm);
   perform public.rec_derivar(g, 'calidad');
   v_msg := pg_temp.falla(format('select public.rec_decidir(%L, %L, %L)', g, 'aprobado', 'x'));

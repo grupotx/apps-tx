@@ -23,6 +23,18 @@ create or replace function pg_temp.hist(p_id uuid) returns text language sql as 
     from public.rec_eventos where reclamo_id = p_id
 $$;
 
+-- Envoltorios con la firma anterior (un producto): rec_crear exige la lista de productos y el reclamante.
+create or replace function pg_temp.crear(p_cli uuid, p_prod text, p_motivo text, p_desc text, p_fecha date, p_datos jsonb default '{}')
+returns uuid language sql as $$
+  select public.rec_crear(p_cli, case when p_prod is null then null else array[p_prod] end, p_motivo, p_desc, p_fecha, p_datos,
+    '{"tipo":"cliente","nombre":"Persona de prueba","telefono":"+56 9 1234 5678"}'::jsonb)
+$$;
+
+create or replace function pg_temp.actualizar(p_id uuid, p_producto text default null, p_datos jsonb default null, p_version timestamptz default null)
+returns void language sql as $$
+  select public.rec_actualizar(p_id, case when p_producto is null then null else array[p_producto] end, p_datos, p_version, null)
+$$;
+
 do $$
 declare
   uids uuid[];
@@ -46,7 +58,7 @@ begin
 
   -- ── (1) token de versión: quien actúa con la pantalla vieja falla, aunque el estado no cambie ──
   perform pg_temp.act(v1);
-  a := public.rec_crear(cli, null, 'atraso_despacho', 'El camión llegó tarde', hoy);
+  a := pg_temp.crear(cli, null, 'atraso_despacho', 'El camión llegó tarde', hoy);
   select actualizado_en into tok from public.rec_reclamos where id = a;
   perform pg_temp.act(sc);
   perform public.rec_derivar(a, 'logistica', null, null, tok);
@@ -63,14 +75,14 @@ begin
   if (select area_destino from public.rec_reclamos where id = a) <> 'finanzas' then raise exception 'caso 1d: sin token debía seguir funcionando'; end if;
   select actualizado_en into tok from public.rec_reclamos where id = a;
   perform pg_temp.act(v1);
-  d := public.rec_crear(cli, null, 'otro', 'Reclamo para anular', hoy);
+  d := pg_temp.crear(cli, null, 'otro', 'Reclamo para anular', hoy);
   perform pg_temp.act(sc);
   perform public.rec_anular(d, 'duplicado');
   v_msg := pg_temp.falla(format('select public.rec_derivar(%L, %L, null, null, %L)', d, 'comercial', tok));
   if v_msg is null or v_msg !~* 'ya cambió de estado' then raise exception 'caso 1e: un reclamo que cambió de estado falla con el estado real, dio %', v_msg; end if;
 
   perform pg_temp.act(v1);
-  b := public.rec_crear(cli, p_m, 'calidad_producto', 'Falla de producto', hoy);
+  b := pg_temp.crear(cli, p_m, 'calidad_producto', 'Falla de producto', hoy);
   perform pg_temp.act(sc);
   perform public.rec_derivar(b, 'calidad');
   select actualizado_en into tok from public.rec_reclamos where id = b;
@@ -107,7 +119,7 @@ begin
 
   -- ── (2) Calidad/Producción exigen producto ──
   perform pg_temp.act(v1);
-  c := public.rec_crear(cli, null, 'otro', 'Sin producto', hoy);
+  c := pg_temp.crear(cli, null, 'otro', 'Sin producto', hoy);
   perform pg_temp.act(sc);
   v_msg := pg_temp.falla(format('select public.rec_derivar(%L, %L)', c, 'calidad'));
   if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 2a: derivar a calidad sin producto debía fallar con mensaje de producto, dio %', v_msg; end if;
@@ -117,41 +129,41 @@ begin
 
   -- ── (3) rec_actualizar: producto y datos adicionales después del ingreso ──
   perform pg_temp.act(v1);
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, %L)', c, p_m));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, %L)', c, p_m));
   if v_msg is null or v_msg !~* 'servicio al cliente' then raise exception 'caso 3a: el vendedor no completa datos, dio %', v_msg; end if;
   perform pg_temp.act(sc);
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L)', c));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L)', c));
   if v_msg is null or v_msg !~* 'nada' then raise exception 'caso 3b: sin cambios debía fallar, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, %L)', c, 'NO-EXISTE-XYZ'));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, %L)', c, 'NO-EXISTE-XYZ'));
   if v_msg is null or v_msg !~* 'producto' then raise exception 'caso 3c: producto inexistente debía fallar, dio %', v_msg; end if;
   select actualizado_en into tok from public.rec_reclamos where id = c;
-  perform public.rec_actualizar(c, p_m, '{"obra":"Torre A","lote":"L-12"}'::jsonb, tok);
+  perform pg_temp.actualizar(c, p_m, '{"obra":"Torre A","lote":"L-12"}'::jsonb, tok);
   select * into r from public.rec_reclamos where id = c;
   if r.producto <> p_m or r.planta <> 'morteros' or r.producto_nombre is null or r.datos->>'obra' <> 'Torre A' or r.datos->>'lote' <> 'L-12' then raise exception 'caso 3d: producto/datos inesperados: %', to_jsonb(r); end if;
   if pg_temp.hist(c) not like '%,datos_actualizados:derivado>derivado' then raise exception 'caso 3e: historia inesperada: %', pg_temp.hist(c); end if;
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, null, %L, %L)', c, '{"x":"1"}', tok));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, null, %L, %L)', c, '{"x":"1"}', tok));
   if v_msg is null or v_msg !~* 'modificado' then raise exception 'caso 3f: token viejo debía fallar, dio %', v_msg; end if;
-  perform public.rec_actualizar(c, null, '{"lote":"","contacto":"Juan"}'::jsonb);
+  perform pg_temp.actualizar(c, null, '{"lote":"","contacto":"Juan"}'::jsonb);
   select * into r from public.rec_reclamos where id = c;
   if r.datos ? 'lote' or r.datos->>'contacto' <> 'Juan' or r.datos->>'obra' <> 'Torre A' then raise exception 'caso 3g: el dato vacío se quita y los demás se conservan: %', r.datos; end if;
   select * into ev from public.rec_eventos where reclamo_id = c and tipo = 'datos_actualizados' order by id desc limit 1;
   if ev.detalle->'datos_anteriores'->>'lote' <> 'L-12' then raise exception 'caso 3h: el evento debía guardar los datos anteriores: %', to_jsonb(ev); end if;
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, null, %L)', c, '[1]'));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, null, %L)', c, '[1]'));
   if v_msg is null or v_msg !~* 'objeto' then raise exception 'caso 3i: datos que no son objeto, dio %', v_msg; end if;
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, null, %L)', c, jsonb_build_object('x', repeat('a', 9000))::text));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, null, %L)', c, jsonb_build_object('x', repeat('a', 9000))::text));
   if v_msg is null or v_msg !~* 'largos' then raise exception 'caso 3j: datos demasiado largos, dio %', v_msg; end if;
   perform public.rec_derivar(c, 'calidad');   -- ahora sí: tiene producto
   perform public.rec_pedir_verificacion(c, as1);
   perform pg_temp.act(as2);
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, null, %L)', c, '{"cantidad":"10"}'));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, null, %L)', c, '{"cantidad":"10"}'));
   if v_msg is null then raise exception 'caso 3k: otro asesor no completa datos'; end if;
   perform pg_temp.act(as1);
-  perform public.rec_actualizar(c, null, '{"cantidad":"20 sacos"}'::jsonb);
+  perform pg_temp.actualizar(c, null, '{"cantidad":"20 sacos"}'::jsonb);
   if (select datos->>'cantidad' from public.rec_reclamos where id = c) <> '20 sacos' then raise exception 'caso 3l: el asesor asignado completa datos'; end if;
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, %L)', c, p_m));
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, %L)', c, p_m));
   if v_msg is null or v_msg !~* 'servicio al cliente' then raise exception 'caso 3m: el asesor no cambia el producto, dio %', v_msg; end if;
   perform pg_temp.act(sc);
-  v_msg := pg_temp.falla(format('select public.rec_actualizar(%L, null, %L)', d, '{"x":"1"}'));   -- d está anulado
+  v_msg := pg_temp.falla(format('select pg_temp.actualizar(%L, null, %L)', d, '{"x":"1"}'));   -- d está anulado
   if v_msg is null or v_msg !~* 'cerrado o anulado' then raise exception 'caso 3n: un anulado no se modifica, dio %', v_msg; end if;
 
   -- ── (4) rec_ve_todo en las políticas de lectura ──
@@ -186,9 +198,9 @@ begin
 
   -- ── (8) fecha de recepción: hasta un año atrás ──
   perform pg_temp.act(v1);
-  v_msg := pg_temp.falla(format('select public.rec_crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'Fecha antigua', hoy - 400));
+  v_msg := pg_temp.falla(format('select pg_temp.crear(%L, null, %L, %L, %L)', cli, 'atraso_despacho', 'Fecha antigua', hoy - 400));
   if v_msg is null or v_msg !~* 'año' then raise exception 'caso 8a: una fecha de hace más de un año debía fallar, dio %', v_msg; end if;
-  perform public.rec_crear(cli, null, 'atraso_despacho', 'Fecha de hace 300 días', hoy - 300);
+  perform pg_temp.crear(cli, null, 'atraso_despacho', 'Fecha de hace 300 días', hoy - 300);
 
   -- ── (9) un anulado no admite archivos nuevos ──
   insert into storage.objects (bucket_id, name) values ('reclamos', d::text || '/x.jpg');

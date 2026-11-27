@@ -15,6 +15,18 @@ exception when others then
   return sqlerrm;
 end $$;
 
+-- Envoltorios con la firma anterior (un producto): rec_crear exige la lista de productos y el reclamante.
+create or replace function pg_temp.crear(p_cli uuid, p_prod text, p_motivo text, p_desc text, p_fecha date, p_datos jsonb default '{}')
+returns uuid language sql as $$
+  select public.rec_crear(p_cli, case when p_prod is null then null else array[p_prod] end, p_motivo, p_desc, p_fecha, p_datos,
+    '{"tipo":"cliente","nombre":"Persona de prueba","telefono":"+56 9 1234 5678"}'::jsonb)
+$$;
+
+create or replace function pg_temp.actualizar(p_id uuid, p_producto text default null, p_datos jsonb default null, p_version timestamptz default null)
+returns void language sql as $$
+  select public.rec_actualizar(p_id, case when p_producto is null then null else array[p_producto] end, p_datos, p_version, null)
+$$;
+
 do $$
 declare
   pend uuid; pend2 uuid; vend uuid; ajeno uuid; adm uuid;
@@ -88,11 +100,11 @@ begin
 
   -- ── (4) rec_crear guarda el nombre del cliente y del producto (copia estable que cualquiera con acceso al reclamo ve) ──
   perform pg_temp.act(pend);
-  v_id := public.rec_crear(cli, p_code, 'calidad_producto', 'Reclamo de prueba de lectura', hoy);
+  v_id := pg_temp.crear(cli, p_code, 'calidad_producto', 'Reclamo de prueba de lectura', hoy);
   select * into r from public.rec_reclamos where id = v_id;
   if r.cliente_nombre is distinct from cli_nombre then raise exception 'caso 4a: cliente_nombre esperado %, quedó %', cli_nombre, r.cliente_nombre; end if;
   if r.producto_nombre is distinct from p_nombre then raise exception 'caso 4b: producto_nombre esperado %, quedó %', p_nombre, r.producto_nombre; end if;
-  v_id := public.rec_crear(cli, null, 'atraso_despacho', 'Sin producto', hoy);
+  v_id := pg_temp.crear(cli, null, 'atraso_despacho', 'Sin producto', hoy);
   select * into r from public.rec_reclamos where id = v_id;
   if r.producto_nombre is not null then raise exception 'caso 4c: sin producto no hay nombre de producto'; end if;
 
