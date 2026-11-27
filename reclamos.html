@@ -327,6 +327,7 @@ async function traerTodo(tabla, cols, orden, asc){
 }
 async function cargarReclamos(){
   RECS = await traerTodo('rec_reclamos', COLS, 'creado_en', false);
+  PAN.ev = null;   // los eventos del panel (tiempos por etapa) se vuelven a pedir cuando cambian los reclamos
   try{ await resolverNombres(RECS.flatMap(r => [r.asesor_id, r.creado_por])); }catch(e){ /* los nombres son accesorios */ }
   ultimaCarga = Date.now();
 }
@@ -792,7 +793,18 @@ async function cargarMiniaturas(){
 async function llamar(r, nombre, args){
   try{
     const { error } = await sb.rpc(nombre, Object.assign({ p_id: r.id }, args, { p_version: r.actualizado_en }));
-    if(error){ if(/modificad|ya cambió/i.test(error.message)) setTimeout(recargarDetalle, 60); return error.message; }
+    if(error){
+      // Sea cual sea el error, la pantalla de fondo se refresca para mostrar el estado real. Si el reclamo cambió mientras
+      // se miraba, el diálogo sigue abierto (el texto escrito no se pierde) y toma la versión nueva: quien lo envía otra vez
+      // ya vio el aviso y el estado actualizado, y la base vuelve a validar estado y permisos.
+      const conflicto = /modificad|ya cambió/i.test(error.message);
+      await recargarDetalle();
+      if(conflicto && DET && DET.r && DET.r.id === r.id){
+        r.actualizado_en = DET.r.actualizado_en;
+        return error.message + ' Se actualizó la pantalla de fondo: revísala y, si todavía corresponde, vuelve a enviar.';
+      }
+      return error.message;
+    }
     return null;
   }catch(e){ return 'Sin conexión. Intenta de nuevo.'; }
 }
@@ -975,8 +987,8 @@ function rangoPreset(p){
 async function renderPanel(el){
   el.innerHTML = '<div class="card sin">Cargando…</div>';
   try{
-    if(!PAN.ev) PAN.ev = await traerTodo('rec_eventos', 'id,reclamo_id,tipo,a_estado,creado_en', 'id', true);
     if(Date.now() - ultimaCarga > 60000) await cargarReclamos();
+    if(!PAN.ev) PAN.ev = await traerTodo('rec_eventos', 'id,reclamo_id,tipo,a_estado,creado_en', 'id', true);
   }catch(e){
     el.innerHTML = `<div class="card sin">No se pudo cargar el panel.<br><span class="small">${esc(e.message || e)}</span><div class="acciones" style="justify-content:center"><button class="btn" id="p-reint">Reintentar</button></div></div>`;
     $('#p-reint').onclick = () => { PAN.ev = null; renderPanel(el); };
