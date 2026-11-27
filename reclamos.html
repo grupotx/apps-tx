@@ -97,6 +97,54 @@ a.rec.est-anulado{opacity:.65}
 .rec-cli{font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis}
 .rec-mot,.rec-resp{color:var(--mute);font-size:12.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .plt{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--mute)}
+/* ---- formularios, diálogos y detalle ---- */
+.f{max-width:640px;margin:0 auto}
+.f h2{font-size:18px;margin-bottom:4px}
+.f small,.dlg small{color:var(--mute);font-weight:400}
+.f details{margin-top:14px;border:1px dashed var(--line);border-radius:12px;padding:10px 12px}
+.f details summary{cursor:pointer;font-weight:700;font-size:13px}
+.f .fila2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:560px){.f .fila2{grid-template-columns:1fr}}
+.opts{display:grid;gap:6px;margin-top:6px}
+button.opt{display:flex;gap:8px;align-items:center;justify-content:space-between;width:100%;text-align:left;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer}
+button.opt:hover,button.opt:focus-visible{border-color:var(--brand);outline:none}
+button.opt small{color:var(--mute);display:block}
+.chosen{display:flex;gap:8px;align-items:center;justify-content:space-between;background:var(--brand-soft);border:1px solid var(--brand);border-radius:10px;padding:8px 11px}
+.chosen b{overflow:hidden;text-overflow:ellipsis}
+.btn.peligro{background:var(--bad);border-color:var(--bad);color:#fff}
+.dlg-err{background:color-mix(in srgb,var(--bad) 14%,transparent);border:1px solid var(--bad);color:var(--ink);border-radius:10px;padding:9px 12px;margin-top:12px;font-size:13px}
+.hint{background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-top:10px;font-size:12.5px;color:var(--mute)}
+.ov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:0}
+@media (min-width:600px){.ov{align-items:center;padding:12px}}
+.dlg{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:16px 16px 0 0;padding:18px;width:min(520px,100%);max-height:92vh;overflow:auto;box-shadow:0 24px 60px -20px rgba(0,0,0,.6)}
+@media (min-width:600px){.dlg{border-radius:16px}}
+.dlg h2{font-size:17px;margin-bottom:6px}
+.dlg label{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--mute);margin:14px 0 6px}
+.dlg .radios{display:flex;gap:10px;flex-wrap:wrap}
+.dlg .radios label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;padding:9px 14px;margin:0;cursor:pointer}
+.dlg .radios input{width:auto}
+.det .volver{display:inline-block;margin-bottom:10px;color:var(--mute);text-decoration:none;font-size:13px}
+.det-h h2{font-size:19px;margin:6px 0 4px}
+.det-h .meta{color:var(--mute);font-size:12.5px;display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center}
+.folio.big{font-size:15px}
+.accbar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.accbar .btn,.accbar .ghost{padding:8px 13px;font-size:13px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:820px){.cols{grid-template-columns:1fr}}
+.card h3{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin-bottom:8px}
+.card p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
+dl.kv{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+dl.kv dt{color:var(--mute)}dl.kv dd{margin:0;overflow-wrap:anywhere}
+.fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.fotos a,.fotos .tile{display:grid;place-items:center;aspect-ratio:1;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--sunk);font-size:12px;color:var(--mute);text-align:center;padding:4px;text-decoration:none}
+.fotos img{width:100%;height:100%;object-fit:cover;display:block}
+ol.tl{list-style:none;margin:0;padding:0;display:grid;gap:0}
+ol.tl li{position:relative;padding:0 0 14px 20px;border-left:2px solid var(--line);margin-left:6px}
+ol.tl li:last-child{padding-bottom:0;border-left-color:transparent}
+ol.tl li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--brand)}
+ol.tl .t{font-weight:600;font-size:13.5px}
+ol.tl .w{color:var(--mute);font-size:12px}
+ol.tl .n{font-size:13px;margin-top:2px;white-space:pre-wrap;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -385,9 +433,495 @@ async function recargarSilencioso(){
   if(el && !el.hidden && document.activeElement?.id !== 'f-q') renderBandeja();
 }
 
-/* ===================== Ingreso y detalle: se completan en las Tareas 8 y 9 ===================== */
-function renderNuevo(el){ el.innerHTML = `<div class="card sin">El ingreso de reclamos se habilita en el siguiente paso.</div>`; }
-function renderDetalle(el, id){ el.innerHTML = `<div class="card sin">Detalle del reclamo <b>${esc(id)}</b> (siguiente paso).<div class="acciones" style="justify-content:center"><a class="btn ghost" href="#bandeja">Volver a la bandeja</a></div></div>`; }
+/* ===================== Utilidades de formularios, buscadores y archivos ===================== */
+const fechaHora = s => {
+  if(!s) return ''; const d = new Date(s); if(isNaN(d.getTime())) return '';
+  return d.toLocaleString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Santiago' }).replace(/\./g, '');
+};
+const optList = (lista, sel, vacio) => (vacio ? `<option value="">${esc(vacio)}</option>` : '') + lista.map(x => `<option value="${esc(x.id)}"${x.id === sel ? ' selected' : ''}>${esc(x.label || x.nombre)}</option>`).join('');
+const CAMPOS_DATOS = [['obra', 'Obra'], ['direccion', 'Dirección'], ['contacto', 'Contacto (nombre y teléfono)'], ['lote', 'Lote'], ['factura_guia', 'Factura o guía'], ['cantidad', 'Cantidad afectada']];
+const CANALES = ['Correo', 'WhatsApp', 'Teléfono', 'Presencial', 'Otro'];
+const sinTildes = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const noEnter = e => { if(e.key === 'Enter') e.preventDefault(); };
+
+let PRODS = null;
+async function cargarProductos(){
+  if(PRODS) return PRODS;
+  const { data, error } = await sb.rpc('rec_productos');
+  if(error) throw new Error(error.message);
+  return (PRODS = data || []);
+}
+// Buscador de producto sobre el catálogo (en el navegador). alElegir(producto|null).
+function montarBuscadorProducto(el, alElegir){
+  let elegido = null;
+  const pintar = () => {
+    if(elegido){
+      el.innerHTML = `<div class="chosen"><span><b>${esc(elegido.nombre)}</b><br><small>${esc(elegido.code)} · Planta ${esc(RC.labelDe(RC.PLANTAS, elegido.planta))}</small></span><button type="button" class="ghost btn sm" data-cambiar>Cambiar</button></div>`;
+      el.querySelector('[data-cambiar]').onclick = () => { elegido = null; alElegir(null); pintar(); };
+      return;
+    }
+    el.innerHTML = `<input type="search" placeholder="Buscar producto por nombre o código" autocomplete="off" aria-label="Buscar producto"><div class="opts"></div>`;
+    const inp = el.querySelector('input'), ops = el.querySelector('.opts');
+    inp.onkeydown = noEnter;
+    inp.oninput = async () => {
+      const q = sinTildes(inp.value).trim();
+      if(q.length < 2){ ops.innerHTML = ''; return; }
+      let lista;
+      try{ lista = await cargarProductos(); }catch(e){ ops.innerHTML = '<div class="hint">No se pudo cargar el catálogo de productos.</div>'; return; }
+      const rs = lista.filter(p => sinTildes(p.nombre + ' ' + p.code).includes(q)).slice(0, 8);
+      ops.innerHTML = rs.length ? rs.map((p, i) => `<button type="button" class="opt" data-i="${i}"><span>${esc(p.nombre)}<small>${esc(p.code)}</small></span><span class="plt">${esc(RC.labelDe(RC.PLANTAS, p.planta))}</span></button>`).join('') : '<div class="hint">Ningún producto coincide.</div>';
+      ops.querySelectorAll('button.opt').forEach(b => { b.onclick = () => { elegido = rs[Number(b.dataset.i)]; alElegir(elegido); pintar(); }; });
+    };
+  };
+  pintar();
+}
+// Buscador de cliente (la base devuelve hasta 20 coincidencias por nombre, razón social o RUT).
+function montarBuscadorCliente(el, alElegir){
+  let elegido = null, t = null, seq = 0;
+  const pintar = () => {
+    if(elegido){
+      el.innerHTML = `<div class="chosen"><span><b>${esc(elegido.nombre)}</b><br><small>${esc([elegido.rut, elegido.comuna].filter(Boolean).join(' · '))}</small></span><button type="button" class="ghost btn sm" data-cambiar>Cambiar</button></div>`;
+      el.querySelector('[data-cambiar]').onclick = () => { elegido = null; alElegir(null); pintar(); };
+      return;
+    }
+    el.innerHTML = `<input type="search" placeholder="Buscar cliente por nombre o RUT" autocomplete="off" aria-label="Buscar cliente"><div class="opts"></div>`;
+    const inp = el.querySelector('input'), ops = el.querySelector('.opts');
+    inp.onkeydown = noEnter;
+    inp.oninput = () => {
+      clearTimeout(t);
+      const q = inp.value.trim();
+      if(q.length < 2){ ops.innerHTML = ''; return; }
+      t = setTimeout(async () => {
+        const mi = ++seq; ops.innerHTML = '<div class="hint">Buscando…</div>';
+        const { data, error } = await rpc('rec_buscar_clientes', { p_q: q });
+        if(mi !== seq) return;
+        if(error){ ops.innerHTML = ''; return; }
+        const rs = data || [];
+        ops.innerHTML = rs.length
+          ? rs.map((c, i) => `<button type="button" class="opt" data-i="${i}"><span>${esc(c.nombre)}<small>${esc([c.rut, c.comuna].filter(Boolean).join(' · '))}</small></span></button>`).join('') + (rs.length >= 20 ? '<div class="small">Se muestran 20: escribe más para afinar.</div>' : '')
+          : '<div class="hint">Ningún cliente coincide. Revisa el nombre o el RUT.</div>';
+        ops.querySelectorAll('button.opt').forEach(b => { b.onclick = () => { elegido = rs[Number(b.dataset.i)]; alElegir(elegido); pintar(); }; });
+      }, 250);
+    };
+  };
+  pintar();
+}
+// Las fotos se reducen en el celular (máx. 1600 px, JPEG) antes de subir: ahorran datos y caben en el límite de 10 MB.
+async function comprimirImagen(file){
+  try{
+    if(!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.82));
+    return blob || file;
+  }catch(e){ return file; }
+}
+// Sube a reclamos/<id>/<uuid>.<ext> y lo registra con rec_adjuntar. Devuelve cuántos fallaron.
+async function subirArchivos(id, files){
+  let fallos = 0;
+  for(const f of files){
+    try{
+      const esPdf = f.type === 'application/pdf';
+      const blob = esPdf ? f : await comprimirImagen(f);
+      if(blob.size > 10 * 1024 * 1024) throw new Error('Archivo de más de 10 MB');
+      const ct = blob.type || f.type;
+      const ext = esPdf ? 'pdf' : (ct === 'image/png' ? 'png' : ct === 'image/webp' ? 'webp' : 'jpg');
+      const ruta = `${id}/${crypto.randomUUID()}.${ext}`;
+      const up = await sb.storage.from('reclamos').upload(ruta, blob, { contentType: ct, upsert: false });
+      if(up.error) throw up.error;
+      const r = await sb.rpc('rec_adjuntar', { p_id: id, p_tipo: esPdf ? 'informe' : 'foto', p_ruta: ruta });
+      if(r.error) throw r.error;
+    }catch(e){ fallos++; }
+  }
+  return fallos;
+}
+
+/* ===================== Diálogos ===================== */
+function cerrarDialogo(){ const o = $('#dlg'); if(o){ document.removeEventListener('keydown', o._esc); o.remove(); } }
+// alEnviar(form) devuelve un texto de error (el diálogo sigue abierto) o nada (se cierra).
+function abrirDialogo({ titulo, html, confirmar = 'Guardar', peligro = false, alAbrir, alEnviar }){
+  cerrarDialogo();
+  const ov = document.createElement('div'); ov.className = 'ov'; ov.id = 'dlg';
+  ov.innerHTML = `<form class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t" novalidate><h2 id="dlg-t">${esc(titulo)}</h2><div>${html}</div><div class="dlg-err" id="dlg-err" hidden></div><div class="acciones"><button type="button" class="ghost" id="dlg-x">Cancelar</button><button type="submit" class="btn${peligro ? ' peligro' : ''}" id="dlg-ok">${esc(confirmar)}</button></div></form>`;
+  document.body.appendChild(ov);
+  const f = ov.querySelector('form'), ok = ov.querySelector('#dlg-ok'), err = ov.querySelector('#dlg-err');
+  ov.querySelector('#dlg-x').onclick = cerrarDialogo;
+  ov.addEventListener('mousedown', e => { if(e.target === ov) cerrarDialogo(); });
+  ov._esc = e => { if(e.key === 'Escape') cerrarDialogo(); };
+  document.addEventListener('keydown', ov._esc);
+  let enviando = false;
+  f.onsubmit = async e => {
+    e.preventDefault(); if(enviando) return;
+    enviando = true; err.hidden = true; ok.disabled = true; const txt = ok.textContent; ok.textContent = 'Enviando…';
+    try{
+      const msg = await alEnviar(f);
+      if(msg){ err.textContent = msg; err.hidden = false; } else { cerrarDialogo(); return; }
+    }catch(x){ err.textContent = (x && x.message) || 'No se pudo completar la acción.'; err.hidden = false; }
+    enviando = false; ok.disabled = false; ok.textContent = txt;
+  };
+  if(alAbrir) alAbrir(f);
+  const p = f.querySelector('input:not([type=hidden]):not([type=radio]),select,textarea,input[type=radio]'); if(p) p.focus();
+}
+
+/* ===================== Ingreso rápido ===================== */
+let NEW = { cliente: null, producto: null, conProducto: false };
+let enviandoNuevo = false;
+function renderNuevo(el){
+  NEW = { cliente: null, producto: null, conProducto: false };
+  const hoy = hoyCL();
+  const min = RC.fechaValida(hoy) ? new Date(Date.parse(hoy + 'T12:00:00Z') - 365 * 86400000).toISOString().slice(0, 10) : '';
+  el.innerHTML = `<form class="card f" id="f-nuevo" novalidate>
+    <h2>Nuevo reclamo</h2><p class="aviso">Lo mínimo para registrarlo; el detalle se completa después.</p>
+    <label>Cliente</label><div id="n-cli"></div>
+    <label for="n-mot">Motivo</label>
+    <select id="n-mot"><option value="">Elige el motivo</option>${MOTIVOS.filter(m => m.activo).map(m => `<option value="${esc(m.id)}">${esc(m.nombre)}</option>`).join('')}</select>
+    <div id="n-prod-wrap" hidden><label id="n-prod-l">Producto</label><div id="n-prod"></div></div>
+    <button type="button" class="ghost btn sm" id="n-add-prod" style="margin-top:10px" hidden>+ Agregar producto (opcional)</button>
+    <label for="n-desc">¿Qué pasó?</label>
+    <textarea id="n-desc" rows="4" maxlength="4000" placeholder="Describe el reclamo con las palabras del cliente"></textarea>
+    <label for="n-fec">Fecha de recepción</label>
+    <input type="date" id="n-fec" value="${esc(hoy)}" max="${esc(hoy)}" min="${esc(min)}">
+    <label for="n-fotos">Fotos <small>(opcional, hasta 5)</small></label>
+    <input type="file" id="n-fotos" accept="image/*" multiple>
+    <details><summary>Datos adicionales (opcional)</summary>
+      <div class="fila2">${CAMPOS_DATOS.map(([k, l]) => `<div><label for="d-${k}">${esc(l)}</label><input id="d-${k}" data-dato="${k}" maxlength="200"></div>`).join('')}</div>
+    </details>
+    <div class="dlg-err" id="n-err" hidden></div>
+    <div class="acciones"><button class="btn" type="submit" id="n-ok">Ingresar reclamo</button><a class="ghost btn" href="#bandeja">Cancelar</a></div>
+  </form>`;
+  montarBuscadorCliente($('#n-cli'), c => { NEW.cliente = c; });
+  montarBuscadorProducto($('#n-prod'), p => { NEW.producto = p; });
+  const mot = $('#n-mot');
+  const actualiza = () => {
+    const m = MOTIVOS.find(x => x.id === mot.value), exige = !!(m && m.requiere_producto);
+    $('#n-prod-wrap').hidden = !(exige || NEW.conProducto);
+    $('#n-prod-l').innerHTML = exige ? 'Producto <small>(obligatorio para este motivo)</small>' : 'Producto <small>(opcional)</small>';
+    $('#n-add-prod').hidden = exige || NEW.conProducto;
+  };
+  mot.onchange = actualiza;
+  $('#n-add-prod').onclick = () => { NEW.conProducto = true; actualiza(); };
+  $('#n-fotos').onchange = e => { if(e.target.files.length > 5) toast('Máximo 5 fotos: se subirán las primeras 5.'); };
+  actualiza();
+  $('#f-nuevo').onsubmit = enviarNuevo;
+}
+async function enviarNuevo(e){
+  e.preventDefault(); if(enviandoNuevo) return;
+  const err = $('#n-err'); err.hidden = true;
+  const datos = {}; document.querySelectorAll('[data-dato]').forEach(i => { const v = i.value.trim(); if(v) datos[i.dataset.dato] = v; });
+  const form = { cliente_id: NEW.cliente ? NEW.cliente.id : '', producto: !$('#n-prod-wrap').hidden && NEW.producto ? NEW.producto.code : '',
+                 motivo: $('#n-mot').value, descripcion: $('#n-desc').value, fecha_recepcion: $('#n-fec').value };
+  const errores = RC.validarCrear(form, MOTIVOS.filter(m => m.activo), hoyCL());
+  if(errores.length){ err.innerHTML = errores.map(x => '• ' + esc(x)).join('<br>'); err.hidden = false; return; }
+  enviandoNuevo = true;
+  const ok = $('#n-ok'); ok.disabled = true; ok.textContent = 'Ingresando…';
+  try{
+    const { data: id, error } = await sb.rpc('rec_crear', { p_cliente_id: form.cliente_id, p_producto: form.producto || null, p_motivo: form.motivo,
+      p_descripcion: form.descripcion.trim(), p_fecha_recepcion: form.fecha_recepcion, p_datos: datos });
+    if(error){ err.textContent = error.message; err.hidden = false; return; }
+    let fallos = 0; const files = [...($('#n-fotos').files || [])].slice(0, 5);
+    if(files.length){ ok.textContent = 'Subiendo fotos…'; fallos = await subirArchivos(id, files); }
+    try{ await cargarReclamos(); }catch(x){ /* se recarga al abrir la bandeja */ }
+    const rr = RECS.find(r => r.id === id);
+    toast('Reclamo ingresado' + (rr ? ': ' + rr.folio : '') + (fallos ? `. ${fallos} archivo(s) no se pudieron subir; agrégalos en el detalle.` : ''));
+    location.hash = '#r/' + id;
+  }catch(x){ err.textContent = 'Sin conexión. Revisa e intenta de nuevo; lo que escribiste sigue aquí.'; err.hidden = false; }
+  finally{ enviandoNuevo = false; ok.disabled = false; ok.textContent = 'Ingresar reclamo'; }
+}
+
+/* ===================== Detalle ===================== */
+let DET = null;   // { id, r, ev, ad, urls }
+const recargarDetalle = () => renderDetalle($('#v-detalle'), DET ? DET.id : ruta().id);
+async function renderDetalle(el, id){
+  if(DET && DET.urls) DET.urls.forEach(u => URL.revokeObjectURL(u));
+  const mi = DET = { id, r: null, ev: [], ad: [], urls: [] };
+  el.innerHTML = '<div class="card sin">Cargando…</div>';
+  try{
+    const [r, ev, ad] = await Promise.all([
+      sb.from('rec_reclamos').select('*').eq('id', id).maybeSingle(),
+      sb.from('rec_eventos').select('id,tipo,de_estado,a_estado,usuario,nota,detalle,creado_en').eq('reclamo_id', id).order('id', { ascending: true }),
+      sb.from('rec_adjuntos').select('id,tipo,ruta,subido_por,creado_en').eq('reclamo_id', id).order('creado_en', { ascending: true })]);
+    if(r.error) throw new Error(r.error.message);
+    if(DET !== mi) return;
+    if(!r.data){ el.innerHTML = `<div class="card sin"><b>No encontramos este reclamo</b> o no tienes acceso.<div class="acciones" style="justify-content:center"><a class="btn ghost" href="#bandeja">Volver a la bandeja</a></div></div>`; return; }
+    mi.r = r.data; mi.ev = ev.data || []; mi.ad = ad.data || [];
+    const ids = [mi.r.creado_por, mi.r.decidido_por, mi.r.comunicado_por, mi.r.asesor_id, ...mi.ev.flatMap(e => [e.usuario, e.detalle && e.detalle.asesor, e.detalle && e.detalle.a, e.detalle && e.detalle.de])];
+    try{ await resolverNombres(ids); }catch(x){ /* los nombres son accesorios */ }
+    if(DET !== mi) return;
+    pintarDetalle(el);
+  }catch(e){
+    if(DET !== mi) return;
+    el.innerHTML = `<div class="card sin">No se pudo cargar el reclamo.<br><span class="small">${esc(e.message || e)}</span><div class="acciones" style="justify-content:center"><button class="btn" id="d-reint">Reintentar</button><a class="btn ghost" href="#bandeja">Volver</a></div></div>`;
+    $('#d-reint').onclick = recargarDetalle;
+  }
+}
+const ACC = {
+  derivar: { t: 'Derivar', fn: dlgDerivar }, pedir_verificacion: { t: 'Pedir visita técnica', fn: dlgPedirVisita },
+  reasignar_asesor: { t: 'Reasignar asesor', fn: dlgReasignar }, informe: { t: 'Registrar informe', fn: dlgInforme },
+  decidir: { t: 'Decidir', fn: dlgDecidir }, devolver: { t: 'No es de mi área', fn: dlgDevolver },
+  completar_datos: { t: 'Completar datos', fn: dlgDatos }, definir_solucion: { t: 'Definir solución', fn: dlgSolucion },
+  comunicar: { t: 'Comunicar al cliente', fn: dlgComunicar }, cerrar: { t: 'Cerrar reclamo', fn: dlgCerrar },
+  corregir_compensacion: { t: 'Corregir compensación', fn: dlgCompensacion }, anular: { t: 'Anular', fn: dlgAnular, peligro: true },
+  reabrir: { t: 'Reabrir', fn: dlgReabrir },
+};
+const AVANCE_UI = ['derivar', 'informe', 'decidir', 'definir_solucion', 'comunicar', 'cerrar'];
+function textoEvento(e){
+  const d = e.detalle || {};
+  switch(e.tipo){
+    case 'creado': return 'Reclamo ingresado';
+    case 'derivado': return 'Derivado a ' + RC.labelDe(RC.AREAS, d.area) + (d.planta ? ' · ' + RC.labelDe(RC.PLANTAS, d.planta) : '');
+    case 'devuelto': return 'Devuelto a servicio al cliente (no corresponde al área)';
+    case 'verificacion_pedida': return 'Visita técnica pedida a ' + (nombreDe(d.asesor) || 'un asesor');
+    case 'asesor_reasignado': return 'Asesor reasignado a ' + (nombreDe(d.a) || 'otra persona');
+    case 'informe': return 'Informe de calidad registrado';
+    case 'decidido': return 'Decisión: ' + (e.a_estado === 'aprobado' ? 'aprobado' : 'rechazado');
+    case 'solucion_definida': return 'Solución definida: ' + RC.labelDe(RC.SOLUCIONES, d.solucion_tipo) + ' · ' + clp(d.compensacion);
+    case 'comunicado': return 'Comunicado al cliente' + (d.canal ? ' por ' + d.canal : '');
+    case 'cerrado': return 'Reclamo cerrado';
+    case 'compensacion_corregida': return 'Compensación corregida de ' + clp(d.monto_anterior) + ' a ' + clp(d.monto_nuevo);
+    case 'anulado': return 'Reclamo anulado';
+    case 'reabierto': return 'Reclamo reabierto';
+    case 'adjunto': return 'Archivo agregado (' + (e.nota === 'informe' ? 'informe' : 'foto') + ')';
+    case 'datos_actualizados': return 'Datos del reclamo completados';
+    default: return e.tipo;
+  }
+}
+function pintarDetalle(el){
+  const { r, ev, ad } = DET;
+  const acc = RC.accionesPermitidas(r, ALC, me.admin, me.id);
+  const pend = RC.pendienteDeMi(r, ALC, me.admin, me.id);
+  const plt = r.planta_destino || r.planta, d = antiguedad(r);
+  const datos = Object.entries(r.datos || {}).filter(([, v]) => v);
+  const rotulo = k => (CAMPOS_DATOS.find(c => c[0] === k) || [k, k])[1];
+  const bloque = (titulo, html) => `<div class="card"><h3>${esc(titulo)}</h3>${html}</div>`;
+  const kv = filas => `<dl class="kv">${filas.filter(f => f[1] !== '' && f[1] != null).map(f => `<dt>${esc(f[0])}</dt><dd>${esc(f[1])}</dd>`).join('')}</dl>`;
+  const quien = id => nombreDe(id) || 'alguien del equipo';
+  el.innerHTML = `<div class="det">
+    <a class="volver" href="#bandeja">← Volver a la bandeja</a>
+    <div class="card det-h">
+      <div class="rec-top"><b class="folio big">${esc(r.folio)}</b><span class="est est-${esc(r.estado)}">${esc(RC.labelDe(RC.ESTADOS, r.estado))}</span>${pend ? '<span class="pend">Pendiente de ti</span>' : ''}<span class="edad" title="Días desde la recepción">${d} d</span></div>
+      <h2>${esc(r.cliente_nombre || 'Cliente sin nombre')}</h2>
+      <div class="meta"><span>${esc(labelMotivo(r.motivo))}</span>${r.producto_nombre ? `<span>· ${esc(r.producto_nombre)}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}<span>· Recibido ${esc(fechaCorta(r.fecha_recepcion))}</span><span>· Ingresó ${esc(quien(r.creado_por))}</span></div>
+      ${responsable(r) ? `<div class="meta" style="margin-top:4px"><b style="color:var(--ink)">Ahora:</b> ${esc(responsable(r))}</div>` : ''}
+    </div>
+    ${acc.length ? `<div class="accbar">${acc.map(a => `<button type="button" class="${pend && AVANCE_UI.includes(a) ? 'btn' : 'ghost btn'}" data-acc="${a}"${ACC[a].peligro ? ' style="color:var(--bad)"' : ''}>${esc(ACC[a].t)}</button>`).join('')}</div>` : ''}
+    <div class="cols">
+      <div>
+        ${bloque('Descripción', `<p>${esc(r.descripcion)}</p>`)}
+        ${datos.length ? bloque('Datos adicionales', kv(datos.map(([k, v]) => [rotulo(k), String(v)]))) : ''}
+        ${r.informe ? bloque('Informe de calidad', `<p>${esc(r.informe)}</p>`) : ''}
+        ${r.decision ? bloque('Decisión', `<p><b>${r.decision === 'aprobado' ? 'Aprobado' : 'Rechazado'}</b> por ${esc(quien(r.decidido_por))} · ${esc(fechaHora(r.decidido_en))}</p><p>${esc(r.razones || '')}</p>`) : ''}
+        ${r.solucion_tipo ? bloque('Solución', kv([['Tipo', RC.labelDe(RC.SOLUCIONES, r.solucion_tipo)], ['Detalle', r.solucion_detalle || ''], ['Compensación', clp(r.compensacion)]])) : ''}
+        ${r.mensaje_cliente ? bloque('Comunicación al cliente', `<p class="small">${esc(fechaHora(r.comunicado_en))} · ${esc(quien(r.comunicado_por))}${r.canal ? ' · ' + esc(r.canal) : ''}</p><p>${esc(r.mensaje_cliente)}</p>`) : ''}
+      </div>
+      <div>
+        <div class="card"><h3>Archivos</h3>
+          ${ad.length ? `<div class="fotos" id="d-fotos">${ad.map((a, i) => `<span class="tile" data-i="${i}">${a.tipo === 'informe' ? 'PDF' : 'Cargando…'}</span>`).join('')}</div>` : '<p class="small">Sin archivos.</p>'}
+          ${r.estado !== 'anulado' ? `<label class="ghost btn sm" style="margin-top:10px;display:inline-flex;cursor:pointer">+ Agregar archivos<input type="file" id="d-add" hidden multiple accept="image/*,application/pdf"></label>` : ''}
+        </div>
+        <div class="card"><h3>Historia</h3><ol class="tl">${ev.map(e => `<li><div class="t">${esc(textoEvento(e))}</div><div class="w">${esc(quien(e.usuario))} · ${esc(fechaHora(e.creado_en))}</div>${e.nota && e.tipo !== 'adjunto' ? `<div class="n">${esc(e.nota)}</div>` : ''}</li>`).join('')}</ol></div>
+      </div>
+    </div></div>`;
+  el.querySelectorAll('[data-acc]').forEach(b => { b.onclick = () => ACC[b.dataset.acc].fn(DET.r); });
+  const add = $('#d-add');
+  if(add) add.onchange = async () => {
+    const files = [...add.files].slice(0, 10); if(!files.length) return;
+    toast('Subiendo…'); const fallos = await subirArchivos(r.id, files);
+    toast(fallos ? `${fallos} archivo(s) no se pudieron subir.` : 'Archivos agregados.');
+    recargarDetalle();
+  };
+  cargarMiniaturas();
+}
+async function cargarMiniaturas(){
+  const mi = DET; if(!mi || !mi.ad.length) return;
+  for(let i = 0; i < mi.ad.length; i++){
+    const a = mi.ad[i];
+    try{
+      const { data, error } = await sb.storage.from('reclamos').download(a.ruta);
+      if(error || !data || DET !== mi) continue;
+      const url = URL.createObjectURL(data); mi.urls.push(url);
+      const tile = document.querySelector(`#d-fotos [data-i="${i}"]`); if(!tile) continue;
+      const esPdf = /\.pdf$/i.test(a.ruta);
+      tile.outerHTML = esPdf ? `<a href="${url}" target="_blank" rel="noopener">Informe PDF</a>` : `<a href="${url}" target="_blank" rel="noopener" title="Abrir"><img src="${url}" alt="Foto del reclamo"></a>`;
+    }catch(e){ /* queda el recuadro */ }
+  }
+}
+
+/* ===================== Acciones del flujo ===================== */
+// Llama a la función de la base con el token de versión de la pantalla (si el reclamo cambió, la base lo rechaza).
+async function llamar(r, nombre, args){
+  try{
+    const { error } = await sb.rpc(nombre, Object.assign({ p_id: r.id }, args, { p_version: r.actualizado_en }));
+    if(error){ if(/modificad|ya cambió/i.test(error.message)) setTimeout(recargarDetalle, 60); return error.message; }
+    return null;
+  }catch(e){ return 'Sin conexión. Intenta de nuevo.'; }
+}
+async function tras(msg){ toast(msg); try{ await cargarReclamos(); }catch(e){ /* se recarga al volver a la bandeja */ } await recargarDetalle(); }
+const vacio = s => !String(s || '').trim();
+const esServicio = () => me.admin || ALC.some(a => a.rol === 'servicio_cliente');
+async function listaAsesores(){ const { data, error } = await sb.rpc('rec_asesores'); if(error) throw new Error(error.message); return data || []; }
+
+function dlgDerivar(r){
+  const m = MOTIVOS.find(x => x.id === r.motivo);
+  abrirDialogo({ titulo: 'Derivar reclamo', confirmar: 'Derivar',
+    html: `<label>Área</label><select name="area">${optList(RC.AREAS, r.area_destino || (m && m.area_sugerida) || '', 'Elige un área')}</select>
+      <div id="dv-planta" hidden><label>Planta</label><select name="planta">${optList(RC.PLANTAS, r.planta_destino || r.planta || '', 'Elige una planta')}</select></div>
+      <div class="hint" id="dv-aviso" hidden></div>
+      <label>Nota <small>(opcional)</small></label><textarea name="nota" rows="2" maxlength="500"></textarea>`,
+    alAbrir: f => {
+      const upd = () => {
+        const a = f.elements.area.value, pl = RC.AREAS_POR_PLANTA.includes(a), falta = pl && !r.producto;
+        $('#dv-planta').hidden = !pl; $('#dv-aviso').hidden = !falta;
+        $('#dv-aviso').textContent = falta ? `Este reclamo no tiene producto (de él sale la planta): complétalo con «Completar datos» antes de derivarlo a ${RC.labelDe(RC.AREAS, a)}.` : '';
+        $('#dlg-ok').disabled = falta;
+      };
+      f.elements.area.onchange = upd; upd();
+    },
+    alEnviar: async f => {
+      const a = f.elements.area.value, pl = RC.AREAS_POR_PLANTA.includes(a);
+      if(!a) return 'Elige el área a la que se deriva.';
+      if(pl && !f.elements.planta.value) return 'Elige la planta.';
+      const msg = await llamar(r, 'rec_derivar', { p_area: a, p_planta: pl ? f.elements.planta.value : null, p_nota: f.elements.nota.value.trim() || null });
+      if(msg) return msg;
+      await tras('Reclamo derivado a ' + RC.labelDe(RC.AREAS, a) + '.');
+    } });
+}
+async function dlgAsesor(r, titulo, fn, okMsg){
+  let asesores;
+  try{ asesores = await listaAsesores(); }catch(e){ toast('No se pudo cargar la lista de asesores: ' + (e.message || e)); return; }
+  abrirDialogo({ titulo, confirmar: 'Asignar',
+    html: asesores.length ? `<label>Asesor técnico</label><select name="asesor"><option value="">Elige un asesor</option>${asesores.filter(a => a.id !== r.asesor_id).map(a => `<option value="${esc(a.id)}">${esc(a.nombre)}</option>`).join('')}</select>` : '<p>No hay asesores técnicos activos. Pídele a un administrador que los asigne en la pestaña Accesos.</p>',
+    alEnviar: async f => {
+      const id = f.elements.asesor && f.elements.asesor.value; if(!id) return 'Elige un asesor.';
+      const msg = await llamar(r, fn, { p_asesor: id }); if(msg) return msg; await tras(okMsg);
+    } });
+}
+function dlgPedirVisita(r){ return dlgAsesor(r, 'Pedir visita técnica', 'rec_pedir_verificacion', 'Visita técnica pedida.'); }
+function dlgReasignar(r){ return dlgAsesor(r, 'Reasignar asesor', 'rec_reasignar_asesor', 'Asesor reasignado.'); }
+
+async function dlgInforme(r){
+  let visitas = [];
+  try{
+    const { data } = await sb.from('registros').select('id,kind,fecha,cliente,obra').eq('autor', me.id).order('fecha', { ascending: false }).limit(15);
+    visitas = data || [];
+  }catch(e){ visitas = []; }
+  abrirDialogo({ titulo: 'Informe de calidad', confirmar: 'Registrar informe',
+    html: `<label>Informe</label><textarea name="texto" rows="6" maxlength="6000" placeholder="Qué se verificó, qué se encontró y la causa probable"></textarea>
+      ${visitas.length ? `<label>Visita en Terreno <small>(opcional)</small></label><select name="visita"><option value="">Sin enlace</option>${visitas.map(v => `<option value="${esc(v.id)}">${esc([fechaCorta(v.fecha), v.cliente, v.obra, v.kind].filter(Boolean).join(' · '))}</option>`).join('')}</select>` : ''}
+      <label>Fotos o PDF <small>(opcional)</small></label><input type="file" name="archivos" accept="image/*,application/pdf" multiple>`,
+    alEnviar: async f => {
+      if(vacio(f.elements.texto.value)) return 'Escribe el informe.';
+      const msg = await llamar(r, 'rec_registrar_informe', { p_texto: f.elements.texto.value.trim(), p_visita_registro_id: (f.elements.visita && f.elements.visita.value) || null });
+      if(msg) return msg;
+      const files = [...f.elements.archivos.files].slice(0, 10);
+      const fallos = files.length ? await subirArchivos(r.id, files) : 0;
+      await tras('Informe registrado' + (fallos ? `; ${fallos} archivo(s) no se pudieron subir.` : '.'));
+    } });
+}
+function dlgDecidir(r){
+  abrirDialogo({ titulo: 'Decidir el reclamo', confirmar: 'Registrar decisión',
+    html: `<div class="radios"><label><input type="radio" name="dec" value="aprobado"> Aprobar</label><label><input type="radio" name="dec" value="rechazado"> Rechazar</label></div>
+      <label>Razones <small>(el cliente las recibirá)</small></label><textarea name="razones" rows="4" maxlength="2000"></textarea>`,
+    alEnviar: async f => {
+      const dec = (f.querySelector('input[name=dec]:checked') || {}).value;
+      if(!dec) return 'Elige si se aprueba o se rechaza.';
+      if(vacio(f.elements.razones.value)) return 'Escribe las razones de la decisión.';
+      const msg = await llamar(r, 'rec_decidir', { p_decision: dec, p_razones: f.elements.razones.value.trim() });
+      if(msg) return msg; await tras(dec === 'aprobado' ? 'Reclamo aprobado.' : 'Reclamo rechazado.');
+    } });
+}
+function dlgDevolver(r){
+  abrirDialogo({ titulo: 'No corresponde a mi área', confirmar: 'Devolver',
+    html: `<p class="aviso">El reclamo vuelve a servicio al cliente para que lo derive a quien corresponda.</p><label>¿Por qué?</label><textarea name="nota" rows="3" maxlength="500"></textarea>`,
+    alEnviar: async f => {
+      if(vacio(f.elements.nota.value)) return 'Explica por qué no corresponde a tu área.';
+      const msg = await llamar(r, 'rec_devolver', { p_nota: f.elements.nota.value.trim() }); if(msg) return msg; await tras('Reclamo devuelto.');
+    } });
+}
+function dlgDatos(r){
+  const sc = esServicio();
+  let prod = null;
+  abrirDialogo({ titulo: 'Completar datos', confirmar: 'Guardar',
+    html: (sc ? `<label>Producto${r.producto ? ` <small>(actual: ${esc(r.producto_nombre || r.producto)})</small>` : ''}</label><div id="dd-prod"></div>` : '') +
+      `<div class="fila2">${CAMPOS_DATOS.map(([k, l]) => `<div><label>${esc(l)}</label><input name="d_${k}" maxlength="200" value="${esc((r.datos || {})[k] || '')}"></div>`).join('')}</div>`,
+    alAbrir: () => { if(sc) montarBuscadorProducto($('#dd-prod'), p => { prod = p; }); },
+    alEnviar: async f => {
+      const datos = {}; let cambios = 0;
+      for(const [k] of CAMPOS_DATOS){ const v = f.elements['d_' + k].value.trim(), antes = String((r.datos || {})[k] || ''); if(v !== antes){ datos[k] = v; cambios++; } }
+      if(!prod && !cambios) return 'No hay cambios que guardar.';
+      const msg = await llamar(r, 'rec_actualizar', { p_producto: prod ? prod.code : null, p_datos: cambios ? datos : null });
+      if(msg) return msg; await tras('Datos guardados.');
+    } });
+}
+function dlgSolucion(r){
+  abrirDialogo({ titulo: 'Definir la solución', confirmar: 'Guardar solución',
+    html: `<label>Tipo de solución</label><select name="tipo">${optList(RC.SOLUCIONES, r.decision === 'rechazado' ? 'explicacion' : '', 'Elige el tipo')}</select>
+      <label>Detalle</label><textarea name="detalle" rows="3" maxlength="2000" placeholder="Qué se le ofrece al cliente"></textarea>
+      <label>Monto de la compensación <small>(pesos; 0 si no hay)</small></label><input name="monto" inputmode="numeric" autocomplete="off" placeholder="0">`,
+    alAbrir: f => {
+      const upd = () => { const ex = f.elements.tipo.value === 'explicacion'; f.elements.monto.disabled = ex; if(ex) f.elements.monto.value = '0'; };
+      f.elements.tipo.onchange = upd; upd();
+    },
+    alEnviar: async f => {
+      if(!f.elements.tipo.value) return 'Elige el tipo de solución.';
+      const m = RC.validarMonto(f.elements.monto.value); if(m.error) return m.error;
+      const msg = await llamar(r, 'rec_definir_solucion', { p_tipo: f.elements.tipo.value, p_detalle: f.elements.detalle.value.trim() || null, p_compensacion: m.valor });
+      if(msg) return msg; await tras('Solución definida.');
+    } });
+}
+function dlgComunicar(r){
+  const texto = RC.mensajeCliente(r, { name: r.cliente_nombre });
+  abrirDialogo({ titulo: 'Comunicar al cliente', confirmar: 'Registrar como comunicado',
+    html: `<p class="aviso">Revisa y ajusta el texto, cópialo y envíalo por el canal que uses; luego registra que ya se comunicó.</p>
+      <label>Mensaje</label><textarea name="mensaje" rows="9" maxlength="4000">${esc(texto)}</textarea>
+      <div class="acciones" style="margin-top:8px"><button type="button" class="ghost btn sm" id="cm-copiar">Copiar texto</button></div>
+      <label>Canal</label><select name="canal">${CANALES.map(c => `<option>${esc(c)}</option>`).join('')}</select>`,
+    alAbrir: f => {
+      $('#cm-copiar').onclick = async () => {
+        const t = f.elements.mensaje;
+        try{ await navigator.clipboard.writeText(t.value); toast('Texto copiado.'); }
+        catch(e){ t.select(); try{ document.execCommand('copy'); toast('Texto copiado.'); }catch(x){ toast('No se pudo copiar; selecciónalo y cópialo a mano.'); } }
+      };
+    },
+    alEnviar: async f => {
+      if(vacio(f.elements.mensaje.value)) return 'El mensaje no puede quedar vacío.';
+      const msg = await llamar(r, 'rec_comunicar', { p_mensaje: f.elements.mensaje.value.trim(), p_canal: f.elements.canal.value });
+      if(msg) return msg; await tras('Comunicación registrada.');
+    } });
+}
+function dlgCerrar(r){
+  abrirDialogo({ titulo: 'Cerrar el reclamo', confirmar: 'Cerrar reclamo', html: '<p>El reclamo ya fue comunicado al cliente. Al cerrarlo deja de aparecer como pendiente.</p>',
+    alEnviar: async () => { const msg = await llamar(r, 'rec_cerrar', {}); if(msg) return msg; await tras('Reclamo cerrado.'); } });
+}
+function dlgCompensacion(r){
+  abrirDialogo({ titulo: 'Corregir la compensación', confirmar: 'Corregir',
+    html: `<p class="aviso">Hoy: <b>${esc(clp(r.compensacion))}</b>. El cambio queda en la historia con el monto anterior y el nuevo.</p>
+      <label>Nuevo monto <small>(pesos)</small></label><input name="monto" inputmode="numeric" autocomplete="off">
+      <label>Motivo de la corrección</label><textarea name="motivo" rows="2" maxlength="500"></textarea>`,
+    alEnviar: async f => {
+      const m = RC.validarMonto(f.elements.monto.value); if(m.error) return m.error;
+      if(vacio(f.elements.motivo.value)) return 'Explica el motivo de la corrección.';
+      const msg = await llamar(r, 'rec_corregir_compensacion', { p_monto: m.valor, p_motivo: f.elements.motivo.value.trim() });
+      if(msg) return msg; await tras('Compensación corregida.');
+    } });
+}
+function dlgAnular(r){
+  abrirDialogo({ titulo: 'Anular el reclamo', confirmar: 'Anular reclamo', peligro: true,
+    html: `<p class="aviso">Para un duplicado o un error de ingreso. Un reclamo anulado no cuenta en los costos ni en los tiempos.</p><label>Motivo</label><textarea name="motivo" rows="3" maxlength="500"></textarea>`,
+    alEnviar: async f => {
+      if(vacio(f.elements.motivo.value)) return 'Explica el motivo de la anulación.';
+      const msg = await llamar(r, 'rec_anular', { p_motivo: f.elements.motivo.value.trim() }); if(msg) return msg; await tras('Reclamo anulado.');
+    } });
+}
+function dlgReabrir(r){
+  abrirDialogo({ titulo: 'Reabrir el reclamo', confirmar: 'Reabrir',
+    html: `<p class="aviso">Vuelve a «Ingresado» y parte de cero; lo anterior queda guardado en la historia.</p><label>Motivo</label><textarea name="motivo" rows="3" maxlength="500"></textarea>`,
+    alEnviar: async f => {
+      if(vacio(f.elements.motivo.value)) return 'Explica el motivo de la reapertura.';
+      const msg = await llamar(r, 'rec_reabrir', { p_motivo: f.elements.motivo.value.trim() }); if(msg) return msg; await tras('Reclamo reabierto.');
+    } });
+}
 
 sb.auth.onAuthStateChange(ev => { if(ev === 'SIGNED_OUT') location.reload(); });
 document.addEventListener('click', e => { const ir = e.target.closest('[data-ir]'); if(ir && !ir.closest('#lista')) location.hash = ir.dataset.ir; });

@@ -268,6 +268,13 @@ begin
   perform pg_temp.act(v1);
   v_msg := pg_temp.falla('select * from public.rec_asesores()');
   if v_msg is null then raise exception 'caso 13b: el vendedor no ve la lista de asesores'; end if;
+  -- un asesor técnico también la ve (para reasignar su reclamo a otro asesor); un encargado de área no
+  perform pg_temp.act(as1);
+  select count(*) into v_n from public.rec_asesores();
+  if v_n <> 2 then raise exception 'caso 13c: un asesor técnico ve la lista de asesores (2) y ve %', v_n; end if;
+  perform pg_temp.act(enc_m);
+  v_msg := pg_temp.falla('select * from public.rec_asesores()');
+  if v_msg is null then raise exception 'caso 13d: un encargado de área no ve la lista de asesores'; end if;
 
   -- ── (14) el administrador hace lo de servicio al cliente pero no decide sin alcance ──
   perform pg_temp.act(v1);
