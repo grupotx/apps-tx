@@ -8,6 +8,12 @@
 --  3. rec_crear y rec_actualizar reciben la lista y el reclamante (se eliminan las firmas anteriores); rec_vendedores
 --     entrega la lista para elegir. Mensajes idénticos a reclamos-core.js. RLS sin cambios.
 
+-- Los alter table toman un bloqueo exclusivo sobre rec_reclamos y profiles (que lee cada inicio de sesión). Si otra
+-- transacción los tiene ocupados, la migración falla a los 5 s y se deshace entera, en vez de quedar esperando en la cola
+-- con los inicios de sesión detenidos detrás. SET LOCAL vale solo dentro de la transacción en que corre la migración y se
+-- descarta al terminarla; fuera de una transacción PostgreSQL solo da un aviso y no cambia nada.
+set local lock_timeout = '5s';
+
 -- ───────────────────────── Columnas ─────────────────────────
 alter table public.rec_reclamos
   add column if not exists productos jsonb not null default '[]'::jsonb,
@@ -252,6 +258,7 @@ end
 $$;
 
 -- ───────────────────────── Vendedores para elegir ─────────────────────────
+-- Las cuentas de prueba (correo zz.%) solo las ve el administrador, como en admin_usuarios.
 create or replace function public.rec_vendedores()
 returns table(id uuid, nombre text, email text, telefono text) language plpgsql stable security definer set search_path = ''
 as $$
@@ -261,6 +268,7 @@ begin
     select p.id, p.nombre, p.email, p.telefono
       from public.profiles p
      where p.activo and p.rol::text = 'vendedor'
+       and (p.email not like 'zz.%' or app.tiene_rol(variadic array['admin']))
      order by coalesce(p.nombre, p.email), p.id;
 end
 $$;
