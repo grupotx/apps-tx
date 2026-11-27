@@ -212,14 +212,17 @@ function login(msg){
 async function start(){
   const {data:{session}}=await sb.auth.getSession(); if(!session)return login();
   const {data:p}=await sb.from('profiles').select('nombre,email,rol,activo').eq('id',session.user.id).maybeSingle();
-  me={id:session.user.id,email:session.user.email,nombre:p?.nombre||session.user.email.split('@')[0],admin:!!(p&&p.activo&&p.rol==='admin')};
-  $('#estado-conexion').innerHTML=`<a class="uchip" ${EN_PORTAL?'':'href="./"'}><span class="av">${esc(ini(me.nombre))}</span><span class="un"><b>${esc(me.nombre)}</b><small>${me.admin?'Administrador':'Sin permiso'}</small></span></a>`;
-  if(!me.admin){$('#app').innerHTML=`<div class="card gate"><h2>Solo administradores</h2><p>Esta página es para administrar usuarios y accesos. Pídele acceso al administrador del portal.</p><div class="acciones">${EN_PORTAL?'':'<a class="btn" href="./">Volver al portal</a>'}</div></div>`;return}
+  me={id:session.user.id,email:session.user.email,nombre:p?.nombre||session.user.email.split('@')[0],activo:!!(p&&p.activo),admin:!!(p&&p.activo&&p.rol==='admin')};
+  $('#estado-conexion').innerHTML=`<a class="uchip" ${EN_PORTAL?'':'href="./"'}><span class="av">${esc(ini(me.nombre))}</span><span class="un"><b>${esc(me.nombre)}</b><small>${me.admin?'Administrador':me.activo?'Mi cuenta':'Sin permiso'}</small></span></a>`;
+  if(!me.activo){$('#app').innerHTML=`<div class="card gate"><h2>Solo administradores</h2><p>Esta página es para administrar usuarios y accesos. Pídele acceso al administrador del portal.</p><div class="acciones">${EN_PORTAL?'':'<a class="btn" href="./">Volver al portal</a>'}</div></div>`;return}
   // requireEnrollment:false aunque sea admin: esta ES la página donde se activa el 2FA, no tendría
   // sentido bloquear a quien todavía no se ha podido inscribir. Si ya lo tiene activo, sí pide el
   // código de esta sesión (igual que cualquier otra app).
   if(!(await TMfa.gate(sb,{requireEnrollment:false})))return;
   await renderSeguridad();
+  // Quien no es administrador solo ve Mi seguridad: Reportes TX le pide 2FA para RRHH/Finanzas y esta es la
+  // única página donde se activa. La lista de usuarios (admin_usuarios) es solo para administradores.
+  if(!me.admin){$('#app').innerHTML=`<div class="card"><h2>Usuarios y accesos</h2><p class="aviso">La administración de usuarios y accesos es solo para administradores del portal. Aquí puedes activar o desactivar la verificación en dos pasos de tu propia cuenta.</p>${EN_PORTAL?'':'<div class="acciones"><a class="btn ghost" href="./">Volver al portal</a></div>'}</div>`;return}
   await cargar();
 }
 /* ============ Mi seguridad (2FA) ============ */

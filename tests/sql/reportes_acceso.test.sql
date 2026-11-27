@@ -6,6 +6,13 @@
 -- zz.prueba.vendedor (usr) recibe los módulos; zz.prueba.logistica (nad) no es admin. Como
 -- admin_usuarios() oculta las cuentas zz.*, esa parte se prueba con un admin real que solo lee la
 -- lista y se da a sí mismo dos módulos rep_* (todo se revierte al final).
+-- ADVERTENCIA: esta prueba cambia DATOS REALES de producción dentro de su transacción (le da los módulos
+-- rep_finanzas y rep_costos a un administrador real y cambia el rol de las cuentas zz.prueba.*). Solo es
+-- segura porque el "raise exception 'OK_ROLLBACK'" del final aborta el bloque y lo deshace todo: NUNCA
+-- quitar esa línea ni agregar nada después de ella (sin ella los cambios quedarían guardados).
+-- MANTENIMIENTO: si se agrega un módulo a admin_usuarios, hay que actualizar el caso 7c (hoy exige
+-- exactamente 15 claves en "modulos": las 7 de antes + las 8 rep_*), las listas claves_old / claves_rep y
+-- la comparación del caso 7h con la fórmula original de las 7 claves anteriores; si no, la prueba falla.
 do $$
 declare
   adm uuid; usr uuid; nad uuid; vis uuid;
