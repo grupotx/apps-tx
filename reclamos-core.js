@@ -363,7 +363,7 @@
     return m;
   }
 
-  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, MAX_PRODUCTOS, RECLAMANTES, labelDe, plantaDeFamilia, productosDe, resumenProductos, textoProductos, plantasDe, repartir, fechaValida, fechaCL, diasEntre, diaCL, validarReclamante, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, enPeriodo, metricas };
+  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, MAX_PRODUCTOS, RECLAMANTES, labelDe, plantaDeFamilia, productosDe, resumenProductos, textoProductos, plantasDe, repartir, fechaValida, fechaCL, diasEntre, diaCL, validarReclamante, validarCrear, RE_CORREO: reCorreo, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, enPeriodo, metricas };
   if (typeof window !== 'undefined') g.RC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);

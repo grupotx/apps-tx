@@ -500,7 +500,7 @@ async function cargarProductos(){
   return (PRODS = data || []);
 }
 // Enlaces mailto:/tel: solo con caracteres permitidos (teléfono: dígitos y +; correo: el correo recortado y con formato válido).
-const RE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const RE_CORREO = RC.RE_CORREO;
 const hrefTel = s => { const v = String(s == null ? '' : s).replace(/[^\d+]/g, ''); return v ? 'tel:' + v : ''; };
 const hrefMail = s => { const v = String(s == null ? '' : s).trim(); return RE_CORREO.test(v) ? 'mailto:' + encodeURIComponent(v).replace(/%40/g, '@') : ''; };
 const contactoReclamante = r => [r.reclamante_nombre, r.reclamante_correo, r.reclamante_telefono].filter(Boolean).join(' · ');
@@ -981,6 +981,8 @@ function reclamanteCambio(x, r){
   if(x.tipo !== r.reclamante_tipo || t(x.telefono) !== t(r.reclamante_telefono)) return true;
   return x.tipo === 'vendedor' ? t(x.id) !== t(r.reclamante_id) : t(x.nombre) !== t(r.reclamante_nombre) || t(x.correo) !== t(r.reclamante_correo);
 }
+// ¿La lista de productos cambió? (antes: productos guardados; despues: códigos; el orden cuenta)
+const productosCambiaron = (antes, despues) => despues.length !== antes.length || despues.some((c, i) => c !== antes[i].code);
 function dlgDatos(r){
   const sc = esServicio();
   const ini = RC.productosDe(r);
@@ -994,7 +996,7 @@ function dlgDatos(r){
       const datos = {}; let cambios = 0;
       for(const [k] of CAMPOS_DATOS){ const v = f.elements['d_' + k].value.trim(), antes = String((r.datos || {})[k] || ''); if(v !== antes){ datos[k] = v; cambios++; } }
       const codigos = prods.map(p => p.code).filter(Boolean);
-      const prodCambio = sc && (codigos.length !== ini.length || codigos.some((c, i) => c !== ini[i].code));
+      const prodCambio = sc && productosCambiaron(ini, codigos);
       const recCambio = sc && reclamanteCambio(rec, r);
       if(!prodCambio && !recCambio && !cambios) return 'No hay cambios que guardar.';
       if(prodCambio && !codigos.length) return 'Indica al menos un producto.';

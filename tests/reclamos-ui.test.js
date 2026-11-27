@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const RC = require('../reclamos-core.js');
 const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'reclamos.html'), 'utf8');
@@ -97,7 +98,7 @@ test('los enlaces mailto: y tel: pasan por funciones que solo dejan caracteres p
   assert.equal(tel(null), '');
 
   const src = html.match(/const RE_CORREO = [^\n]*/)[0] + '\n' + html.match(/const hrefMail = [^\n]*/)[0] + '; return hrefMail;';
-  const mail = new Function(src)();
+  const mail = new Function('RC', src)(RC);
   assert.equal(mail('  a@b.cl '), 'mailto:a@b.cl');
   assert.equal(mail('no es correo'), '');
   assert.equal(mail('javascript:alert(1)'), '');
@@ -111,8 +112,65 @@ test('los enlaces mailto: y tel: pasan por funciones que solo dejan caracteres p
   assert.doesNotMatch(html, /href="mailto:\$\{(?!esc)/);
 });
 
-test('la regex de correo es la compartida con reclamos-core', () => {
-  const m = html.match(/const RE_CORREO = (\/[^\n;]*\/);/);
-  assert.ok(m);
-  assert.equal(m[1], '/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/');
+test('la página usa la regex de correo de reclamos-core (sin copia propia)', () => {
+  assert.match(html, /const RE_CORREO = RC\.RE_CORREO;/);
+  assert.ok(RC.RE_CORREO instanceof RegExp);
+  assert.equal(RC.RE_CORREO.test('a@b.cl'), true);
+  assert.equal(RC.RE_CORREO.test('a@b'), false);
+  assert.equal(RC.RE_CORREO.test('a b@c.cl'), false);
+});
+
+// ── Funciones puras de reclamos.html, extraídas del texto y ejecutadas ──
+const linea = (nombre) => { const m = html.match(new RegExp('const ' + nombre + ' = [^\\n]*')); assert.ok(m, 'falta const ' + nombre); return m[0]; };
+const funcion = (nombre) => { const m = html.match(new RegExp('function ' + nombre + '\\([\\s\\S]*?\\r?\\n\\}(?=\\r?\\n)')); assert.ok(m, 'falta function ' + nombre); return m[0]; };
+
+test('reclamanteCambio: reclamo antiguo sin reclamante', () => {
+  const f = new Function(funcion('reclamanteCambio') + '; return reclamanteCambio;')();
+  const viejo = { reclamante_tipo: null };
+  assert.equal(f({ tipo: 'vendedor', id: '', nombre: '', correo: '', telefono: '' }, viejo), false, 'el valor por defecto vacío no es un cambio');
+  assert.equal(f({ tipo: 'vendedor', id: 'v1', nombre: 'A', correo: 'a@b.cl', telefono: '' }, viejo), true);
+  assert.equal(f({ tipo: 'vendedor', id: '', nombre: '', correo: '', telefono: '555' }, viejo), true, 'teléfono suelto: se envía y la validación pide elegir vendedor');
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: '  ', correo: '', telefono: '' }, viejo), false);
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: 'Juan', correo: '', telefono: '' }, viejo), true);
+});
+
+test('reclamanteCambio: vendedor se compara por id y teléfono; cliente por sus tres campos, recortados', () => {
+  const f = new Function(funcion('reclamanteCambio') + '; return reclamanteCambio;')();
+  const v = { reclamante_tipo: 'vendedor', reclamante_id: 'v1', reclamante_nombre: 'Viejo nombre', reclamante_correo: 'viejo@x.cl', reclamante_telefono: '111' };
+  assert.equal(f({ tipo: 'vendedor', id: 'v1', nombre: 'Otro nombre', correo: 'otro@x.cl', telefono: '111' }, v), false, 'nombre y correo salen del perfil: no cuentan');
+  assert.equal(f({ tipo: 'vendedor', id: 'v1', nombre: '', correo: '', telefono: ' 111 ' }, v), false, 'el teléfono se recorta');
+  assert.equal(f({ tipo: 'vendedor', id: 'v1', nombre: '', correo: '', telefono: '222' }, v), true, 'solo cambió el teléfono');
+  assert.equal(f({ tipo: 'vendedor', id: 'v2', nombre: '', correo: '', telefono: '111' }, v), true, 'otro vendedor');
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: 'Juan', correo: 'j@x.cl', telefono: '111' }, v), true, 'cambió el tipo');
+  const c = { reclamante_tipo: 'cliente', reclamante_id: null, reclamante_nombre: 'Juan', reclamante_correo: 'j@x.cl', reclamante_telefono: '123' };
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: ' Juan ', correo: ' j@x.cl', telefono: '123 ' }, c), false, 'valores idénticos con espacios');
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: 'Juana', correo: 'j@x.cl', telefono: '123' }, c), true);
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: 'Juan', correo: 'k@x.cl', telefono: '123' }, c), true);
+  assert.equal(f({ tipo: 'cliente', id: '', nombre: 'Juan', correo: 'j@x.cl', telefono: '' }, c), true, 'se borró el teléfono');
+});
+
+test('productosCambiaron: igual, quitar, agregar y reordenar', () => {
+  const f = new Function(linea('productosCambiaron') + '; return productosCambiaron;')();
+  const antes = [{ code: 'A' }, { code: 'B' }];
+  assert.equal(f(antes, ['A', 'B']), false);
+  assert.equal(f(antes, ['A']), true, 'quitar');
+  assert.equal(f(antes, ['A', 'B', 'C']), true, 'agregar');
+  assert.equal(f(antes, ['B', 'A']), true, 'reordenar');
+  assert.equal(f([], []), false, 'reclamo sin productos y sin cambios');
+  assert.equal(f([], ['A']), true);
+  assert.equal(f(antes, []), true, 'vaciar (el diálogo lo rechaza aparte)');
+});
+
+test('armarReclamante: id solo para el vendedor y campos recortados', () => {
+  const f = new Function(linea('armarReclamante') + '; return armarReclamante;')();
+  assert.deepEqual(f({ tipo: 'cliente', id: 'x', nombre: ' Juan ', correo: ' j@x.cl ', telefono: ' 123 ' }), { tipo: 'cliente', id: null, nombre: 'Juan', correo: 'j@x.cl', telefono: '123' });
+  assert.deepEqual(f({ tipo: 'vendedor', id: 'v1', nombre: 'A', correo: 'a@b.cl', telefono: null }), { tipo: 'vendedor', id: 'v1', nombre: 'A', correo: 'a@b.cl', telefono: '' });
+  assert.equal(f({ tipo: 'vendedor', id: '', nombre: '', correo: '', telefono: '' }).id, null);
+});
+
+test('contactoReclamante: une solo lo que existe', () => {
+  const f = new Function(linea('contactoReclamante') + '; return contactoReclamante;')();
+  assert.equal(f({ reclamante_nombre: 'Ana', reclamante_correo: 'a@b.cl', reclamante_telefono: '123' }), 'Ana · a@b.cl · 123');
+  assert.equal(f({ reclamante_nombre: 'Ana', reclamante_correo: null, reclamante_telefono: '123' }), 'Ana · 123');
+  assert.equal(f({}), '');
 });

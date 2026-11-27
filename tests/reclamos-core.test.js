@@ -590,3 +590,10 @@ test('metricas: porPlanta cuenta una vez por planta_destino || planta, aunque ha
   assert.equal(m.porProducto.Z, undefined);
   assert.equal(m.costoPorProducto.Z, undefined);
 });
+
+test('RE_CORREO: la regex que usan validarReclamante y la pantalla', () => {
+  assert.ok(RC.RE_CORREO.test('a@b.cl'));
+  assert.ok(!RC.RE_CORREO.test('a@b'));
+  assert.ok(!RC.RE_CORREO.test('a b@c.cl'));
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'X', correo: 'a@b' }), ['El correo no tiene un formato válido.']);
+});
