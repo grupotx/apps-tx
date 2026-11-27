@@ -268,9 +268,9 @@ begin
      group by p.proname having count(*) <> 1) t;
   if v_n <> 0 then raise exception 'caso 8b: % funciones con más de una firma', v_n; end if;
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-   where n.nspname = 'app' and p.proname in ('rec_txt', 'rec_normalizar_telefono', 'rec_normalizar_productos', 'rec_normalizar_reclamante')
+   where n.nspname = 'app' and p.proname in ('rec_espacios', 'rec_txt', 'rec_normalizar_telefono', 'rec_normalizar_productos', 'rec_normalizar_reclamante')
      and not (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'));
-  if v_n <> 4 then raise exception 'caso 8c: los 4 ayudantes internos deben existir y no ser ejecutables por el cliente (% ok)', v_n; end if;
+  if v_n <> 5 then raise exception 'caso 8c: los 5 ayudantes internos deben existir y no ser ejecutables por el cliente (% ok)', v_n; end if;
   -- a es de un cliente ajeno al vendedor, lo creó servicio y no es de su área: ser el reclamante no le da acceso.
   if (select reclamante_id from public.rec_reclamos where id = a) <> vend then raise exception 'caso 8d: preparación'; end if;
   perform pg_temp.act(vend);
