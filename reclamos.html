@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://xinnonzltoaoptnvkhhy.supabase.co wss://xinnonzltoaoptnvkhhy.supabase.co; base-uri 'none'; form-action 'none'; object-src 'none'">
+<script>(function(){function a(){try{var t=localStorage.getItem("tx-theme"),d=document.documentElement;if(t==="light")d.dataset.theme="light";else d.dataset.theme="dark"}catch(e){document.documentElement.dataset.theme="dark"}}a();addEventListener("storage",function(e){if(e.key==="tx-theme")a()})})();</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Grupo TX · Reclamos</title>
+<meta name="theme-color" content="#050505">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="mfa-gate.js"></script>
+<script src="reclamos-core.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+:root{
+  --brand:#ff2a4d;--brand-ink:#fff;--brand-soft:#3a0f18;
+  --bg:#050505;--card:#0e0f11;--sunk:#17181b;--ink:#f4f4f4;--mute:#a4a7ae;
+  --line:rgba(255,255,255,.22);--line-soft:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.55);
+  --ok:#4fd18a;--bad:#ff6670;--warn:#f2b04a;--info:#79a8f0;--viol:#b98be6;--teal:#4cc9cb;--gris:#9aa3b4;
+  --f-ui:"Sora",system-ui,-apple-system,"Segoe UI",sans-serif;--f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark}
+:root[data-theme="light"]{
+  --brand:#e4032e;--brand-soft:#fde7eb;--bg:#f2f2f0;--card:#ffffff;--sunk:#eaeae7;--ink:#121212;--mute:#5e6066;
+  --line:rgba(0,0,0,.18);--line-soft:rgba(0,0,0,.08);--line-strong:rgba(0,0,0,.5);
+  --ok:#18864a;--bad:#c4121f;--warn:#b86e00;--info:#2459a8;--viol:#8a4fbf;--teal:#0f8b8d;--gris:#6b7280;
+  color-scheme:light}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;font-family:var(--f-ui);background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:inherit}
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
+.topin{display:flex;align-items:center;gap:14px;padding:12px max(20px,env(safe-area-inset-left,0px));max-width:1200px;margin:0 auto;flex-wrap:wrap}
+.txmark{width:58px;flex:none;color:var(--ink);display:block}
+.ttl{display:flex;flex-direction:column;margin-right:auto;min-width:0;line-height:1.15}
+.ttl small{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand);font-weight:700}
+.ttl h1{margin:0;font-size:21px;font-weight:800;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#estado-conexion{font-size:12px;color:var(--mute)}
+.uchip{display:flex;align-items:center;gap:8px;border:1px solid var(--line-soft);border-radius:99px;padding:4px 12px 4px 4px;color:var(--ink);text-decoration:none;font-size:13px}
+.uchip .av{width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:11.5px;font-weight:700}
+.uchip .un{display:grid;line-height:1.15}.uchip .un b{font-size:12.5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uchip .un small{font-size:10.5px;color:var(--mute);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+nav.tabs{display:flex;gap:6px;padding:0 max(20px,env(safe-area-inset-left,0px)) 10px;overflow-x:auto;max-width:1200px;margin:0 auto;scrollbar-width:none}
+nav.tabs button{flex:none;border:1px solid transparent;background:transparent;color:var(--mute);padding:8px 14px;border-radius:10px;font-weight:600;font-size:13.5px;cursor:pointer}
+nav.tabs button:hover{color:var(--ink);background:var(--sunk)}
+nav.tabs button.on{background:var(--brand-soft);color:var(--brand);border-color:var(--brand)}
+main{padding:20px max(20px,env(safe-area-inset-left,0px)) 56px;max-width:1200px;margin:0 auto}
+@media (max-width:560px){.topin{padding:10px 14px;gap:10px}.txmark{width:44px}.ttl h1{font-size:17px}.uchip{padding:3px}.uchip .un{display:none}nav.tabs{padding:0 14px 10px}main{padding:14px 14px 48px}}
+h2,h3{margin:0;font-weight:800;letter-spacing:-.01em}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:10px;background:var(--sunk);color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+input[type=checkbox]{width:auto;accent-color:var(--brand)}
+textarea{min-height:90px;resize:vertical}
+.btn{background:var(--brand);color:var(--brand-ink);border:1px solid var(--brand);border-radius:10px;padding:9px 15px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.btn:hover{filter:brightness(1.08)}
+.btn[disabled]{opacity:.6;cursor:wait}
+.btn.ghost,button.ghost{background:var(--card);color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;padding:9px 15px;font-weight:600;cursor:pointer}
+.btn.sm{padding:6px 11px;font-size:12.5px}
+.card{background:var(--card);border:1px solid var(--line-soft);border-radius:14px;padding:16px;margin-bottom:14px}
+.aviso{color:var(--mute);font-size:12.5px;margin:0 0 12px}
+.small{color:var(--mute);font-size:11.5px;white-space:normal}
+.sin{color:var(--mute);text-align:center;padding:28px 8px}
+.acciones{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.gate{max-width:420px;margin:48px auto;padding:24px}
+.gate .txmark{width:110px;margin-bottom:18px}
+.gate label,.f label{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--mute);margin:14px 0 6px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;transition:transform .25s,opacity .25s;opacity:0;pointer-events:none;font-size:13.5px;z-index:60;max-width:calc(100vw - 32px)}
+#toast.on{transform:translateX(-50%) translateY(0);opacity:1}
+/* ---- bandeja ---- */
+.subtabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.subtabs button{border:1px solid var(--line-strong);background:transparent;color:var(--mute);padding:8px 14px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer}
+.subtabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.subtabs .n{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:99px;background:var(--brand);color:var(--brand-ink);font-size:11px;font-weight:700;text-align:center}
+.filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line-soft);border-radius:14px;padding:12px;margin-bottom:14px}
+.filtros input[type=search]{flex:1 1 200px;width:auto}
+.filtros select{flex:0 1 auto;width:auto;max-width:100%}
+.filtros label{font-size:12.5px;color:var(--mute);display:flex;gap:6px;align-items:center}
+.lista{display:grid;gap:10px}
+a.rec{display:grid;gap:4px;background:var(--card);border:1px solid var(--line-soft);border-left:4px solid var(--gris);border-radius:12px;padding:12px 14px;text-decoration:none;color:inherit}
+a.rec:hover{border-color:var(--line-strong)}
+a.rec:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+a.rec.est-ingresado{border-left-color:var(--info)}a.rec.est-derivado{border-left-color:var(--warn)}a.rec.est-en_verificacion{border-left-color:var(--viol)}
+a.rec.est-aprobado{border-left-color:var(--ok)}a.rec.est-rechazado{border-left-color:var(--bad)}a.rec.est-solucion_definida{border-left-color:var(--teal)}
+a.rec.est-comunicado{border-left-color:var(--info)}a.rec.est-cerrado,a.rec.est-anulado{border-left-color:var(--gris)}
+a.rec.est-anulado{opacity:.65}
+.rec-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.folio{font-family:var(--f-mono);font-size:12.5px;font-weight:700}
+.est{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;border:1px solid var(--line-strong);color:var(--ink);white-space:nowrap}
+.est.est-ingresado{color:var(--info);border-color:var(--info)}.est.est-derivado{color:var(--warn);border-color:var(--warn)}.est.est-en_verificacion{color:var(--viol);border-color:var(--viol)}
+.est.est-aprobado{color:var(--ok);border-color:var(--ok)}.est.est-rechazado{color:var(--bad);border-color:var(--bad)}.est.est-solucion_definida{color:var(--teal);border-color:var(--teal)}
+.est.est-comunicado{color:var(--info);border-color:var(--info)}.est.est-cerrado,.est.est-anulado{color:var(--gris);border-color:var(--gris)}
+.edad{margin-left:auto;font-size:12px;color:var(--mute);font-family:var(--f-mono)}
+.edad.alta{color:var(--bad);font-weight:700}
+.pend{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--brand)}
+.pend::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--brand)}
+.rec-cli{font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis}
+.rec-mot,.rec-resp{color:var(--mute);font-size:12.5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.plt{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--mute)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topin">
+    <span class="txmark" aria-label="Grupo TX"><svg role="img" aria-label="Grupo TX" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1181.46 500"><g><g><path d="M36.39,34.79h35.41v30.74c-3.77,4.13-8.31,7.35-13.63,9.67-5.32,2.32-10.99,3.48-17,3.48-12.02,0-21.89-3.62-29.6-10.86C3.86,60.57,0,51.09,0,39.36c0-11.08,3.67-20.4,11.02-27.97C18.37,3.82,27.81.04,39.32.04c6.52,0,12.6,1.25,18.25,3.75,5.65,2.5,9.81,5.81,12.49,9.94l-11.62,10.43c-4.63-5.21-10.79-7.82-18.46-7.82-6.95,0-12.44,2.04-16.46,6.14-4.02,4.09-6.03,9.72-6.03,16.89s2.19,12.89,6.57,16.94c4.38,4.05,10.12,6.08,17.22,6.08,5.58,0,10.35-1.45,14.34-4.34v-8.04h-19.23v-15.21Z" fill="currentColor" stroke-width="0"></path><path d="M586.76,44.59c0,4.75-.63,9.06-1.89,12.92-1.26,3.86-2.93,7.09-5.01,9.69-2.08,2.6-4.55,4.79-7.4,6.57-2.86,1.78-5.85,3.06-8.96,3.84-3.12.78-6.38,1.17-9.8,1.17-9.87,0-18.15-3.04-24.83-9.13-6.68-6.09-10.02-14.66-10.02-25.72V.05h17.26v41.87c0,6.31,1.52,11.34,4.56,15.09,3.04,3.75,7.39,5.62,13.03,5.62,10.54,0,15.81-6.76,15.81-20.27V.05h17.26v44.54Z" fill="currentColor" stroke-width="0"></path><path d="M778.01,78.5V.21h32.43c6.34,0,11.78.78,16.33,2.35,4.55,1.57,8,3.69,10.35,6.37,2.35,2.68,4.03,5.52,5.03,8.5,1.01,2.98,1.51,6.23,1.51,9.73,0,7.46-2.68,13.78-8.05,18.96-5.37,5.18-13.76,7.77-25.16,7.77h-15.1v24.61h-17.34ZM795.34,16.43v21.25h14.88c10.29,0,15.43-3.54,15.43-10.63s-4.92-10.63-14.76-10.63h-15.55Z" fill="currentColor" stroke-width="0"></path><path d="M1041.89,11.44c7.57-7.6,16.85-11.41,27.86-11.41s20.18,3.75,27.75,11.24c7.57,7.49,11.35,16.85,11.35,28.08s-3.78,20.49-11.35,28.02c-7.57,7.53-16.82,11.3-27.75,11.3s-20.2-3.75-27.81-11.24c-7.6-7.49-11.4-16.85-11.4-28.08s3.78-20.31,11.35-27.91ZM1054.38,55.97c4.24,4.27,9.36,6.41,15.37,6.41s11.3-2.12,15.42-6.35c4.13-4.24,6.19-9.79,6.19-16.67s-2.15-12.35-6.46-16.62c-4.31-4.27-9.36-6.41-15.15-6.41s-11.13,2.14-15.37,6.41c-4.24,4.27-6.35,9.81-6.35,16.62s2.12,12.35,6.35,16.62Z" fill="currentColor" stroke-width="0"></path><path d="M259.83,78.38V0h31.69c5.97,0,11.1.71,15.4,2.13,4.29,1.42,7.58,3.38,9.85,5.88,2.28,2.5,3.92,5.17,4.93,8.01,1.01,2.84,1.51,6.01,1.51,9.52,0,5.08-1.38,9.7-4.14,13.88-2.76,4.18-6.49,7.2-11.2,9.07l21.83,29.9h-20.94l-19.15-26.76h-12.43v26.76h-17.35ZM277.18,16.23v19.15h14.67c4.25,0,7.54-.86,9.85-2.57,2.31-1.72,3.47-4.14,3.47-7.28s-1.03-5.38-3.08-6.94c-2.05-1.57-5.69-2.35-10.92-2.35h-14Z" fill="currentColor" stroke-width="0"></path></g><g><g><path d="M.23,109.3v177.41h177.41V109.3H.23ZM126.95,236.02H50.92v-76.03h76.03v76.03ZM.23,312.05v177.41h177.41v-177.41H.23ZM126.95,438.78H50.92v-76.03h76.03v76.03ZM202.98,109.3v177.41h177.41V109.3h-177.41ZM329.7,236.02h-76.03v-76.03h76.03v76.03ZM202.98,312.05v177.41h177.41v-177.41h-177.41ZM329.7,438.78h-76.03v-76.03h76.03v76.03Z" fill="var(--brand)" stroke-width="0"></path><g><polygon points="405.22 108.59 405.22 108.67 405.22 181.44 405.22 190.44 520.89 190.44 520.89 488.81 606.7 488.81 606.7 190.44 722.91 190.44 722.91 181.44 722.91 108.67 722.91 108.59 405.22 108.59" fill="currentColor" stroke-width="0"></polygon><polygon points="731.4 488.81 841.74 488.81 921.4 375.87 1002.35 488.81 1108.73 488.81 975.08 299.76 1109.39 108.59 999.75 108.59 919.27 223.04 837.13 108.59 729.14 108.59 865.99 298.58 731.4 488.81" fill="currentColor" stroke-width="0"></polygon></g></g><path d="M1135.63,443.2c5.24-5.17,11.61-7.75,19.1-7.75s13.63,2.6,18.87,7.81c5.24,5.2,7.86,11.44,7.86,18.7s-2.62,13.84-7.86,19.04c-5.24,5.2-11.53,7.81-18.87,7.81s-13.85-2.6-19.1-7.81c-5.24-5.2-7.87-11.55-7.87-19.04s2.62-13.59,7.87-18.76ZM1138.94,477.69c4.31,4.27,9.53,6.4,15.67,6.4s11.27-2.17,15.61-6.51c4.34-4.35,6.52-9.51,6.52-15.5s-2.17-11.25-6.52-15.56c-4.34-4.31-9.55-6.46-15.61-6.46s-11.27,2.15-15.61,6.46c-4.34,4.3-6.51,9.49-6.51,15.56s2.15,11.35,6.46,15.61ZM1143.94,477.57v-31.79h10c8.16,0,12.24,3.22,12.24,9.66,0,2.17-.64,4.06-1.91,5.67s-2.96,2.75-5.06,3.43l9.21,13.03h-6.29l-8.09-11.68h-4.83v11.68h-5.28ZM1158.77,451.45c-1.12-.86-2.81-1.29-5.06-1.29h-4.49v11.23h4.94c1.57,0,3.02-.49,4.33-1.46,1.31-.97,1.97-2.28,1.97-3.93,0-2.17-.56-3.69-1.69-4.55Z" fill="currentColor" stroke-width="0"></path></g></g><g><path d="M4.21,666.74c2.67-4.83,6.38-8.59,11.15-11.28,4.77-2.69,10.17-4.04,16.21-4.04,7.4,0,13.74,1.96,19.01,5.86,5.27,3.91,8.8,9.24,10.57,15.99h-16.7c-1.24-2.61-3.01-4.59-5.29-5.95-2.28-1.36-4.87-2.04-7.77-2.04-4.68,0-8.47,1.63-11.37,4.89-2.9,3.26-4.35,7.61-4.35,13.06s1.45,9.8,4.35,13.06c2.9,3.26,6.69,4.89,11.37,4.89,2.9,0,5.49-.68,7.77-2.04,2.28-1.36,4.04-3.35,5.29-5.95h16.7c-1.78,6.75-5.3,12.07-10.57,15.95-5.27,3.88-11.61,5.82-19.01,5.82-6.04,0-11.45-1.35-16.21-4.04-4.77-2.69-8.48-6.44-11.15-11.24s-4-10.28-4-16.44,1.33-11.65,4-16.48Z" fill="currentColor" stroke-width="0"></path><path d="M83.85,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM111.93,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path><path d="M196.11,714.5h-15.19l-25.41-38.47v38.47h-15.19v-62.37h15.19l25.41,38.65v-38.65h15.19v62.37Z" fill="currentColor" stroke-width="0"></path><path d="M217.43,712.9c-3.61-1.48-6.5-3.67-8.66-6.57-2.16-2.9-3.3-6.4-3.42-10.48h16.17c.24,2.31,1.04,4.07,2.4,5.29,1.36,1.21,3.14,1.82,5.33,1.82s4.03-.52,5.33-1.55c1.3-1.04,1.95-2.47,1.95-4.31,0-1.54-.52-2.81-1.55-3.82-1.04-1.01-2.31-1.83-3.82-2.49-1.51-.65-3.66-1.39-6.44-2.22-4.03-1.24-7.32-2.49-9.86-3.73-2.55-1.24-4.74-3.08-6.57-5.51-1.84-2.43-2.75-5.6-2.75-9.51,0-5.8,2.1-10.35,6.31-13.64,4.21-3.29,9.68-4.93,16.44-4.93s12.41,1.64,16.61,4.93c4.21,3.29,6.46,7.86,6.75,13.73h-16.44c-.12-2.01-.86-3.6-2.22-4.75-1.36-1.16-3.11-1.73-5.24-1.73-1.84,0-3.32.49-4.44,1.47-1.13.98-1.69,2.38-1.69,4.22,0,2.01.95,3.58,2.84,4.71,1.89,1.13,4.86,2.34,8.88,3.64,4.03,1.36,7.3,2.67,9.82,3.91,2.52,1.24,4.69,3.05,6.53,5.42,1.83,2.37,2.75,5.42,2.75,9.15s-.9,6.78-2.71,9.68c-1.81,2.9-4.43,5.21-7.86,6.93-3.44,1.72-7.49,2.58-12.17,2.58s-8.65-.74-12.26-2.22Z" fill="currentColor" stroke-width="0"></path><path d="M306.63,652.13v12.17h-16.52v50.2h-15.19v-50.2h-16.53v-12.17h48.24Z" fill="currentColor" stroke-width="0"></path><path d="M346.07,714.5l-12.97-23.54h-3.64v23.54h-15.19v-62.37h25.5c4.92,0,9.11.86,12.57,2.58s6.06,4.07,7.77,7.06c1.72,2.99,2.58,6.32,2.58,10,0,4.15-1.17,7.85-3.51,11.11-2.34,3.26-5.79,5.57-10.35,6.93l14.39,24.7h-17.15ZM329.46,680.2h9.42c2.78,0,4.87-.68,6.26-2.04,1.39-1.36,2.09-3.29,2.09-5.77s-.7-4.23-2.09-5.6c-1.39-1.36-3.48-2.04-6.26-2.04h-9.42v15.46Z" fill="currentColor" stroke-width="0"></path><path d="M387.12,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M488.31,652.13l-21.59,41.76v20.61h-15.19v-20.61l-21.59-41.76h17.24l12.08,26.12,11.99-26.12h17.06Z" fill="currentColor" stroke-width="0"></path><path d="M509.63,664.3v12.62h20.35v11.73h-20.35v13.68h23.01v12.17h-38.2v-62.37h38.2v12.17h-23.01Z" fill="currentColor" stroke-width="0"></path><path d="M598.29,714.5h-15.19l-25.41-38.47v38.47h-15.19v-62.37h15.19l25.41,38.65v-38.65h15.19v62.37Z" fill="currentColor" stroke-width="0"></path><path d="M649.91,656.04c4.92,2.61,8.72,6.26,11.42,10.97,2.69,4.71,4.04,10.14,4.04,16.3s-1.35,11.52-4.04,16.26c-2.7,4.74-6.52,8.41-11.46,11.02-4.95,2.61-10.68,3.91-17.19,3.91h-23.37v-62.37h23.37c6.57,0,12.32,1.3,17.24,3.91ZM645.12,696.64c3.2-3.14,4.8-7.58,4.8-13.33s-1.6-10.22-4.8-13.42c-3.2-3.2-7.67-4.8-13.42-4.8h-7.2v36.25h7.2c5.74,0,10.22-1.57,13.42-4.71Z" fill="currentColor" stroke-width="0"></path><path d="M687.27,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM715.34,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path><path d="M803.16,652.13v12.17h-25.41v13.15h19.01v11.82h-19.01v25.23h-15.19v-62.37h40.6Z" fill="currentColor" stroke-width="0"></path><path d="M826.09,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M918.66,652.13v12.17h-16.52v50.2h-15.19v-50.2h-16.53v-12.17h48.24Z" fill="currentColor" stroke-width="0"></path><path d="M941.22,652.13v37.31c0,3.73.92,6.6,2.75,8.62,1.83,2.01,4.53,3.02,8.08,3.02s6.28-1.01,8.17-3.02c1.89-2.01,2.84-4.89,2.84-8.62v-37.31h15.19v37.23c0,5.57-1.19,10.28-3.55,14.13-2.37,3.85-5.55,6.75-9.55,8.71-4,1.95-8.46,2.93-13.37,2.93s-9.31-.96-13.19-2.89c-3.88-1.92-6.95-4.83-9.2-8.71-2.25-3.88-3.38-8.6-3.38-14.17v-37.23h15.19Z" fill="currentColor" stroke-width="0"></path><path d="M1020.74,714.5l-12.97-23.54h-3.64v23.54h-15.19v-62.37h25.5c4.92,0,9.11.86,12.57,2.58s6.06,4.07,7.77,7.06c1.72,2.99,2.58,6.32,2.58,10,0,4.15-1.17,7.85-3.51,11.11-2.34,3.26-5.79,5.57-10.35,6.93l14.39,24.7h-17.15ZM1004.12,680.2h9.42c2.78,0,4.87-.68,6.26-2.04,1.39-1.36,2.09-3.29,2.09-5.77s-.7-4.23-2.09-5.6c-1.39-1.36-3.48-2.04-6.26-2.04h-9.42v15.46Z" fill="currentColor" stroke-width="0"></path><path d="M1060.23,711.03c-4.89-2.72-8.77-6.53-11.64-11.42-2.87-4.89-4.31-10.38-4.31-16.48s1.44-11.58,4.31-16.44c2.87-4.86,6.75-8.65,11.64-11.37,4.89-2.72,10.26-4.09,16.12-4.09s11.24,1.36,16.12,4.09c4.89,2.73,8.74,6.52,11.55,11.37,2.81,4.86,4.22,10.34,4.22,16.44s-1.42,11.59-4.26,16.48c-2.84,4.89-6.69,8.69-11.55,11.42-4.86,2.72-10.22,4.09-16.08,4.09s-11.24-1.36-16.12-4.09ZM1088.3,696.28c2.99-3.32,4.49-7.7,4.49-13.15s-1.5-9.91-4.49-13.19c-2.99-3.29-6.97-4.93-11.95-4.93s-9.05,1.63-12.04,4.89c-2.99,3.26-4.49,7.67-4.49,13.24s1.5,9.91,4.49,13.19c2.99,3.29,7,4.93,12.04,4.93s8.96-1.66,11.95-4.98Z" fill="currentColor" stroke-width="0"></path></g></svg></span>
+    <div class="ttl"><small>Reclamos</small><h1>Atención de reclamos</h1></div>
+    <span id="estado-conexion">Conectando…</span>
+  </div>
+  <nav class="tabs" id="nav" hidden>
+    <button data-v="bandeja" class="on">Bandeja</button>
+    <button data-v="nuevo">Nuevo reclamo</button>
+  </nav>
+</header>
+<main id="app"></main>
+<div id="toast"></div>
+
+<script>
+/* ===================== Configuración ===================== */
+const SB_URL = 'https://xinnonzltoaoptnvkhhy.supabase.co';
+const SB_KEY = 'sb_publishable_DoSRSj0wmAR_UIX8tENXXQ_X5BS5a1q';
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+const EN_PORTAL = window.top !== window;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const iniciales = s => String(s || '?').split(/[\s@.]+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+const clp = RC.clp;
+function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 3600); }
+function setConexion(html){ $('#estado-conexion').innerHTML = html; }
+const hoyCL = () => RC.diaCL(new Date().toISOString());
+// Fecha corta en español de Chile: "27 nov" (con el año si no es el actual). Acepta "YYYY-MM-DD" o un instante ISO.
+function fechaCorta(s){
+  if(!s) return '';
+  const d = new Date(String(s).length === 10 ? s + 'T12:00:00' : s);
+  if(isNaN(d.getTime())) return '';
+  const o = { day: 'numeric', month: 'short', timeZone: 'America/Santiago' };
+  if(d.getFullYear() !== new Date().getFullYear()) o.year = 'numeric';
+  return d.toLocaleDateString('es-CL', o).replace(/\./g, '');
+}
+// Llama a una función de la base. Muestra el mensaje de la base como aviso y devuelve { data } o { error }.
+async function rpc(nombre, args){
+  try{
+    const { data, error } = await sb.rpc(nombre, args || {});
+    if(error){ toast(error.message || 'No se pudo completar la acción.'); return { error }; }
+    return { data };
+  }catch(e){ toast('Sin conexión. Intenta de nuevo.'); return { error: e }; }
+}
+
+/* ===================== Estado ===================== */
+let me = null;          // {id, email, nombre, admin}
+let ALC = [];           // alcances propios [{rol, area, planta}] (el rol "vendedor" lo tiene todo usuario del módulo)
+let MOTIVOS = [];       // catálogo de motivos
+let RECS = [];          // reclamos que puedo ver
+let NOMBRES = {};       // id de persona -> nombre (null si no se pudo resolver)
+let ultimaCarga = 0;
+const F = { tab: 'pend', estado: '', area: '', planta: '', q: '', anulados: false };
+const labelMotivo = id => (MOTIVOS.find(m => m.id === id) || {}).nombre || id || '';
+const nombreDe = id => (id && NOMBRES[id]) || '';
+const COLS = 'id,folio,cliente_id,cliente_nombre,producto,producto_nombre,planta,motivo,descripcion,fecha_recepcion,estado,area_destino,planta_destino,asesor_id,decision,compensacion,comunicado_en,cerrado_en,creado_por,creado_en,actualizado_en';
+
+/* ===================== Sesión y acceso ===================== */
+function pantallaLogin(msg){
+  $('#nav').hidden = true;
+  setConexion(EN_PORTAL ? '' : '<a href="./">Portal</a>');
+  $('#app').innerHTML = `<form class="card gate" id="login">
+    <span class="txmark">${$('.topbar .txmark').innerHTML}</span>
+    <h2>Ingresar</h2>
+    ${msg ? `<div class="aviso" style="margin-top:8px">${esc(msg)}</div>` : ''}
+    <label>Correo</label><input id="lg-email" type="email" autocomplete="username" required>
+    <label>Contraseña</label><input id="lg-pass" type="password" autocomplete="current-password" required>
+    <div class="acciones"><button class="btn" id="lg-btn" type="submit">Ingresar</button></div>
+    <p class="small" style="margin-top:12px">Usa el mismo correo y contraseña de las apps Grupo TX.</p>
+  </form>`;
+  $('#login').onsubmit = async e => {
+    e.preventDefault();
+    const b = $('#lg-btn'); b.disabled = true; b.textContent = 'Ingresando…';
+    const { error } = await sb.auth.signInWithPassword({ email: $('#lg-email').value.trim(), password: $('#lg-pass').value });
+    if(error) return pantallaLogin(/invalid/i.test(error.message) ? 'Correo o contraseña incorrectos.' : error.message);
+    iniciar();
+  };
+}
+function tarjeta(titulo, html){
+  $('#nav').hidden = true;
+  $('#app').innerHTML = `<div class="card gate"><h2>${titulo}</h2>${html}</div>`;
+}
+const botonesSalida = () => `<div class="acciones">${EN_PORTAL ? '' : '<a class="btn" href="./">Volver al portal</a>'}<button class="ghost" id="b-salir">Cerrar sesión</button></div>`;
+function ligarSalida(){ const b = $('#b-salir'); if(b) b.onclick = () => sb.auth.signOut().then(() => location.reload()); }
+
+async function iniciar(){
+  setConexion('Conectando…');
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session) return pantallaLogin();
+  let prof = null, acceso = null;
+  try{
+    const [a, p] = await Promise.all([
+      sb.rpc('rec_tengo_acceso'),
+      sb.from('profiles').select('nombre,email,rol,activo').eq('id', session.user.id).maybeSingle()]);
+    acceso = a; prof = p.data;
+  }catch(e){ acceso = { error: e }; }
+  const p = prof || {};
+  me = { id: session.user.id, email: session.user.email,
+         nombre: p.nombre || session.user.user_metadata?.nombre || session.user.email.split('@')[0],
+         admin: !!(p.activo && p.rol === 'admin') };
+  setConexion(esc(me.nombre));
+  if(!acceso || acceso.error){
+    tarjeta('No se pudo verificar tu acceso', `<p class="small">Revisa tu conexión e inténtalo de nuevo.</p><div class="acciones"><button class="btn" id="b-reint">Reintentar</button></div>`);
+    $('#b-reint').onclick = iniciar;
+    return;
+  }
+  if(!acceso.data){
+    tarjeta('Sin acceso a Reclamos', `<p>Tu cuenta (${esc(me.email)}) todavía no tiene acceso a este módulo. Pídele al administrador que te habilite en <b>Usuarios y accesos</b>.</p>${botonesSalida()}`);
+    ligarSalida();
+    return;
+  }
+  // 2FA: si falla por red u otra razón, TMfa.gate no bloquea (ver mfa-gate.js).
+  if(!(await TMfa.gate(sb, { requireEnrollment: me.admin }))) return;
+  try{ await cargarBase(); await cargarReclamos(); }
+  catch(e){
+    tarjeta('No se pudieron cargar los datos', `<p class="small">${esc(e.message || e)}</p><div class="acciones"><button class="btn" id="b-reint">Reintentar</button></div>`);
+    $('#b-reint').onclick = iniciar;
+    return;
+  }
+  setConexion(`<a class="uchip" ${EN_PORTAL ? '' : 'href="./" title="Volver al portal"'}><span class="av">${esc(iniciales(me.nombre))}</span><span class="un"><b>${esc(me.nombre)}</b><small>${esc(rolesTxt())}</small></span></a>`);
+  $('#nav').hidden = false;
+  $('#app').innerHTML = shell();
+  ligarEventos();
+  mostrar();
+}
+const rolesTxt = () => {
+  const r = [...new Set(ALC.map(a => RC.labelDe(RC.ROLES, a.rol)))];
+  return (me.admin ? ['Administrador'] : []).concat(r.length ? r : ['Vendedor']).join(' · ');
+};
+async function cargarBase(){
+  const [al, mo] = await Promise.all([
+    sb.from('rec_alcances').select('rol,area,planta').eq('usuario_id', me.id),
+    sb.from('rec_motivos').select('id,nombre,requiere_producto,area_sugerida,orden,activo').order('orden')]);
+  if(al.error || mo.error) throw new Error((al.error || mo.error).message);
+  ALC = al.data || []; MOTIVOS = mo.data || [];
+}
+async function resolverNombres(ids){
+  const falta = [...new Set(ids.filter(x => x && !(x in NOMBRES)))];
+  for(let i = 0; i < falta.length; i += 200){
+    const lote = falta.slice(i, i + 200);
+    const { data } = await sb.rpc('rec_nombres', { p_ids: lote });
+    (data || []).forEach(p => { NOMBRES[p.id] = p.nombre; });
+    lote.forEach(id => { if(!(id in NOMBRES)) NOMBRES[id] = null; });
+  }
+}
+async function cargarReclamos(){
+  const { data, error } = await sb.from('rec_reclamos').select(COLS).order('creado_en', { ascending: false }).limit(1000);
+  if(error) throw new Error(error.message);
+  RECS = data || [];
+  try{ await resolverNombres(RECS.flatMap(r => [r.asesor_id, r.creado_por])); }catch(e){ /* los nombres son accesorios */ }
+  ultimaCarga = Date.now();
+}
+
+/* ===================== Estructura y rutas ===================== */
+function shell(){
+  return `<section data-v="bandeja" id="v-bandeja" hidden></section>
+  <section data-v="nuevo" id="v-nuevo" hidden></section>
+  <section data-v="detalle" id="v-detalle" hidden></section>`;
+}
+function ligarEventos(){
+  $('#nav').onclick = e => { const b = e.target.closest('button[data-v]'); if(b) location.hash = b.dataset.v; };
+  addEventListener('hashchange', mostrar);
+}
+function ruta(){
+  const h = location.hash.replace(/^#/, '');
+  if(h.startsWith('r/')) return { v: 'detalle', id: h.slice(2) };
+  if(['nuevo'].includes(h)) return { v: h };
+  return { v: 'bandeja' };
+}
+function mostrar(){
+  if(!me || !$('#v-bandeja')) return;
+  const r = ruta();
+  document.querySelectorAll('[data-v]').forEach(el => {
+    if(el.tagName === 'SECTION') el.hidden = el.dataset.v !== r.v;
+    else el.classList.toggle('on', el.dataset.v === (r.v === 'detalle' ? 'bandeja' : r.v));
+  });
+  window.scrollTo(0, 0);
+  if(r.v === 'bandeja') renderBandeja();
+  else if(r.v === 'nuevo') renderNuevo($('#v-nuevo'));
+  else renderDetalle($('#v-detalle'), r.id);
+}
+
+/* ===================== Bandeja ===================== */
+function visibles(){
+  const q = F.q.trim().toLowerCase();
+  let rs = RECS.filter(r => {
+    if(F.tab === 'pend' && !RC.pendienteDeMi(r, ALC, me.admin, me.id)) return false;
+    if(F.tab === 'info' && !RC.esInformado(r, ALC)) return false;
+    if(r.estado === 'anulado' && !F.anulados && F.estado !== 'anulado') return false;
+    if(F.estado && r.estado !== F.estado) return false;
+    if(F.area && r.area_destino !== F.area) return false;
+    if(F.planta && (r.planta_destino || r.planta) !== F.planta) return false;
+    if(q){
+      const hay = [r.folio, r.cliente_nombre, r.producto_nombre, r.producto, r.descripcion, labelMotivo(r.motivo)].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  // Los pendientes van del más antiguo al más nuevo (lo que lleva más tiempo esperando, primero).
+  if(F.tab === 'pend') rs = rs.slice().sort((a, b) => String(a.fecha_recepcion).localeCompare(String(b.fecha_recepcion)));
+  return rs;
+}
+function antiguedad(r){
+  const fin = r.comunicado_en ? RC.diaCL(r.comunicado_en) : hoyCL();
+  const ini = String(r.fecha_recepcion).slice(0, 10);
+  return Math.max(0, RC.fechaValida(ini) && fin ? RC.diasEntre(ini, fin) : 0);
+}
+function responsable(r){
+  switch(r.estado){
+    case 'ingresado': return 'Servicio al cliente · por derivar';
+    case 'derivado': return RC.labelDe(RC.AREAS, r.area_destino) + (r.planta_destino ? ' · ' + RC.labelDe(RC.PLANTAS, r.planta_destino) : '');
+    case 'en_verificacion': return 'Asesor técnico · ' + (nombreDe(r.asesor_id) || 'sin nombre');
+    case 'aprobado': case 'rechazado': case 'solucion_definida': case 'comunicado': return 'Servicio al cliente';
+    default: return '';
+  }
+}
+function filaRec(r){
+  const d = antiguedad(r), abierto = !['comunicado', 'cerrado', 'anulado'].includes(r.estado);
+  const plt = r.planta_destino || r.planta;
+  const pendiente = F.tab !== 'pend' && RC.pendienteDeMi(r, ALC, me.admin, me.id);
+  return `<a class="rec est-${esc(r.estado)}" href="#r/${esc(r.id)}">
+    <div class="rec-top"><b class="folio">${esc(r.folio)}</b><span class="est est-${esc(r.estado)}">${esc(RC.labelDe(RC.ESTADOS, r.estado))}</span>${pendiente ? '<span class="pend">Pendiente de ti</span>' : ''}<span class="edad${abierto && d >= 7 ? ' alta' : ''}" title="Días desde la recepción">${d} d</span></div>
+    <div class="rec-cli">${esc(r.cliente_nombre || 'Cliente sin nombre')}</div>
+    <div class="rec-mot"><span>${esc(labelMotivo(r.motivo))}</span>${r.producto_nombre ? `<span>· ${esc(r.producto_nombre)}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}</div>
+    <div class="rec-resp"><span>${esc(responsable(r))}</span><span>· Recibido ${esc(fechaCorta(r.fecha_recepcion))}</span></div>
+  </a>`;
+}
+function listaHtml(){
+  const rs = visibles();
+  if(rs.length) return `<div class="lista">${rs.map(filaRec).join('')}</div>`;
+  if(!RECS.length) return `<div class="card sin"><b>Aún no hay reclamos.</b><br><span class="small">Cuando se ingrese uno aparecerá aquí.</span><div class="acciones" style="justify-content:center"><button class="btn" data-ir="nuevo">Nuevo reclamo</button></div></div>`;
+  const hayFiltro = F.estado || F.area || F.planta || F.q.trim() || F.anulados;
+  if(F.tab === 'pend' && !hayFiltro) return `<div class="card sin"><b>No tienes reclamos pendientes.</b><br><span class="small">Lo que dependa de ti aparecerá aquí.</span></div>`;
+  if(F.tab === 'info' && !hayFiltro) return `<div class="card sin"><b>No hay reclamos de calidad en tu planta.</b></div>`;
+  return `<div class="card sin"><b>Ningún reclamo coincide con los filtros.</b><div class="acciones" style="justify-content:center"><button class="ghost" data-limpiar>Quitar filtros</button></div></div>`;
+}
+function renderBandeja(){
+  const el = $('#v-bandeja');
+  const nPend = RECS.filter(r => RC.pendienteDeMi(r, ALC, me.admin, me.id)).length;
+  const nInfo = RECS.filter(r => RC.esInformado(r, ALC)).length;
+  const conInfo = ALC.some(a => a.rol === 'encargado_calidad');
+  if(!conInfo && F.tab === 'info') F.tab = 'pend';
+  const opt = (lista, v) => lista.map(x => `<option value="${esc(x.id)}"${x.id === v ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
+  el.innerHTML = `
+    <div class="subtabs" id="subtabs">
+      <button data-tab="pend" class="${F.tab === 'pend' ? 'on' : ''}">Pendientes de mí${nPend ? `<span class="n">${nPend}</span>` : ''}</button>
+      <button data-tab="todos" class="${F.tab === 'todos' ? 'on' : ''}">Todos los que puedo ver<span class="n" style="background:var(--sunk);color:var(--mute)">${RECS.filter(r => r.estado !== 'anulado').length}</span></button>
+      ${conInfo ? `<button data-tab="info" class="${F.tab === 'info' ? 'on' : ''}">Informados${nInfo ? `<span class="n" style="background:var(--sunk);color:var(--mute)">${nInfo}</span>` : ''}</button>` : ''}
+    </div>
+    <div class="filtros">
+      <input type="search" id="f-q" placeholder="Buscar por folio, cliente, producto o texto" value="${esc(F.q)}" aria-label="Buscar">
+      <select id="f-estado" aria-label="Estado"><option value="">Todos los estados</option>${opt(RC.ESTADOS, F.estado)}</select>
+      <select id="f-area" aria-label="Área"><option value="">Todas las áreas</option>${opt(RC.AREAS, F.area)}</select>
+      <select id="f-planta" aria-label="Planta"><option value="">Todas las plantas</option>${opt(RC.PLANTAS, F.planta)}</select>
+      <label><input type="checkbox" id="f-anul"${F.anulados ? ' checked' : ''}> Ver anulados</label>
+      <button class="ghost btn sm" id="f-act" title="Volver a cargar los reclamos">Actualizar</button>
+    </div>
+    <div id="lista">${listaHtml()}</div>`;
+  $('#subtabs').onclick = e => { const b = e.target.closest('button[data-tab]'); if(b){ F.tab = b.dataset.tab; renderBandeja(); } };
+  $('#f-q').oninput = e => { F.q = e.target.value; refrescarLista(); };
+  $('#f-estado').onchange = e => { F.estado = e.target.value; refrescarLista(); };
+  $('#f-area').onchange = e => { F.area = e.target.value; refrescarLista(); };
+  $('#f-planta').onchange = e => { F.planta = e.target.value; refrescarLista(); };
+  $('#f-anul').onchange = e => { F.anulados = e.target.checked; refrescarLista(); };
+  $('#f-act').onclick = async () => { const b = $('#f-act'); b.disabled = true; try{ await cargarReclamos(); }catch(e){ toast('No se pudo actualizar: ' + (e.message || e)); } renderBandeja(); };
+  if(Date.now() - ultimaCarga > 30000) recargarSilencioso();
+}
+function refrescarLista(){
+  $('#lista').innerHTML = listaHtml();
+  ligarListaAcciones();
+}
+function ligarListaAcciones(){
+  const lim = $('#lista [data-limpiar]');
+  if(lim) lim.onclick = () => { Object.assign(F, { estado: '', area: '', planta: '', q: '', anulados: false }); renderBandeja(); };
+  const ir = $('#lista [data-ir]');
+  if(ir) ir.onclick = () => { location.hash = ir.dataset.ir; };
+}
+// Al volver a la bandeja con datos viejos, se recarga sin molestar y se redibuja si no se está escribiendo.
+async function recargarSilencioso(){
+  ultimaCarga = Date.now();
+  try{ await cargarReclamos(); }catch(e){ return; }
+  const el = $('#v-bandeja');
+  if(el && !el.hidden && document.activeElement?.id !== 'f-q') renderBandeja();
+}
+
+/* ===================== Ingreso y detalle: se completan en las Tareas 8 y 9 ===================== */
+function renderNuevo(el){ el.innerHTML = `<div class="card sin">El ingreso de reclamos se habilita en el siguiente paso.</div>`; }
+function renderDetalle(el, id){ el.innerHTML = `<div class="card sin">Detalle del reclamo <b>${esc(id)}</b> (siguiente paso).<div class="acciones" style="justify-content:center"><a class="btn ghost" href="#bandeja">Volver a la bandeja</a></div></div>`; }
+
+sb.auth.onAuthStateChange(ev => { if(ev === 'SIGNED_OUT') location.reload(); });
+document.addEventListener('click', e => { const ir = e.target.closest('[data-ir]'); if(ir && !ir.closest('#lista')) location.hash = ir.dataset.ir; });
+iniciar();
+</script>
+</body>
+</html>
