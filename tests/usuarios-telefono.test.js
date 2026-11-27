@@ -130,3 +130,11 @@ test('si la base rechaza el teléfono se muestra el aviso y se recarga la lista'
   assert.deepEqual(rpcs.map((r) => r.fn), ['admin_set_telefono', 'admin_usuarios']);
   assert.equal(toast().textContent, msg);
 });
+
+test('la cabecera .uc-h declara una columna por cada celda de la ficha (nombre, correo, cargo, teléfono, estado)', () => {
+  const m = html.match(/\.uc-h\{[^}]*grid-template-columns:([^;}]*)/);
+  assert.ok(m, 'falta el grid de .uc-h');
+  // Cuenta las pistas de nivel superior (los espacios dentro de minmax(...) no separan pistas).
+  const pistas = m[1].replace(/\([^)]*\)/g, 'x').trim().split(/\s+/);
+  assert.equal(pistas.length, 5);
+});
