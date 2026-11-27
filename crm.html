@@ -1757,6 +1757,9 @@ function productForm(code){const p=code?P(code):null;const isNew=!p;const d=p||{
 
 /* ============ FICHAS TÉCNICAS ============ */
 let FS={pregunta:'',fichas:[]};
+// Formato mínimo de la respuesta del bot (negrita, cursiva, viñetas): se escapa PRIMERO todo el texto y recién
+// después se agregan las pocas etiquetas permitidas, así nada de lo que venga del modelo se interpreta como HTML.
+function mdMini(s){return esc(s).replace(/^[ \t]*[*-][ \t]+/gm,'• ').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:]|$)/g,'$1<i>$2</i>').replace(/\n/g,'<br>')}
 async function cargarFichas(){const{data,error}=await sb.from('fichas_tecnicas').select('id,nombre,categoria,version').order('nombre');if(!error)FS.fichas=data||[]}
 function vFichas(){
  M().innerHTML=`<div class="ph"><div><h1>Fichas técnicas</h1><p>Pregunta en lenguaje natural sobre los productos; el bot responde citando la ficha real.</p></div>${can('productos')?`<button class="btn pri" data-act="subirFicha">${ico('plus')}Subir ficha nueva</button>`:''}</div>
@@ -1784,7 +1787,7 @@ async function preguntarFicha(){
   if(!r.ok||j.error){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>${esc(j.error||'No se pudo responder.')}</span></div>`;return}
   if(j.sin_resultado){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>No encontré información sobre eso en las fichas técnicas.</span></div>`;return}
   const links=await Promise.all((j.fichas||[]).map(async f=>{const{data}=await sb.storage.from('fichas-tecnicas').createSignedUrl(f.storage_path,3600);return`<a href="${data&&data.signedUrl||'#'}" target="_blank">${esc(f.nombre)}</a>`}));
-  $('#fi-resp').innerHTML=`<div class="note"><span>${esc(j.respuesta).replace(/\n/g,'<br>')}${links.length?`<br><span class="small muted">Fuente: ${links.join(', ')}</span>`:''}</span></div>`;
+  $('#fi-resp').innerHTML=`<div class="note"><span>${mdMini(j.respuesta)}${links.length?`<br><span class="small muted">Fuente: ${links.join(', ')}</span>`:''}</span></div>`;
  }catch(e){$('#fi-resp').innerHTML=`<div class="note warn">${ico('alert')}<span>No se pudo conectar. Revisa tu conexión.</span></div>`}
  finally{btn.disabled=false;btn.textContent='Preguntar'}
 }
