@@ -31,11 +31,15 @@ update public.rec_reclamos r
 alter table public.profiles add column if not exists telefono text;
 
 -- ───────────────────────── Ayudantes internos ─────────────────────────
--- Recorta como String.prototype.trim (espacios, tabuladores, saltos de línea, espacio duro) y vacío → null.
+-- Recorta como String.prototype.trim y vacío → null. Mismo conjunto que JS: tab, LF, VT, FF, CR, espacio, NBSP, U+1680,
+-- U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 y U+FEFF (BOM).
 create or replace function app.rec_txt(p text)
 returns text language sql immutable security definer set search_path = ''
 as $$
-  select nullif(btrim(coalesce(p, ''), ' ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) || chr(160)), '')
+  select nullif(btrim(coalesce(p, ''),
+    chr(9) || chr(10) || chr(11) || chr(12) || chr(13) || chr(32) || chr(160) || chr(5760)
+    || chr(8192) || chr(8193) || chr(8194) || chr(8195) || chr(8196) || chr(8197) || chr(8198) || chr(8199) || chr(8200)
+    || chr(8201) || chr(8202) || chr(8232) || chr(8233) || chr(8239) || chr(8287) || chr(12288) || chr(65279)), '')
 $$;
 
 -- Teléfono recortado (null si viene vacío). Solo dígitos, espacios y + ( ) - . ; máximo 30 caracteres y al menos 7 dígitos.
@@ -104,7 +108,10 @@ begin
   v_tel := app.rec_txt(p->>'telefono');
   if v_nombre is null then raise exception 'Escribe el nombre de quien reclama.'; end if;
   if v_correo is null and v_tel is null then raise exception 'Indica un correo o un teléfono de contacto.'; end if;
-  if v_correo is not null and v_correo !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+  -- Equivale a /^[^\s@]+@[^\s@]+\.[^\s@]+$/ de JS. Se listan los espacios de \s de JS uno a uno: [[:space:]] no
+  -- sirve porque no incluye U+FEFF y sí incluye U+0085.
+  if v_correo is not null and v_correo !~
+       '^[^\t\n\v\f\r    -     　﻿@]+@[^\t\n\v\f\r    -     　﻿@]+\.[^\t\n\v\f\r    -     　﻿@]+$' then
     raise exception 'El correo no tiene un formato válido.';
   end if;
   return jsonb_build_object('tipo', 'cliente', 'id', null, 'nombre', v_nombre, 'correo', v_correo,

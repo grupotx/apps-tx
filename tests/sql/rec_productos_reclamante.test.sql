@@ -151,6 +151,31 @@ begin
     raise exception 'caso 3d: cliente guarda los datos recortados y sin id: %', to_jsonb(r);
   end if;
 
+  -- ── (3b) espacios Unicode: igual que trim() y \s de JS (reclamos-core.js) ──
+  c := public.rec_crear(cli, null, 'otro', 'Teléfono con NNBSP', hoy, '{}'::jsonb,
+    jsonb_build_object('tipo', 'cliente', 'nombre', chr(12288) || 'Ana' || chr(8195), 'telefono', '+56 9 1234 5678' || chr(8239)));
+  select * into r from public.rec_reclamos where id = c;
+  if r.reclamante_telefono is distinct from '+56 9 1234 5678' or r.reclamante_nombre is distinct from 'Ana' then
+    raise exception 'caso 3e: U+202F, U+3000 y U+2003 se recortan como en JS: %', to_jsonb(r);
+  end if;
+  c := public.rec_crear(cli, null, 'otro', 'Teléfono con BOM', hoy, '{}'::jsonb,
+    jsonb_build_object('tipo', 'cliente', 'nombre', 'Ana', 'telefono', chr(65279) || '+56 9 1234 5678'));
+  if (select reclamante_telefono from public.rec_reclamos where id = c) is distinct from '+56 9 1234 5678' then raise exception 'caso 3f: U+FEFF se recorta'; end if;
+  perform pg_temp.espera('3g', pg_temp.fc(cli, null, 'otro', jsonb_build_object('tipo', 'cliente', 'nombre', chr(12288), 'telefono', '+56 9 1234 5678')),
+    'Escribe el nombre de quien reclama.');
+  perform pg_temp.espera('3h', pg_temp.fc(cli, null, 'otro', jsonb_build_object('tipo', 'cliente', 'nombre', 'Ana', 'correo', chr(8195) || chr(65279))),
+    'Indica un correo o un teléfono de contacto.');
+  perform pg_temp.espera('3i', pg_temp.fc(cli, array[p_a, chr(160) || p_a || chr(160)], 'otro', rc), 'Hay productos repetidos.');
+  perform pg_temp.espera('3j', pg_temp.fc(cli, array[p_a, p_a || chr(65279)], 'otro', rc), 'Hay productos repetidos.');
+  c := public.rec_crear(cli, array[chr(8239) || p_a || chr(65279)], 'calidad_producto', 'Código con espacios Unicode', hoy, '{}'::jsonb, rc);
+  if (select producto from public.rec_reclamos where id = c) is distinct from p_a then raise exception 'caso 3k: el código se recorta como en JS'; end if;
+  -- correo: \s de JS incluye U+FEFF y U+3000 pero no U+0085
+  perform pg_temp.espera('3l', pg_temp.fc(cli, null, 'otro', jsonb_build_object('tipo', 'cliente', 'nombre', 'Ana', 'correo', 'ana' || chr(65279) || 'x@cliente.cl')),
+    'El correo no tiene un formato válido.');
+  perform pg_temp.espera('3m', pg_temp.fc(cli, null, 'otro', jsonb_build_object('tipo', 'cliente', 'nombre', 'Ana', 'correo', 'ana' || chr(12288) || 'x@cliente.cl')),
+    'El correo no tiene un formato válido.');
+  perform pg_temp.espera('3n', pg_temp.fc(cli, null, 'otro', jsonb_build_object('tipo', 'cliente', 'nombre', 'Ana', 'correo', 'ana' || chr(133) || 'x@cliente.cl')), null);
+
   -- ── (4) rec_actualizar ──
   select actualizado_en into tok from public.rec_reclamos where id = a;
   perform public.rec_actualizar(a, array[p_p, p_m], null, tok, null);
