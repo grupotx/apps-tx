@@ -379,6 +379,10 @@ function mostrar(){
 }
 
 /* ===================== Bandeja ===================== */
+// Texto sobre el que busca la bandeja: todos los productos (también los reclamos antiguos) y el reclamante.
+function textoBusqueda(r){
+  return [r.folio, r.cliente_nombre, RC.textoProductos(r), r.producto, r.descripcion, labelMotivo(r.motivo), r.reclamante_nombre].join(' ').toLowerCase();
+}
 function visibles(){
   const q = F.q.trim().toLowerCase();
   let rs = RECS.filter(r => {
@@ -389,8 +393,7 @@ function visibles(){
     if(F.area && r.area_destino !== F.area) return false;
     if(F.planta && (r.planta_destino || r.planta) !== F.planta) return false;
     if(q){
-      const hay = [r.folio, r.cliente_nombre, r.producto_nombre, r.producto, r.descripcion, labelMotivo(r.motivo)].join(' ').toLowerCase();
-      if(!hay.includes(q)) return false;
+      if(!textoBusqueda(r).includes(q)) return false;
     }
     return true;
   });
@@ -419,7 +422,7 @@ function filaRec(r){
   return `<a class="rec est-${esc(r.estado)}" href="#r/${esc(r.id)}">
     <div class="rec-top"><b class="folio">${esc(r.folio)}</b><span class="est est-${esc(r.estado)}">${esc(RC.labelDe(RC.ESTADOS, r.estado))}</span>${pendiente ? '<span class="pend">Pendiente de ti</span>' : ''}<span class="edad${abierto && d >= 7 ? ' alta' : ''}" title="Días desde la recepción">${d} d</span></div>
     <div class="rec-cli">${esc(r.cliente_nombre || 'Cliente sin nombre')}</div>
-    <div class="rec-mot"><span>${esc(labelMotivo(r.motivo))}</span>${r.producto_nombre ? `<span>· ${esc(r.producto_nombre)}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}</div>
+    <div class="rec-mot"><span>${esc(labelMotivo(r.motivo))}</span>${RC.resumenProductos(r) ? `<span>· ${esc(RC.resumenProductos(r))}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}</div>
     <div class="rec-resp"><span>${esc(responsable(r))}</span><span>· Recibido ${esc(fechaCorta(r.fecha_recepcion))}</span></div>
   </a>`;
 }
@@ -1100,13 +1103,19 @@ async function renderPanel(el){
 }
 function filtrarPanel(){
   const f = PAN.f;
-  return RECS.filter(r => (!f.area || r.area_destino === f.area) && (!f.planta || (r.planta_destino || r.planta) === f.planta) && (!f.motivo || r.motivo === f.motivo) && (!f.producto || r.producto === f.producto));
+  return RECS.filter(r => (!f.area || r.area_destino === f.area) && (!f.planta || (r.planta_destino || r.planta) === f.planta) && (!f.motivo || r.motivo === f.motivo) && (!f.producto || RC.productosDe(r).some(p => p.code === f.producto)));
+}
+// Código → nombre de todos los productos de todos los reclamos (cualquier posición de la lista), ordenado por nombre.
+function productosPanel(rs){
+  const mapa = new Map();
+  rs.forEach(r => RC.productosDe(r).forEach(p => { if(!mapa.has(p.code)) mapa.set(p.code, p.nombre || p.code); }));
+  return [...mapa.entries()].sort((a, b) => a[1].localeCompare(b[1]));
 }
 function pintarPanel(el){
   const f = PAN.f, per = { desde: f.desde, hasta: f.hasta };
   const base = filtrarPanel();
   const m = RC.metricas(base, PAN.ev, per);
-  const productos = [...new Map(RECS.filter(r => r.producto).map(r => [r.producto, r.producto_nombre || r.producto])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const productos = productosPanel(RECS);
   const nomProd = c => (productos.find(p => p[0] === c) || [c, c])[1];
   const dias = x => (x == null ? '—' : String(x).replace('.', ',') + ' d');
   const filas = (conteo, costo, etiqueta) => Object.keys(conteo).map(k => ({ k, n: conteo[k], c: costo[k] == null ? null : costo[k] }))
@@ -1166,17 +1175,21 @@ function pintarPanel(el){
 }
 // CSV con ";" y BOM (Excel en español). Los textos que empiezan con = + - @ se neutralizan (inyección de fórmulas).
 function exportarCsv(rs){
-  const cab = ['Folio', 'Cliente', 'Producto', 'Planta', 'Motivo', 'Área', 'Estado', 'Recepción', 'Comunicado', 'Días de respuesta', 'Compensación'];
-  const filas = rs.map(r => {
-    const ini = String(r.fecha_recepcion).slice(0, 10), com = r.comunicado_en ? RC.diaCL(r.comunicado_en) : '';
-    return [r.folio, r.cliente_nombre || '', r.producto_nombre || '', RC.labelDe(RC.PLANTAS, r.planta_destino || r.planta), labelMotivo(r.motivo), RC.labelDe(RC.AREAS, r.area_destino),
-      RC.labelDe(RC.ESTADOS, r.estado), ini, com, com ? Math.max(0, RC.diasEntre(ini, com)) : '', r.compensacion == null ? '' : r.compensacion];
-  });
-  const q = v => { let s = String(v ?? ''); if(/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
-  const txt = '﻿' + [cab, ...filas].map(f => f.map(q).join(';')).join('\r\n');
-  const url = URL.createObjectURL(new Blob([txt], { type: 'text/csv;charset=utf-8' }));
+  const url = URL.createObjectURL(new Blob([textoCsv(rs)], { type: 'text/csv;charset=utf-8' }));
   const a = document.createElement('a'); a.href = url; a.download = `reclamos-${hoyCL()}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+// Texto completo del CSV: BOM, ";", CRLF. Los textos que empiezan con = + - @ se neutralizan (inyección de fórmulas).
+function textoCsv(rs){
+  const cab = ['Folio', 'Cliente', 'Producto', 'Planta', 'Motivo', 'Área', 'Estado', 'Recepción', 'Comunicado', 'Días de respuesta', 'Compensación', 'Reclamante (tipo)', 'Reclamante (nombre)', 'Reclamante (correo)', 'Reclamante (teléfono)'];
+  const filas = rs.map(r => {
+    const ini = String(r.fecha_recepcion).slice(0, 10), com = r.comunicado_en ? RC.diaCL(r.comunicado_en) : '';
+    return [r.folio, r.cliente_nombre || '', RC.textoProductos(r), RC.labelDe(RC.PLANTAS, r.planta_destino || r.planta), labelMotivo(r.motivo), RC.labelDe(RC.AREAS, r.area_destino),
+      RC.labelDe(RC.ESTADOS, r.estado), ini, com, com ? Math.max(0, RC.diasEntre(ini, com)) : '', r.compensacion == null ? '' : r.compensacion,
+      RC.labelDe(RC.RECLAMANTES, r.reclamante_tipo), r.reclamante_nombre || '', r.reclamante_correo || '', r.reclamante_telefono || ''];
+  });
+  const q = v => { let s = String(v ?? ''); if(/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+  return '﻿' + [cab, ...filas].map(f => f.map(q).join(';')).join('\r\n');
 }
 
 /* ===================== Accesos (administración) ===================== */

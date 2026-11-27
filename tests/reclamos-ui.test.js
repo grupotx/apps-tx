@@ -174,3 +174,77 @@ test('contactoReclamante: une solo lo que existe', () => {
   assert.equal(f({ reclamante_nombre: 'Ana', reclamante_correo: null, reclamante_telefono: '123' }), 'Ana · 123');
   assert.equal(f({}), '');
 });
+
+// ── Bandeja, panel y CSV: funciones puras extraídas y ejecutadas ──
+const nuevoR = { id: 'n', folio: 'R-2', cliente_nombre: 'Cli Dos', motivo: 'calidad', estado: 'comunicado', fecha_recepcion: '2026-11-01', comunicado_en: '2026-11-05T15:00:00Z', compensacion: 1001, area_destino: 'planta', planta_destino: 'osorno', planta: null, producto: 'P1', producto_nombre: 'Alfa',
+  productos: [{ code: 'P1', nombre: 'Alfa', planta: 'osorno' }, { code: 'P2', nombre: 'Beta', planta: 'osorno' }],
+  reclamante_tipo: 'cliente', reclamante_id: null, reclamante_nombre: '=HYPERLINK("x")', reclamante_correo: 'a@b.cl', reclamante_telefono: '+56 9 1234 5678' };
+const viejoR = { id: 'v', folio: 'R-1', cliente_nombre: 'Cli Uno', motivo: 'otro', estado: 'ingresado', fecha_recepcion: '2026-10-01', producto: 'P3', producto_nombre: 'Gamma', planta: 'osorno', productos: null, reclamante_tipo: null };
+const sinProd = { id: 's', folio: 'R-3', motivo: 'otro', estado: 'ingresado', fecha_recepcion: '2026-10-02' };
+
+test('textoBusqueda: incluye todos los productos y el reclamante, y no falla con reclamos antiguos', () => {
+  const f = new Function('RC', 'labelMotivo', funcion('textoBusqueda') + '; return textoBusqueda;')(RC, id => id || '');
+  assert.match(f(nuevoR), /beta/, 'el segundo producto se busca');
+  assert.match(f(nuevoR), /hyperlink/, 'el nombre del reclamante se busca');
+  assert.match(f(viejoR), /gamma/, 'reclamo antiguo: producto de las columnas antiguas');
+  assert.equal(typeof f(sinProd), 'string');
+  assert.match(f(sinProd), /r-3/);
+});
+
+test('productosPanel: código a nombre desde todos los productos de todos los reclamos, ordenado por nombre', () => {
+  const f = new Function('RC', funcion('productosPanel') + '; return productosPanel;')(RC);
+  const otro = { productos: [{ code: 'P9', nombre: 'Zeta', planta: 'osorno' }, { code: 'P0', nombre: 'Ámbar', planta: 'osorno' }] };
+  const l = f([nuevoR, viejoR, sinProd, otro]);
+  assert.deepEqual(l.map(p => p[0]), ['P1', 'P0', 'P2', 'P3', 'P9']);
+  assert.deepEqual(l.map(p => p[1]), ['Alfa', 'Ámbar', 'Beta', 'Gamma', 'Zeta']);
+  assert.equal(l.find(p => p[0] === 'P2')[1], 'Beta', 'un código que no es el primero del reclamo se resuelve a su nombre');
+});
+
+test('filtrarPanel filtra por pertenencia a la lista de productos', () => {
+  const c = cuerpo('filtrarPanel');
+  assert.match(c, /RC\.productosDe\(r\)\.some\(p => p\.code === f\.producto\)/);
+  const f = new Function('RC', 'PAN', 'RECS', funcion('filtrarPanel') + '; return filtrarPanel;');
+  const run = (prod) => f(RC, { f: { producto: prod } }, [nuevoR, viejoR, sinProd])().map(r => r.id);
+  assert.deepEqual(run('P2'), ['n'], 'segundo producto');
+  assert.deepEqual(run('P3'), ['v'], 'reclamo antiguo por su producto antiguo');
+  assert.deepEqual(run(''), ['n', 'v', 's']);
+});
+
+test('pintarPanel resuelve nombres con productosPanel (no con producto_nombre)', () => {
+  const c = cuerpo('pintarPanel');
+  assert.match(c, /productosPanel\(RECS\)/);
+  assert.doesNotMatch(c, /r\.producto_nombre/);
+});
+
+test('la tarjeta de la bandeja muestra el resumen de productos', () => {
+  const c = cuerpo('filaRec');
+  assert.match(c, /RC\.resumenProductos\(r\)/);
+  assert.doesNotMatch(c, /producto_nombre/);
+});
+
+test('textoCsv: 11 columnas actuales en orden y 4 del reclamante al final', () => {
+  const f = new Function('RC', 'labelMotivo', funcion('textoCsv') + '; return textoCsv;')(RC, id => id || '');
+  const txt = f([nuevoR, viejoR]);
+  assert.equal(txt.charCodeAt(0), 0xFEFF, 'BOM');
+  const lineas = txt.slice(1).split('\r\n');
+  assert.equal(lineas.length, 3, 'cabecera y 2 filas, separadas por CRLF');
+  const cab = lineas[0].split(';').map(s => s.replace(/^"|"$/g, ''));
+  assert.deepEqual(cab, ['Folio', 'Cliente', 'Producto', 'Planta', 'Motivo', 'Área', 'Estado', 'Recepción', 'Comunicado', 'Días de respuesta', 'Compensación', 'Reclamante (tipo)', 'Reclamante (nombre)', 'Reclamante (correo)', 'Reclamante (teléfono)']);
+});
+
+test('textoCsv: producto con todos, reclamante, neutralización y reclamo antiguo', () => {
+  const f = new Function('RC', 'labelMotivo', funcion('textoCsv') + '; return textoCsv;')(RC, id => id || '');
+  const [, n, v] = f([nuevoR, viejoR]).slice(1).split('\r\n').map(l => l.split(';'));
+  assert.equal(n[2], '"Alfa / Beta"', 'Producto con todos separados por " / "');
+  assert.equal(n[10], '"1001"');
+  assert.equal(n[11], '"Cliente"');
+  assert.equal(n[12], '"\'=HYPERLINK(""x"")"', 'nombre que empieza con = se neutraliza y se escapan comillas');
+  assert.equal(n[13], '"a@b.cl"');
+  assert.equal(n[14], '"\'+56 9 1234 5678"', 'teléfono con + inicial se neutraliza');
+  assert.equal(v[2], '"Gamma"', 'reclamo antiguo: producto de las columnas antiguas');
+  assert.deepEqual(v.slice(11), ['""', '""', '""', '""'], 'reclamo antiguo: reclamante vacío');
+});
+
+test('exportarCsv descarga el texto de textoCsv', () => {
+  assert.match(cuerpo('exportarCsv'), /textoCsv\(rs\)/);
+});
