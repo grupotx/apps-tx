@@ -293,6 +293,7 @@ function pintar(){
       <div><label>Nombre</label><input data-f="nombre" value="${esc(u.nombre||'')}" placeholder="Nombre y apellido"></div>
       <div><label>Correo</label><div class="em">${esc(u.email)}</div></div>
       <div><label>Cargo</label><input data-f="cargo" value="${esc(u.cargo||'')}" placeholder="Ej. Jefe de ventas"></div>
+      <div><label>Teléfono</label><input data-f="telefono" value="${esc(u.telefono||"")}" placeholder="+56 9 1234 5678" maxlength="30" inputmode="tel" autocomplete="off"></div>
       <div style="display:flex;gap:8px;align-items:center"><span class="pill ${u.cuenta_activa?'ok':'off'}">${u.cuenta_activa?'Cuenta activa':'Desactivada'}</span>
         <label class="sw" title="Activar o desactivar la cuenta"><input type="checkbox" data-cuenta ${u.cuenta_activa?'checked':''} ${u.id===me.id?'disabled':''}><span></span></label>
         ${u.id===me.id?'':`<button type="button" class="mini" data-reset-mfa title="Si perdió el celular con su app de autenticación: borra su 2FA actual, para que pueda activarlo de nuevo desde cero">Resetear 2FA</button>`}</div>
@@ -307,7 +308,8 @@ document.addEventListener('input',e=>{if(e.target.id==='uq'){q=e.target.value;pi
 document.addEventListener('change',async e=>{
   const t=e.target; if(t.id==='usolo'){solo=t.value;return pintar()}
   const sec=t.closest('.uc'); if(!sec)return; const id=sec.dataset.id; const u=USERS.find(x=>x.id===id);
-  if(t.dataset.f){u[t.dataset.f]=t.value.trim();await rpc('admin_set_perfil',{p_id:id,p_nombre:u.nombre||null,p_cargo:u.cargo||null},'Perfil guardado')}
+  if(t.dataset.f==='telefono'){u.telefono=t.value.trim();await rpc('admin_set_telefono',{p_id:id,p_telefono:u.telefono||null},'Teléfono guardado')}
+  else if(t.dataset.f){u[t.dataset.f]=t.value.trim();await rpc('admin_set_perfil',{p_id:id,p_nombre:u.nombre||null,p_cargo:u.cargo||null},'Perfil guardado')}
   else if(t.dataset.cuenta!==undefined){if(await rpc('admin_set_cuenta',{p_id:id,p_activo:t.checked},t.checked?'Cuenta activada':'Cuenta desactivada'))await cargar()}
   else if(t.dataset.mod){const m=MODS.find(x=>x.k===t.dataset.mod);const rol=m.roles?(sec.querySelector(`[data-rol="${m.k}"]`).value):null;
     if(await rpc('admin_set_modulo',{p_id:id,p_modulo:m.k,p_activo:t.checked,p_rol:t.checked?rol:null},t.checked?'Acceso otorgado':'Acceso quitado'))await cargar()}
