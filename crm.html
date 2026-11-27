@@ -114,6 +114,7 @@ main{padding-block:20px 90px;padding-inline:20px;min-width:0;max-width:1320px;wi
 .btn:hover{border-color:var(--fg-3)}
 .btn svg{width:16px;height:16px}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.mic{padding:8px 11px}.btn.mic.rec{background:var(--accent);border-color:var(--accent);color:var(--accent-fg);animation:micpulse 1.2s ease-in-out infinite}@keyframes micpulse{50%{box-shadow:0 0 0 6px var(--accent-2)}}@media (prefers-reduced-motion:reduce){.btn.mic.rec{animation:none}}
 .btn.pri:hover{filter:brightness(1.08)}
 .btn.good{background:var(--good);border-color:var(--good);color:#fff}
 .btn.bad{background:var(--panel);border-color:var(--bad);color:var(--bad)}
@@ -1763,17 +1764,38 @@ function mdMini(s){return esc(s).replace(/^[ \t]*[*-][ \t]+/gm,'• ').replace(/
 async function cargarFichas(){const{data,error}=await sb.from('fichas_tecnicas').select('id,nombre,categoria,version').order('nombre');if(!error)FS.fichas=data||[]}
 function vFichas(){
  M().innerHTML=`<div class="ph"><div><h1>Fichas técnicas</h1><p>Pregunta en lenguaje natural sobre los productos; el bot responde citando la ficha real.</p></div>${can('productos')?`<button class="btn pri" data-act="subirFicha">${ico('plus')}Subir ficha nueva</button>`:''}</div>
- <div class="card"><div class="fld full"><label>Pregunta</label><div class="row"><input id="fi-q" placeholder="¿Este adhesivo sirve para exterior?" value="${esc(FS.pregunta)}" style="flex:1"><button class="btn pri" id="fi-ask">Preguntar</button></div></div><div id="fi-resp"></div></div>
+ <div class="card"><div class="fld full"><label>Pregunta</label><div class="row"><input id="fi-q" placeholder="¿Este adhesivo sirve para exterior?" value="${esc(FS.pregunta)}" style="flex:1">${vozOk()?`<button type="button" class="btn mic" id="fi-mic" title="Preguntar por voz" aria-label="Preguntar por voz"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>`:''}<button class="btn pri" id="fi-ask">Preguntar</button></div></div><div id="fi-resp"></div></div>
  <div class="card" style="margin-top:14px"><h2>Fichas disponibles</h2><div id="fi-lista"><div class="empty">Cargando…</div></div></div>`;
  cargarFichas().then(drawFichasLista);
  $('#fi-ask').onclick=preguntarFicha;
  $('#fi-q').onkeydown=e=>{if(e.key==='Enter')preguntarFicha()};
+ if($('#fi-mic'))$('#fi-mic').onclick=micFichas;
  M().onclick=e=>{if(e.target.closest('[data-act="subirFicha"]'))fichaForm();const r=e.target.closest('[data-act="reemplazarFicha"]');if(r)fichaForm(r.dataset.id)};
 }
 function drawFichasLista(){
  const el=$('#fi-lista');if(!el)return;
  if(!FS.fichas.length){el.innerHTML='<div class="empty">Sin fichas subidas todavía.</div>';return}
  el.innerHTML=`<div class="tbl-w"><table><thead><tr><th>Nombre</th><th class="hide-m">Categoría</th><th>Versión</th>${can('productos')?'<th></th>':''}</tr></thead><tbody>${FS.fichas.map(f=>`<tr><td>${esc(f.nombre)}</td><td class="hide-m">${esc(f.categoria||'')}</td><td>${f.version}</td>${can('productos')?`<td><button class="btn sm" data-act="reemplazarFicha" data-id="${f.id}">Reemplazar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`;
+}
+// Preguntar por voz con el reconocimiento de voz del navegador (Chrome/Edge/Safari; Firefox no lo trae y ahí
+// el botón no aparece). Va escribiendo lo que se dice en la caja y, al terminar de hablar, envía la pregunta;
+// el texto queda visible por si hay que corregirlo y volver a preguntar.
+function vozOk(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
+let REC=null;
+function micFichas(){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
+ if(REC){REC.stop();return}
+ const btn=$('#fi-mic'),inp=$('#fi-q'),ph=inp.placeholder;let final='';
+ const r=new SR();r.lang='es-CL';r.interimResults=true;r.continuous=false;r.maxAlternatives=1;
+ r.onstart=()=>{btn.classList.add('rec');btn.setAttribute('aria-pressed','true');inp.placeholder='Escuchando…'};
+ r.onresult=e=>{let t='';for(const x of e.results)t+=x[0].transcript;inp.value=t;if(e.results[e.results.length-1].isFinal)final=t};
+ r.onerror=e=>{const c=e.error;
+  if(c==='not-allowed'||c==='service-not-allowed')toast('Permite el micrófono en el navegador para preguntar por voz.');
+  else if(c==='no-speech')toast('No te escuché. Toca el micrófono e intenta de nuevo.');
+  else if(c!=='aborted')toast('No se pudo usar el micrófono. Revisa tu conexión.')};
+ r.onend=()=>{REC=null;const b=$('#fi-mic'),i=$('#fi-q');if(b){b.classList.remove('rec');b.removeAttribute('aria-pressed')}
+  if(i){i.placeholder=ph;if(final.trim()){i.value=final.trim();preguntarFicha()}}};
+ REC=r;try{r.start()}catch(e){REC=null}
 }
 async function preguntarFicha(){
  const q=$('#fi-q').value.trim();if(!q)return;
