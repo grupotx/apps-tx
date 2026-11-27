@@ -222,7 +222,7 @@ begin
   assert not exists (select 1 from jsonb_array_elements(despues) e where (e->>'email') like 'zz.%'), 'caso 7b: sigue ocultando las cuentas zz.*';
   for fila in select e from jsonb_array_elements(despues) e loop
     assert (fila->'modulos') ?& (claves_old || claves_rep), 'caso 7c: faltan claves en modulos de ' || (fila->>'email');
-    assert (select count(*) from jsonb_object_keys(fila->'modulos')) = 15, 'caso 7c: modulos debe tener exactamente 15 claves';
+    assert (select count(*) from jsonb_object_keys(fila->'modulos')) = 16, 'caso 7c: modulos debe tener exactamente 16 claves';
     foreach k in array claves_rep loop
       assert (select count(*) from jsonb_object_keys(fila->'modulos'->k)) = 2
          and jsonb_typeof(fila->'modulos'->k->'activo') = 'boolean'
