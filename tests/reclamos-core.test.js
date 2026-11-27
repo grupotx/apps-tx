@@ -39,17 +39,17 @@ const MOTIVOS = [
   { id: 'viejo', nombre: 'Motivo retirado', requiere_producto: false, activo: false },
 ];
 const HOY = '2026-11-27';
-const valido = { cliente_id: 'c1', producto: '', motivo: 'facturacion_cobro', descripcion: 'Me cobraron dos veces', fecha_recepcion: '2026-11-26' };
+const valido = { cliente_id: 'c1', productos: [], reclamante: { tipo: 'vendedor', id: 'u1' }, motivo: 'facturacion_cobro', descripcion: 'Me cobraron dos veces', fecha_recepcion: '2026-11-26' };
 
 test('validarCrear: un caso válido sin producto con motivo que no lo exige', () => {
   assert.deepEqual(RC.validarCrear(valido, MOTIVOS, HOY), []);
 });
 
 test('validarCrear: motivo que exige producto sin producto', () => {
-  const e = RC.validarCrear({ ...valido, motivo: 'calidad_producto', producto: '' }, MOTIVOS, HOY);
+  const e = RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: [] }, MOTIVOS, HOY);
   assert.equal(e.length, 1);
   assert.match(e[0], /producto/i);
-  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', producto: 'P-001' }, MOTIVOS, HOY), []);
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: ['P-001'] }, MOTIVOS, HOY), []);
 });
 
 test('validarCrear: fecha de recepción posterior a hoy, vacía o mal escrita', () => {
@@ -68,7 +68,7 @@ test('validarCrear: descripción vacía o en blanco, cliente y motivo faltantes 
 });
 
 test('validarCrear: junta todos los errores a la vez', () => {
-  const e = RC.validarCrear({ cliente_id: '', producto: '', motivo: 'calidad_producto', descripcion: '', fecha_recepcion: '2026-12-01' }, MOTIVOS, HOY);
+  const e = RC.validarCrear({ cliente_id: '', productos: [], reclamante: { tipo: 'vendedor', id: 'u1' }, motivo: 'calidad_producto', descripcion: '', fecha_recepcion: '2026-12-01' }, MOTIVOS, HOY);
   assert.equal(e.length, 4);
 });
 
@@ -432,4 +432,161 @@ test('enPeriodo: sobre la fecha de recepción, extremos incluidos; los anulados 
 test('metricas: porProducto cuenta solo los reclamos con producto', () => {
   const m = RC.metricas([R({ id: 'a', producto: 'P1' }), R({ id: 'b', producto: 'P1' }), R({ id: 'c', producto: 'P2' }), R({ id: 'd', producto: null }), R({ id: 'e', producto: 'P9', estado: 'anulado' })], [], {});
   assert.deepEqual(m.porProducto, { P1: 2, P2: 1 });
+});
+
+// ── varios productos y reclamante ──
+const P = (code, nombre, planta) => ({ code, nombre: nombre || code, planta: planta || null });
+
+test('productosDe: usa la lista productos; un reclamo antiguo se arma con las columnas de siempre; sin nada, vacío', () => {
+  const lista = [P('A1', 'PINTURA A', 'pinturas'), P('B2', 'ADHESIVO B', 'adhesivos')];
+  assert.deepEqual(RC.productosDe({ productos: lista, producto: 'ZZ' }), lista);
+  assert.deepEqual(RC.productosDe({ producto: 'AC001-25', producto_nombre: 'ADHESIVO X', planta: 'adhesivos' }), [P('AC001-25', 'ADHESIVO X', 'adhesivos')]);
+  assert.deepEqual(RC.productosDe({ producto: 'AC001-25' }), [P('AC001-25', 'AC001-25', null)]);
+  assert.deepEqual(RC.productosDe({ productos: [], producto: 'AC001-25', producto_nombre: 'ADHESIVO X', planta: 'adhesivos' }), [P('AC001-25', 'ADHESIVO X', 'adhesivos')]);
+  assert.deepEqual(RC.productosDe({}), []);
+  assert.deepEqual(RC.productosDe({ producto: null, productos: null }), []);
+  assert.deepEqual(RC.productosDe(null), []);
+});
+
+test('resumenProductos y textoProductos: vacío, un producto, varios', () => {
+  assert.equal(RC.resumenProductos({}), '');
+  assert.equal(RC.resumenProductos({ productos: [P('A', 'ADHESIVO X')] }), 'ADHESIVO X');
+  assert.equal(RC.resumenProductos({ productos: [P('A', 'ADHESIVO X'), P('B', 'B'), P('C', 'C')] }), 'ADHESIVO X +2');
+  assert.equal(RC.resumenProductos({ producto: 'P1', producto_nombre: 'ANTIGUO' }), 'ANTIGUO');
+  assert.equal(RC.textoProductos({}), '');
+  assert.equal(RC.textoProductos({ productos: [P('A', 'A'), P('B', 'B')] }), 'A / B');
+  assert.equal(RC.textoProductos({ producto: 'P1', producto_nombre: 'ANTIGUO' }), 'ANTIGUO');
+});
+
+test('plantasDe: plantas distintas en orden de aparición, sin nulos', () => {
+  assert.deepEqual(RC.plantasDe({ productos: [P('A', 'A', 'pinturas'), P('B', 'B', 'adhesivos'), P('C', 'C', 'pinturas')] }), ['pinturas', 'adhesivos']);
+  assert.deepEqual(RC.plantasDe({ productos: [P('A', 'A', null), P('B', 'B', 'morteros')] }), ['morteros']);
+  assert.deepEqual(RC.plantasDe({ producto: 'P1', planta: 'cementos' }), ['cementos']);
+  assert.deepEqual(RC.plantasDe({}), []);
+});
+
+test('catálogos: MAX_PRODUCTOS y RECLAMANTES', () => {
+  assert.equal(RC.MAX_PRODUCTOS, 10);
+  assert.deepEqual(RC.RECLAMANTES, [{ id: 'vendedor', label: 'Vendedor' }, { id: 'cliente', label: 'Cliente' }]);
+});
+
+test('validarReclamante: sin tipo, vendedor sin elegir y vendedor válido', () => {
+  assert.deepEqual(RC.validarReclamante({}), ['Indica quién reclama: vendedor o cliente.']);
+  assert.deepEqual(RC.validarReclamante(undefined), ['Indica quién reclama: vendedor o cliente.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'otro', nombre: 'Ana' }), ['Indica quién reclama: vendedor o cliente.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor' }), ['Elige el vendedor.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor', id: 'u1' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor', id: 'u1', telefono: '' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor', id: 'u1', telefono: '+56 9 1234 5678' }), []);
+});
+
+test('validarReclamante: el teléfono del vendedor, si viene, debe tener al menos 7 dígitos', () => {
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor', id: 'u1', telefono: '123' }), ['El teléfono debe tener al menos 7 dígitos.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'vendedor', telefono: '123' }), ['Elige el vendedor.', 'El teléfono debe tener al menos 7 dígitos.']);
+});
+
+test('validarReclamante: cliente sin nombre ni medios, con correo malo y válido', () => {
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente' }), ['Escribe el nombre de quien reclama.', 'Indica un correo o un teléfono de contacto.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: '   ', correo: ' ', telefono: ' ' }), ['Escribe el nombre de quien reclama.', 'Indica un correo o un teléfono de contacto.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana' }), ['Indica un correo o un teléfono de contacto.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', correo: 'ana@x' }), ['El correo no tiene un formato válido.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', correo: 'ana @x.cl' }), ['El correo no tiene un formato válido.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', correo: 'ana@x.cl' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', correo: '  ana@x.cl  ' }), []);
+});
+
+test('validarReclamante: formato del teléfono (dígitos, separadores permitidos, 7 dígitos, 30 caracteres)', () => {
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '+56 9 1234 5678' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '(02) 2345-6789' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '2.345.678' }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '123456' }), ['El teléfono debe tener al menos 7 dígitos.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '12 34-56' }), ['El teléfono debe tener al menos 7 dígitos.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '1234567 ext 8' }), ['El teléfono debe tener al menos 7 dígitos.']);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '9'.repeat(30) }), []);
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', telefono: '9'.repeat(31) }), ['El teléfono debe tener al menos 7 dígitos.']);
+});
+
+test('validarReclamante: cliente con correo y teléfono inválidos informa ambos', () => {
+  assert.deepEqual(RC.validarReclamante({ tipo: 'cliente', nombre: 'Ana', correo: 'ana', telefono: '12' }), ['El correo no tiene un formato válido.', 'El teléfono debe tener al menos 7 dígitos.']);
+});
+
+test('validarCrear: máximo 10 productos, sin repetidos y con exigencia de producto según el motivo', () => {
+  const diez = Array.from({ length: 10 }, (_, i) => 'P' + i);
+  assert.deepEqual(RC.validarCrear({ ...valido, productos: diez }, MOTIVOS, HOY), []);
+  assert.deepEqual(RC.validarCrear({ ...valido, productos: [...diez, 'P10'] }, MOTIVOS, HOY), ['Máximo 10 productos por reclamo.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, productos: ['A', 'A'] }, MOTIVOS, HOY), ['Hay productos repetidos.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, productos: ['A', ' A '] }, MOTIVOS, HOY), ['Hay productos repetidos.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: [] }, MOTIVOS, HOY), ['Este motivo exige indicar el producto.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: ['', '  '] }, MOTIVOS, HOY), ['Este motivo exige indicar el producto.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto' }, MOTIVOS, HOY), ['Este motivo exige indicar el producto.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: ['A', 'B'] }, MOTIVOS, HOY), []);
+});
+
+test('validarCrear ya no lee el campo producto (solo productos)', () => {
+  assert.deepEqual(RC.validarCrear({ ...valido, motivo: 'calidad_producto', productos: [], producto: 'P-001' }, MOTIVOS, HOY), ['Este motivo exige indicar el producto.']);
+});
+
+test('validarCrear: el reclamante inválido agrega sus errores', () => {
+  assert.deepEqual(RC.validarCrear({ ...valido, reclamante: undefined }, MOTIVOS, HOY), ['Indica quién reclama: vendedor o cliente.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, reclamante: { tipo: 'vendedor' } }, MOTIVOS, HOY), ['Elige el vendedor.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, reclamante: { tipo: 'cliente' } }, MOTIVOS, HOY), ['Escribe el nombre de quien reclama.', 'Indica un correo o un teléfono de contacto.']);
+  assert.deepEqual(RC.validarCrear({ ...valido, reclamante: { tipo: 'cliente', nombre: 'Ana', correo: 'ana@x.cl' } }, MOTIVOS, HOY), []);
+});
+
+test('validarCrear: un ingreso completo con varios productos y reclamante cliente es válido', () => {
+  const d = { cliente_id: 'c1', motivo: 'calidad_producto', productos: ['A', 'B', 'C'], reclamante: { tipo: 'cliente', nombre: 'Ana Pérez', telefono: '+56 9 1234 5678' }, descripcion: 'Llegó roto', fecha_recepcion: '2026-11-26' };
+  assert.deepEqual(RC.validarCrear(d, MOTIVOS, HOY), []);
+});
+
+test('repartir: n enteros que suman el total; el resto, de a uno, a los primeros', () => {
+  assert.deepEqual(RC.repartir(100000, 3), [33334, 33333, 33333]);
+  assert.deepEqual(RC.repartir(5, 1), [5]);
+  assert.deepEqual(RC.repartir(0, 2), [0, 0]);
+  assert.deepEqual(RC.repartir(10001, 2), [5001, 5000]);
+  assert.deepEqual(RC.repartir(2, 5), [1, 1, 0, 0, 0]);
+  for (const [t, n] of [[100000, 3], [7, 4], [1, 10], [123457, 7], [0, 5], [99, 10]]) {
+    const r = RC.repartir(t, n);
+    assert.equal(r.length, n);
+    assert.equal(r.reduce((a, b) => a + b, 0), t);
+    assert.ok(r.every((x) => Number.isInteger(x) && x >= 0));
+  }
+  assert.deepEqual(RC.repartir(10, 0), []);
+});
+
+test('metricas: un reclamo con varios productos cuenta en cada uno y reparte el costo', () => {
+  const rs = [
+    R({ id: 'a', producto: 'A', productos: [P('A', 'PA', 'pinturas'), P('B', 'PB', 'adhesivos')], compensacion: 10001 }),
+    R({ id: 'b', producto: 'A', productos: [P('A', 'PA', 'pinturas')], compensacion: 100 }),
+  ];
+  const m = RC.metricas(rs, [], {});
+  assert.deepEqual(m.porProducto, { A: 2, B: 1 });
+  assert.deepEqual(m.costoPorProducto, { A: 5101, B: 5000 });
+  assert.equal(m.costoTotal, 10101);
+  assert.equal(Object.values(m.costoPorProducto).reduce((a, b) => a + b, 0), m.costoTotal);
+});
+
+test('metricas: un código repetido dentro del reclamo cuenta una vez y el reparto es sobre los códigos distintos', () => {
+  const m = RC.metricas([R({ id: 'a', productos: [P('A'), P('A'), P('B')], compensacion: 3 })], [], {});
+  assert.deepEqual(m.porProducto, { A: 1, B: 1 });
+  assert.deepEqual(m.costoPorProducto, { A: 2, B: 1 });
+});
+
+test('metricas: un reclamo antiguo con solo producto cuenta en ese producto; sin compensación no hay costo', () => {
+  const m = RC.metricas([R({ id: 'a', producto: 'OLD', compensacion: 700 }), R({ id: 'b', producto: 'OLD2', compensacion: null })], [], {});
+  assert.deepEqual(m.porProducto, { OLD: 1, OLD2: 1 });
+  assert.deepEqual(m.costoPorProducto, { OLD: 700 });
+});
+
+test('metricas: porPlanta cuenta una vez por planta_destino || planta, aunque haya productos de varias plantas; el anulado no cuenta', () => {
+  const rs = [
+    R({ id: 'a', planta: 'pinturas', planta_destino: 'adhesivos', productos: [P('A', 'A', 'pinturas'), P('B', 'B', 'adhesivos')], compensacion: 10 }),
+    R({ id: 'b', planta: 'pinturas', planta_destino: null, productos: [P('A', 'A', 'pinturas'), P('C', 'C', 'morteros')], compensacion: 20 }),
+    R({ id: 'c', estado: 'anulado', planta: 'cementos', planta_destino: 'cementos', productos: [P('Z', 'Z', 'cementos')], compensacion: 99 }),
+  ];
+  const m = RC.metricas(rs, [], {});
+  assert.deepEqual(m.porPlanta, { adhesivos: 1, pinturas: 1 });
+  assert.deepEqual(m.costoPorPlanta, { adhesivos: 10, pinturas: 20 });
+  assert.deepEqual(m.porProducto, { A: 2, B: 1, C: 1 });
+  assert.equal(m.porProducto.Z, undefined);
+  assert.equal(m.costoPorProducto.Z, undefined);
 });

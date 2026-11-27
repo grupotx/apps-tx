@@ -48,6 +48,12 @@
   const labelDe = (lista, id) => { const x = lista.find((e) => e.id === id); return x ? x.label : (id == null ? '' : String(id)); };
   // Solo en estas áreas el reclamo (y el encargado) se separa por planta.
   const AREAS_POR_PLANTA = ['calidad', 'produccion'];
+  // Un reclamo lleva hasta 10 productos y dice quién reclama: un vendedor (de la lista) o un cliente (a mano).
+  const MAX_PRODUCTOS = 10;
+  const RECLAMANTES = [
+    { id: 'vendedor', label: 'Vendedor' },
+    { id: 'cliente', label: 'Cliente' },
+  ];
 
   // ── Planta de un producto, a partir de su familia (misma regla que public.rec_planta_de_familia) ──
   function plantaDeFamilia(familia) {
@@ -56,6 +62,37 @@
     if (['MORTEROS', 'MORT BAS', 'MORT REP', 'ESPECIALES', 'ESTUCOS', 'GRANELES'].includes(f)) return 'morteros';
     if (f === 'CEMENTO') return 'cementos';
     return 'adhesivos';
+  }
+
+  // ── Productos de un reclamo ──
+  // Los reclamos nuevos traen la lista `productos` [{code, nombre, planta}]; los anteriores solo las columnas
+  // producto / producto_nombre / planta, que se leen como una lista de un elemento.
+  function productosDe(r) {
+    const x = r || {};
+    if (Array.isArray(x.productos) && x.productos.length) {
+      return x.productos.map((p) => ({ code: p.code, nombre: p.nombre || p.code, planta: p.planta || null }));
+    }
+    if (x.producto) return [{ code: x.producto, nombre: x.producto_nombre || x.producto, planta: x.planta || null }];
+    return [];
+  }
+  // "Nombre" o "Nombre +N" (el primero y cuántos más hay); '' si no hay productos.
+  function resumenProductos(r) {
+    const ps = productosDe(r);
+    if (!ps.length) return '';
+    return ps.length > 1 ? ps[0].nombre + ' +' + (ps.length - 1) : ps[0].nombre;
+  }
+  const textoProductos = (r) => productosDe(r).map((p) => p.nombre).join(' / ');
+  // Plantas distintas de los productos, en orden de aparición y sin nulos.
+  const plantasDe = (r) => [...new Set(productosDe(r).map((p) => p.planta).filter(Boolean))];
+
+  // Reparte `total` (entero) en `n` enteros que lo suman; el resto va de a 1 a los primeros.
+  function repartir(total, n) {
+    const k = Math.trunc(Number(n));
+    if (!(k >= 1)) return [];
+    const t = Math.trunc(Number(total) || 0);
+    const base = Math.floor(t / k);
+    const resto = t - base * k;
+    return Array.from({ length: k }, (_, i) => base + (i < resto ? 1 : 0));
   }
 
   // ── Fechas (YYYY-MM-DD) ──
@@ -82,16 +119,47 @@
     return d.toISOString().slice(0, 10);
   }
 
+  // ── Quién reclama ──
+  // rec = { tipo: 'vendedor'|'cliente', id?, nombre?, correo?, telefono? }. Devuelve los errores en español (vacío si es válido).
+  // Vendedor: se elige de la lista (id); su nombre y correo los toma la base del perfil y el teléfono es opcional.
+  // Cliente: nombre obligatorio y al menos un correo o un teléfono. Mismos textos y reglas que public.rec_* en la base.
+  const reCorreo = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const rePhoneChars = /^[0-9 +().-]+$/;
+  const txt = (v) => String(v == null ? '' : v).trim();
+  const telefonoValido = (s) => s.length <= 30 && rePhoneChars.test(s) && s.replace(/\D/g, '').length >= 7;
+  function validarReclamante(rec) {
+    const e = [];
+    const x = rec || {};
+    const correo = txt(x.correo);
+    const telefono = txt(x.telefono);
+    if (x.tipo === 'vendedor') {
+      if (!txt(x.id)) e.push('Elige el vendedor.');
+    } else if (x.tipo === 'cliente') {
+      if (!txt(x.nombre)) e.push('Escribe el nombre de quien reclama.');
+      if (!correo && !telefono) e.push('Indica un correo o un teléfono de contacto.');
+      if (correo && !reCorreo.test(correo)) e.push('El correo no tiene un formato válido.');
+    } else {
+      return ['Indica quién reclama: vendedor o cliente.'];
+    }
+    if (telefono && !telefonoValido(telefono)) e.push('El teléfono debe tener al menos 7 dígitos.');
+    return e;
+  }
+
   // ── Validación del ingreso rápido ──
-  // Devuelve la lista de errores en español (vacía si es válido); la base vuelve a validar todo.
+  // d.productos: arreglo de códigos de producto. Devuelve la lista de errores en español (vacía si es válido);
+  // la base vuelve a validar todo.
   function validarCrear(d, motivos, hoy) {
     const e = [];
     const x = d || {};
+    const codigos = (Array.isArray(x.productos) ? x.productos : []).map(txt).filter(Boolean);
     if (!x.cliente_id) e.push('Elige el cliente.');
     const m = (motivos || []).find((k) => k.id === x.motivo && k.activo !== false);
     if (!x.motivo) e.push('Elige el motivo.');
     else if (!m) e.push('El motivo elegido no existe o ya no está disponible.');
-    else if (m.requiere_producto && !String(x.producto || '').trim()) e.push('Este motivo exige indicar el producto.');
+    else if (m.requiere_producto && !codigos.length) e.push('Este motivo exige indicar el producto.');
+    if (codigos.length > MAX_PRODUCTOS) e.push('Máximo ' + MAX_PRODUCTOS + ' productos por reclamo.');
+    if (new Set(codigos).size < codigos.length) e.push('Hay productos repetidos.');
+    e.push(...validarReclamante(x.reclamante));
     if (!String(x.descripcion || '').trim()) e.push('Escribe la descripción del reclamo.');
     if (!x.fecha_recepcion) e.push('Indica la fecha de recepción.');
     else if (!fechaValida(x.fecha_recepcion)) e.push('La fecha de recepción no es válida.');
@@ -271,14 +339,16 @@
       suma(m.porMotivo, r.motivo, 1);
       suma(m.porArea, area, 1);
       if (planta) suma(m.porPlanta, planta, 1);
-      if (r.producto) suma(m.porProducto, r.producto, 1);
+      // Cada producto cuenta una vez por reclamo; el costo se reparte entre los productos distintos (la suma es el costo).
+      const codigos = [...new Set(productosDe(r).map((p) => p.code).filter(Boolean))];
+      for (const cod of codigos) suma(m.porProducto, cod, 1);
       if (r.compensacion != null) {
         const c = Number(r.compensacion) || 0;
         m.costoTotal += c;
         suma(m.costoPorMotivo, r.motivo, c);
         suma(m.costoPorArea, area, c);
         if (planta) suma(m.costoPorPlanta, planta, c);
-        if (r.producto) suma(m.costoPorProducto, r.producto, c);
+        repartir(c, codigos.length).forEach((parte, i) => suma(m.costoPorProducto, codigos[i], parte));
       }
       if (r.comunicado_en) {
         const fin = diaCL(r.comunicado_en);
@@ -293,7 +363,7 @@
     return m;
   }
 
-  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, labelDe, plantaDeFamilia, fechaValida, fechaCL, diasEntre, diaCL, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, enPeriodo, metricas };
+  const API = { ESTADOS, AREAS, PLANTAS, SOLUCIONES, ROLES, AREAS_POR_PLANTA, MAX_PRODUCTOS, RECLAMANTES, labelDe, plantaDeFamilia, productosDe, resumenProductos, textoProductos, plantasDe, repartir, fechaValida, fechaCL, diasEntre, diaCL, validarReclamante, validarCrear, validarMonto, accionesPermitidas, pendienteDeMi, esInformado, clp, mensajeCliente, enPeriodo, metricas };
   if (typeof window !== 'undefined') g.RC = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
 })(typeof window !== 'undefined' ? window : globalThis);
