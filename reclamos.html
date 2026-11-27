@@ -140,6 +140,14 @@ button.opt small{color:var(--mute);display:block}
 .dlg .radios{display:flex;gap:10px;flex-wrap:wrap}
 .dlg .radios label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;padding:9px 14px;margin:0;cursor:pointer}
 .dlg .radios input{width:auto}
+.f .radios{display:flex;gap:10px;flex-wrap:wrap}
+.f .radios label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink);border:1px solid var(--line-strong);border-radius:10px;padding:9px 14px;margin:0;cursor:pointer}
+.f .radios input{width:auto}
+.chips2 + input,.chips2 + .hint{margin-top:8px}
+.chip2 small{display:block}
+.plist{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+.plist small{color:var(--mute);display:block}
+input[readonly]{opacity:.8;cursor:default}
 .det .volver{display:inline-block;margin-bottom:10px;color:var(--mute);text-decoration:none;font-size:13px}
 .det-h h2{font-size:19px;margin:6px 0 4px}
 .det-h .meta{color:var(--mute);font-size:12.5px;display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center}
@@ -223,7 +231,7 @@ let ultimaCarga = 0;
 const F = { tab: 'pend', estado: '', area: '', planta: '', q: '', anulados: false };
 const labelMotivo = id => (MOTIVOS.find(m => m.id === id) || {}).nombre || id || '';
 const nombreDe = id => (id && NOMBRES[id]) || '';
-const COLS = 'id,folio,cliente_id,cliente_nombre,producto,producto_nombre,planta,motivo,descripcion,fecha_recepcion,estado,area_destino,planta_destino,asesor_id,decision,compensacion,comunicado_en,cerrado_en,creado_por,creado_en,actualizado_en';
+const COLS = 'id,folio,cliente_id,cliente_nombre,producto,producto_nombre,planta,productos,reclamante_tipo,reclamante_id,reclamante_nombre,reclamante_correo,reclamante_telefono,motivo,descripcion,fecha_recepcion,estado,area_destino,planta_destino,asesor_id,decision,compensacion,comunicado_en,cerrado_en,creado_por,creado_en,actualizado_en';
 
 /* ===================== Sesión y acceso ===================== */
 function pantallaLogin(msg){
@@ -491,29 +499,91 @@ async function cargarProductos(){
   if(error) throw new Error(error.message);
   return (PRODS = data || []);
 }
-// Buscador de producto sobre el catálogo (en el navegador). alElegir(producto|null).
-function montarBuscadorProducto(el, alElegir){
-  let elegido = null;
-  const pintar = () => {
-    if(elegido){
-      el.innerHTML = `<div class="chosen"><span><b>${esc(elegido.nombre)}</b><br><small>${esc(elegido.code)} · Planta ${esc(RC.labelDe(RC.PLANTAS, elegido.planta))}</small></span><button type="button" class="ghost btn sm" data-cambiar>Cambiar</button></div>`;
-      el.querySelector('[data-cambiar]').onclick = () => { elegido = null; alElegir(null); pintar(); };
-      return;
-    }
-    el.innerHTML = `<input type="search" placeholder="Buscar producto por nombre o código" autocomplete="off" aria-label="Buscar producto"><div class="opts"></div>`;
-    const inp = el.querySelector('input'), ops = el.querySelector('.opts');
+// Enlaces mailto:/tel: solo con caracteres permitidos (teléfono: dígitos y +; correo: el correo recortado y con formato válido).
+const RE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const hrefTel = s => { const v = String(s == null ? '' : s).replace(/[^\d+]/g, ''); return v ? 'tel:' + v : ''; };
+const hrefMail = s => { const v = String(s == null ? '' : s).trim(); return RE_CORREO.test(v) ? 'mailto:' + encodeURIComponent(v).replace(/%40/g, '@') : ''; };
+const contactoReclamante = r => [r.reclamante_nombre, r.reclamante_correo, r.reclamante_telefono].filter(Boolean).join(' · ');
+// Reclamante tal como lo recibe la base (el id solo existe para el vendedor).
+const armarReclamante = x => ({ tipo: x.tipo, id: x.tipo === 'vendedor' ? (x.id || null) : null, nombre: String(x.nombre || '').trim(), correo: String(x.correo || '').trim(), telefono: String(x.telefono || '').trim() });
+
+// Lista de productos del reclamo (máx. 10, sin repetidos): chips con ✕ y un buscador sobre el catálogo para agregar. alCambiar(lista).
+function montarListaProductos(el, inicial, alCambiar){
+  let lista = (inicial || []).filter(Boolean).map(p => ({ code: p.code, nombre: p.nombre, planta: p.planta }));
+  const pintar = (enfocar) => {
+    const lleno = lista.length >= RC.MAX_PRODUCTOS;
+    el.innerHTML = (lista.length ? `<div class="chips2">${lista.map((p, i) => `<span class="chip2"><span>${esc(p.nombre)}<small>${esc(p.code)}${p.planta ? ' · Planta ' + esc(RC.labelDe(RC.PLANTAS, p.planta)) : ''}</small></span><button type="button" data-q="${i}" aria-label="Quitar ${esc(p.nombre)}">✕</button></span>`).join('')}</div>` : '')
+      + (lleno ? `<div class="hint">Máximo ${RC.MAX_PRODUCTOS} productos por reclamo.</div>`
+        : `<input type="search" placeholder="${lista.length ? 'Agregar otro producto' : 'Buscar producto por nombre o código'}" autocomplete="off" aria-label="Buscar producto"><div class="opts"></div>`);
+    el.querySelectorAll('[data-q]').forEach(b => { b.onclick = () => { lista.splice(Number(b.dataset.q), 1); alCambiar(lista.slice()); pintar(); }; });
+    const inp = el.querySelector('input'); if(!inp) return;
+    const ops = el.querySelector('.opts');
+    if(enfocar) inp.focus();
     inp.onkeydown = noEnter;
     inp.oninput = async () => {
       const q = sinTildes(inp.value).trim();
       if(q.length < 2){ ops.innerHTML = ''; return; }
-      let lista;
-      try{ lista = await cargarProductos(); }catch(e){ ops.innerHTML = '<div class="hint">No se pudo cargar el catálogo de productos.</div>'; return; }
-      const rs = lista.filter(p => sinTildes(p.nombre + ' ' + p.code).includes(q)).slice(0, 8);
+      let cat;
+      try{ cat = await cargarProductos(); }catch(e){ ops.innerHTML = '<div class="hint">No se pudo cargar el catálogo de productos.</div>'; return; }
+      const rs = cat.filter(p => !lista.some(x => x.code === p.code) && sinTildes(p.nombre + ' ' + p.code).includes(q)).slice(0, 8);
       ops.innerHTML = rs.length ? rs.map((p, i) => `<button type="button" class="opt" data-i="${i}"><span>${esc(p.nombre)}<small>${esc(p.code)}</small></span><span class="plt">${esc(RC.labelDe(RC.PLANTAS, p.planta))}</span></button>`).join('') : '<div class="hint">Ningún producto coincide.</div>';
-      ops.querySelectorAll('button.opt').forEach(b => { b.onclick = () => { elegido = rs[Number(b.dataset.i)]; alElegir(elegido); pintar(); }; });
+      ops.querySelectorAll('button.opt').forEach(b => { b.onclick = () => { const p = rs[Number(b.dataset.i)]; lista.push({ code: p.code, nombre: p.nombre, planta: p.planta }); alCambiar(lista.slice()); pintar(true); }; });
     };
   };
   pintar();
+}
+// Vendedores activos (se piden una vez). nombre vacío -> se muestra el correo.
+let VENDEDORES = null;
+async function cargarVendedores(){
+  if(VENDEDORES) return VENDEDORES;
+  const { data, error } = await sb.rpc('rec_vendedores');
+  if(error) throw new Error(error.message);
+  return (VENDEDORES = (data || []).map(v => ({ id: v.id, nombre: v.nombre || v.email || '', correo: v.email || '', telefono: v.telefono || '' })));
+}
+// Quién reclama: Vendedor (se elige de la lista; nombre y correo de solo lectura, teléfono editable) o Cliente (tres campos libres).
+// propio: preselecciona al usuario si está en la lista. alCambiar({tipo,id,nombre,correo,telefono}).
+function montarReclamante(el, inicial, alCambiar, propio){
+  const ini = inicial || {};
+  const S = { tipo: ini.tipo || 'vendedor', id: ini.id || '', nombre: ini.nombre || '', correo: ini.correo || '', telefono: ini.telefono || '' };
+  let lista = null, fallo = false;
+  const avisar = () => alCambiar(Object.assign({}, S));
+  const campos = () => {
+    const c = el.querySelector('#rc-campos');
+    const tel = `<label for="rc-tel">Teléfono <small>(opcional)</small></label><input id="rc-tel" maxlength="30" inputmode="tel" autocomplete="off" value="${esc(S.telefono)}">`;
+    if(S.tipo === 'vendedor'){
+      if(lista === null && !fallo){ c.innerHTML = '<div class="hint">Cargando vendedores…</div>'; return; }
+      if(fallo){ c.innerHTML = '<div class="hint">No se pudo cargar la lista de vendedores. Puedes ingresar los datos con «Cliente».</div>'; return; }
+      const fuera = S.id && !lista.some(v => v.id === S.id);
+      c.innerHTML = `<label for="rc-vend">Vendedor</label><select id="rc-vend"><option value="">Elige el vendedor</option>${fuera ? `<option value="${esc(S.id)}" selected>${esc(S.nombre || S.correo)}</option>` : ''}${lista.map(v => `<option value="${esc(v.id)}"${v.id === S.id ? ' selected' : ''}>${esc(v.nombre)}</option>`).join('')}</select>
+        <div class="fila2"><div><label for="rc-nom">Nombre</label><input id="rc-nom" readonly tabindex="-1" maxlength="200" value="${esc(S.nombre)}"></div><div><label for="rc-cor">Correo</label><input id="rc-cor" readonly tabindex="-1" maxlength="200" value="${esc(S.correo)}"></div></div>${tel}`;
+      c.querySelector('#rc-vend').onchange = e => {
+        const v = lista.find(x => x.id === e.target.value);
+        Object.assign(S, v ? { id: v.id, nombre: v.nombre, correo: v.correo, telefono: v.telefono } : { id: '', nombre: '', correo: '', telefono: '' });
+        campos(); avisar();
+      };
+    }else{
+      c.innerHTML = `<label for="rc-nom">Nombre de quien reclama</label><input id="rc-nom" maxlength="200" autocomplete="off" value="${esc(S.nombre)}">
+        <div class="fila2"><div><label for="rc-cor">Correo</label><input id="rc-cor" type="email" maxlength="200" autocomplete="off" value="${esc(S.correo)}"></div><div>${tel}</div></div>`;
+      c.querySelector('#rc-nom').oninput = e => { S.nombre = e.target.value; avisar(); };
+      c.querySelector('#rc-cor').oninput = e => { S.correo = e.target.value; avisar(); };
+    }
+    c.querySelector('#rc-tel').oninput = e => { S.telefono = e.target.value; avisar(); };
+    c.querySelectorAll('input').forEach(i => { i.onkeydown = noEnter; });
+  };
+  el.innerHTML = `<div class="radios">${RC.RECLAMANTES.map(t => `<label><input type="radio" name="rc-tipo" value="${esc(t.id)}"${S.tipo === t.id ? ' checked' : ''}> ${esc(t.label)}</label>`).join('')}</div><div id="rc-campos"></div>`;
+  el.querySelectorAll('input[name=rc-tipo]').forEach(r => { r.onchange = () => {
+    if(!r.checked || S.tipo === r.value) return;
+    Object.assign(S, { tipo: r.value, id: '', nombre: '', correo: '', telefono: '' }); campos(); avisar();
+  }; });
+  campos();
+  cargarVendedores().then(l => {
+    lista = l;
+    if(propio && S.tipo === 'vendedor' && !S.id){
+      const yo = l.find(v => v.id === me.id);
+      if(yo){ Object.assign(S, { id: yo.id, nombre: yo.nombre, correo: yo.correo, telefono: yo.telefono }); avisar(); }
+    }
+    campos();
+  }).catch(() => { fallo = true; toast('No se pudo cargar la lista de vendedores. Puedes ingresar al reclamante como Cliente.'); campos(); });
 }
 // Buscador de cliente (la base devuelve hasta 20 coincidencias por nombre, razón social o RUT).
 function montarBuscadorCliente(el, alElegir){
@@ -606,10 +676,10 @@ function abrirDialogo({ titulo, html, confirmar = 'Guardar', peligro = false, al
 }
 
 /* ===================== Ingreso rápido ===================== */
-let NEW = { cliente: null, producto: null, conProducto: false };
+let NEW = { cliente: null, productos: [], conProducto: false, reclamante: { tipo: 'vendedor', id: '', nombre: '', correo: '', telefono: '' } };
 let enviandoNuevo = false;
 function renderNuevo(el){
-  NEW = { cliente: null, producto: null, conProducto: false };
+  NEW = { cliente: null, productos: [], conProducto: false, reclamante: { tipo: 'vendedor', id: '', nombre: '', correo: '', telefono: '' } };
   const hoy = hoyCL();
   const min = RC.fechaValida(hoy) ? new Date(Date.parse(hoy + 'T12:00:00Z') - 365 * 86400000).toISOString().slice(0, 10) : '';
   el.innerHTML = `<form class="card f" id="f-nuevo" novalidate>
@@ -617,7 +687,8 @@ function renderNuevo(el){
     <label>Cliente</label><div id="n-cli"></div>
     <label for="n-mot">Motivo</label>
     <select id="n-mot"><option value="">Elige el motivo</option>${MOTIVOS.filter(m => m.activo).map(m => `<option value="${esc(m.id)}">${esc(m.nombre)}</option>`).join('')}</select>
-    <div id="n-prod-wrap" hidden><label id="n-prod-l">Producto</label><div id="n-prod"></div></div>
+    <label>Reclamante <small>(quién reclama)</small></label><div id="n-rec"></div>
+    <div id="n-prod-wrap" hidden><label id="n-prod-l">Productos</label><div id="n-prod"></div></div>
     <button type="button" class="ghost btn sm" id="n-add-prod" style="margin-top:10px" hidden>+ Agregar producto (opcional)</button>
     <label for="n-desc">¿Qué pasó?</label>
     <textarea id="n-desc" rows="4" maxlength="4000" placeholder="Describe el reclamo con las palabras del cliente"></textarea>
@@ -632,14 +703,16 @@ function renderNuevo(el){
     <div class="acciones"><button class="btn" type="submit" id="n-ok">Ingresar reclamo</button><a class="ghost btn" href="#bandeja">Cancelar</a></div>
   </form>`;
   montarBuscadorCliente($('#n-cli'), c => { NEW.cliente = c; });
-  montarBuscadorProducto($('#n-prod'), p => { NEW.producto = p; });
+  montarListaProductos($('#n-prod'), [], l => { NEW.productos = l; actualiza(); });
+  montarReclamante($('#n-rec'), NEW.reclamante, x => { NEW.reclamante = x; }, true);
   const mot = $('#n-mot');
-  const actualiza = () => {
+  function actualiza(){
     const m = MOTIVOS.find(x => x.id === mot.value), exige = !!(m && m.requiere_producto);
-    $('#n-prod-wrap').hidden = !(exige || NEW.conProducto);
-    $('#n-prod-l').innerHTML = exige ? 'Producto <small>(obligatorio para este motivo)</small>' : 'Producto <small>(opcional)</small>';
-    $('#n-add-prod').hidden = exige || NEW.conProducto;
-  };
+    const ver = exige || NEW.conProducto || NEW.productos.length > 0;
+    $('#n-prod-wrap').hidden = !ver;
+    $('#n-prod-l').innerHTML = exige ? 'Productos <small>(al menos uno para este motivo; hasta ' + RC.MAX_PRODUCTOS + ')</small>' : 'Productos <small>(opcional; hasta ' + RC.MAX_PRODUCTOS + ')</small>';
+    $('#n-add-prod').hidden = ver;
+  }
   mot.onchange = actualiza;
   $('#n-add-prod').onclick = () => { NEW.conProducto = true; actualiza(); };
   $('#n-fotos').onchange = e => { if(e.target.files.length > 5) toast('Máximo 5 fotos: se subirán las primeras 5.'); };
@@ -650,15 +723,15 @@ async function enviarNuevo(e){
   e.preventDefault(); if(enviandoNuevo) return;
   const err = $('#n-err'); err.hidden = true;
   const datos = {}; document.querySelectorAll('[data-dato]').forEach(i => { const v = i.value.trim(); if(v) datos[i.dataset.dato] = v; });
-  const form = { cliente_id: NEW.cliente ? NEW.cliente.id : '', producto: !$('#n-prod-wrap').hidden && NEW.producto ? NEW.producto.code : '',
+  const form = { cliente_id: NEW.cliente ? NEW.cliente.id : '', productos: NEW.productos.map(p => p.code).filter(Boolean), reclamante: armarReclamante(NEW.reclamante),
                  motivo: $('#n-mot').value, descripcion: $('#n-desc').value, fecha_recepcion: $('#n-fec').value };
   const errores = RC.validarCrear(form, MOTIVOS.filter(m => m.activo), hoyCL());
   if(errores.length){ err.innerHTML = errores.map(x => '• ' + esc(x)).join('<br>'); err.hidden = false; return; }
   enviandoNuevo = true;
   const ok = $('#n-ok'); ok.disabled = true; ok.textContent = 'Ingresando…';
   try{
-    const { data: id, error } = await sb.rpc('rec_crear', { p_cliente_id: form.cliente_id, p_producto: form.producto || null, p_motivo: form.motivo,
-      p_descripcion: form.descripcion.trim(), p_fecha_recepcion: form.fecha_recepcion, p_datos: datos });
+    const { data: id, error } = await sb.rpc('rec_crear', { p_cliente_id: form.cliente_id, p_productos: form.productos, p_motivo: form.motivo,
+      p_descripcion: form.descripcion.trim(), p_fecha_recepcion: form.fecha_recepcion, p_datos: datos, p_reclamante: form.reclamante });
     if(error){ err.textContent = error.message; err.hidden = false; return; }
     let fallos = 0; const files = [...($('#n-fotos').files || [])].slice(0, 5);
     if(files.length){ ok.textContent = 'Subiendo fotos…'; fallos = await subirArchivos(id, files); }
@@ -737,18 +810,25 @@ function pintarDetalle(el){
   const bloque = (titulo, html) => `<div class="card"><h3>${esc(titulo)}</h3>${html}</div>`;
   const kv = filas => `<dl class="kv">${filas.filter(f => f[1] !== '' && f[1] != null).map(f => `<dt>${esc(f[0])}</dt><dd>${esc(f[1])}</dd>`).join('')}</dl>`;
   const quien = id => nombreDe(id) || 'alguien del equipo';
+  const textoProd = RC.textoProductos(r), prods = RC.productosDe(r);
+  const enlace = (href, t) => href ? `<a href="${esc(href)}">${esc(t)}</a>` : esc(t);
+  const tarjetaReclamante = r.reclamante_tipo
+    ? bloque('Reclamante', `<dl class="kv"><dt>Tipo</dt><dd>${esc(RC.labelDe(RC.RECLAMANTES, r.reclamante_tipo))}</dd><dt>Nombre</dt><dd>${esc(r.reclamante_nombre || '')}</dd>${r.reclamante_correo ? `<dt>Correo</dt><dd>${enlace(hrefMail(r.reclamante_correo), r.reclamante_correo)}</dd>` : ''}${r.reclamante_telefono ? `<dt>Teléfono</dt><dd>${enlace(hrefTel(r.reclamante_telefono), r.reclamante_telefono)}</dd>` : ''}</dl>`)
+    : bloque('Reclamante', `<p class="small">Sin datos del reclamante.${acc.includes('completar_datos') ? ' Puedes agregarlos con «Completar datos».' : ''}</p>`);
   el.innerHTML = `<div class="det">
     <a class="volver" href="#bandeja">← Volver a la bandeja</a>
     <div class="card det-h">
       <div class="rec-top"><b class="folio big">${esc(r.folio)}</b><span class="est est-${esc(r.estado)}">${esc(RC.labelDe(RC.ESTADOS, r.estado))}</span>${pend ? '<span class="pend">Pendiente de ti</span>' : ''}<span class="edad" title="Días desde la recepción">${d} d</span></div>
       <h2>${esc(r.cliente_nombre || 'Cliente sin nombre')}</h2>
-      <div class="meta"><span>${esc(labelMotivo(r.motivo))}</span>${r.producto_nombre ? `<span>· ${esc(r.producto_nombre)}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}<span>· Recibido ${esc(fechaCorta(r.fecha_recepcion))}</span><span>· Ingresó ${esc(quien(r.creado_por))}</span></div>
+      <div class="meta"><span>${esc(labelMotivo(r.motivo))}</span>${textoProd ? `<span>· ${esc(textoProd)}</span>` : ''}${plt ? `<span class="plt">${esc(RC.labelDe(RC.PLANTAS, plt))}</span>` : ''}<span>· Recibido ${esc(fechaCorta(r.fecha_recepcion))}</span><span>· Ingresó ${esc(quien(r.creado_por))}</span></div>
       ${responsable(r) ? `<div class="meta" style="margin-top:4px"><b style="color:var(--ink)">Ahora:</b> ${esc(responsable(r))}</div>` : ''}
     </div>
     ${acc.length ? `<div class="accbar">${acc.map(a => `<button type="button" class="${pend && AVANCE_UI.includes(a) ? 'btn' : 'ghost btn'}" data-acc="${a}"${ACC[a].peligro ? ' style="color:var(--bad)"' : ''}>${esc(ACC[a].t)}</button>`).join('')}</div>` : ''}
     <div class="cols">
       <div>
         ${bloque('Descripción', `<p>${esc(r.descripcion)}</p>`)}
+        ${prods.length ? bloque('Productos', `<ul class="plist">${prods.map(p => `<li><b>${esc(p.nombre)}</b><small>${esc(p.code)}${p.planta ? ' · Planta ' + esc(RC.labelDe(RC.PLANTAS, p.planta)) : ''}</small></li>`).join('')}</ul>`) : ''}
+        ${tarjetaReclamante}
         ${datos.length ? bloque('Datos adicionales', kv(datos.map(([k, v]) => [rotulo(k), String(v)]))) : ''}
         ${r.informe ? bloque('Informe de calidad', `<p>${esc(r.informe)}</p>`) : ''}
         ${r.decision ? bloque('Decisión', `<p><b>${r.decision === 'aprobado' ? 'Aprobado' : 'Rechazado'}</b> por ${esc(quien(r.decidido_por))} · ${esc(fechaHora(r.decidido_en))}</p><p>${esc(r.razones || '')}</p>`) : ''}
@@ -817,7 +897,8 @@ function dlgDerivar(r){
   const m = MOTIVOS.find(x => x.id === r.motivo);
   abrirDialogo({ titulo: 'Derivar reclamo', confirmar: 'Derivar',
     html: `<label>Área</label><select name="area">${optList(RC.AREAS, r.area_destino || (m && m.area_sugerida) || '', 'Elige un área')}</select>
-      <div id="dv-planta" hidden><label>Planta</label><select name="planta">${optList(RC.PLANTAS, r.planta_destino || r.planta || '', 'Elige una planta')}</select></div>
+      <div id="dv-planta" hidden><label>Planta</label><select name="planta">${optList(RC.PLANTAS, r.planta_destino || RC.plantasDe(r)[0] || '', 'Elige una planta')}</select></div>
+      <div class="hint" id="dv-multi" hidden></div>
       <div class="hint" id="dv-aviso" hidden></div>
       <label>Nota <small>(opcional)</small></label><textarea name="nota" rows="2" maxlength="500"></textarea>`,
     alAbrir: f => {
@@ -826,6 +907,9 @@ function dlgDerivar(r){
         $('#dv-planta').hidden = !pl; $('#dv-aviso').hidden = !falta;
         $('#dv-aviso').textContent = falta ? `Este reclamo no tiene producto (de él sale la planta): complétalo con «Completar datos» antes de derivarlo a ${RC.labelDe(RC.AREAS, a)}.` : '';
         $('#dlg-ok').disabled = falta;
+        const ps = RC.plantasDe(r), multi = pl && ps.length > 1;
+        $('#dv-multi').hidden = !multi;
+        $('#dv-multi').textContent = multi ? `Los productos de este reclamo son de varias plantas (${ps.map(p => RC.labelDe(RC.PLANTAS, p)).join(', ')}): elige la planta que lo atenderá.` : '';
       };
       f.elements.area.onchange = upd; upd();
     },
@@ -890,18 +974,32 @@ function dlgDevolver(r){
       const msg = await llamar(r, 'rec_devolver', { p_nota: f.elements.nota.value.trim() }); if(msg) return msg; await tras('Reclamo devuelto.');
     } });
 }
+// ¿Cambió el reclamante respecto del guardado? (el vendedor se compara por id y teléfono: nombre y correo salen del perfil)
+function reclamanteCambio(x, r){
+  const t = v => String(v || '').trim();
+  if(!r.reclamante_tipo) return x.tipo === 'vendedor' ? !!(t(x.id) || t(x.telefono)) : !!(t(x.nombre) || t(x.correo) || t(x.telefono));
+  if(x.tipo !== r.reclamante_tipo || t(x.telefono) !== t(r.reclamante_telefono)) return true;
+  return x.tipo === 'vendedor' ? t(x.id) !== t(r.reclamante_id) : t(x.nombre) !== t(r.reclamante_nombre) || t(x.correo) !== t(r.reclamante_correo);
+}
 function dlgDatos(r){
   const sc = esServicio();
-  let prod = null;
+  const ini = RC.productosDe(r);
+  const rec0 = { tipo: r.reclamante_tipo || 'vendedor', id: r.reclamante_id || '', nombre: r.reclamante_nombre || '', correo: r.reclamante_correo || '', telefono: r.reclamante_telefono || '' };
+  let prods = ini.slice(), rec = Object.assign({}, rec0);
   abrirDialogo({ titulo: 'Completar datos', confirmar: 'Guardar',
-    html: (sc ? `<label>Producto${r.producto ? ` <small>(actual: ${esc(r.producto_nombre || r.producto)})</small>` : ''}</label><div id="dd-prod"></div>` : '') +
+    html: (sc ? '<label>Productos</label><div id="dd-prod"></div><label>Reclamante</label><div id="dd-rec"></div>' : '') +
       `<div class="fila2">${CAMPOS_DATOS.map(([k, l]) => `<div><label>${esc(l)}</label><input name="d_${k}" maxlength="200" value="${esc((r.datos || {})[k] || '')}"></div>`).join('')}</div>`,
-    alAbrir: () => { if(sc) montarBuscadorProducto($('#dd-prod'), p => { prod = p; }); },
+    alAbrir: () => { if(sc){ montarListaProductos($('#dd-prod'), ini, l => { prods = l; }); montarReclamante($('#dd-rec'), rec0, x => { rec = x; }); } },
     alEnviar: async f => {
       const datos = {}; let cambios = 0;
       for(const [k] of CAMPOS_DATOS){ const v = f.elements['d_' + k].value.trim(), antes = String((r.datos || {})[k] || ''); if(v !== antes){ datos[k] = v; cambios++; } }
-      if(!prod && !cambios) return 'No hay cambios que guardar.';
-      const msg = await llamar(r, 'rec_actualizar', { p_producto: prod ? prod.code : null, p_datos: cambios ? datos : null });
+      const codigos = prods.map(p => p.code).filter(Boolean);
+      const prodCambio = sc && (codigos.length !== ini.length || codigos.some((c, i) => c !== ini[i].code));
+      const recCambio = sc && reclamanteCambio(rec, r);
+      if(!prodCambio && !recCambio && !cambios) return 'No hay cambios que guardar.';
+      if(prodCambio && !codigos.length) return 'Indica al menos un producto.';
+      if(recCambio){ const e = RC.validarReclamante(armarReclamante(rec)); if(e.length) return e.join(' '); }
+      const msg = await llamar(r, 'rec_actualizar', { p_productos: prodCambio ? codigos : null, p_datos: cambios ? datos : null, p_reclamante: recCambio ? armarReclamante(rec) : null });
       if(msg) return msg; await tras('Datos guardados.');
     } });
 }
@@ -922,9 +1020,10 @@ function dlgSolucion(r){
     } });
 }
 function dlgComunicar(r){
-  const texto = RC.mensajeCliente(r, { name: r.cliente_nombre });
+  const texto = RC.mensajeCliente(r, { name: r.cliente_nombre }), contacto = contactoReclamante(r);
   abrirDialogo({ titulo: 'Comunicar al cliente', confirmar: 'Registrar como comunicado',
     html: `<p class="aviso">Revisa y ajusta el texto, cópialo y envíalo por el canal que uses; luego registra que ya se comunicó.</p>
+      ${contacto ? `<p class="hint">Contacto de quien reclama: ${esc(contacto)}</p>` : ''}
       <label>Mensaje</label><textarea name="mensaje" rows="9" maxlength="4000">${esc(texto)}</textarea>
       <div class="acciones" style="margin-top:8px"><button type="button" class="ghost btn sm" id="cm-copiar">Copiar texto</button></div>
       <label>Canal</label><select name="canal">${CANALES.map(c => `<option>${esc(c)}</option>`).join('')}</select>`,
